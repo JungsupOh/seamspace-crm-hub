@@ -1,5 +1,5 @@
 const BASE_URL = `https://api.airtable.com/v0/${import.meta.env.VITE_AIRTABLE_BASE_ID || 'appsnsExBG8ZeEZEk'}`;
-const TOKEN = import.meta.env.VITE_AIRTABLE_TOKEN || '';
+const TOKEN = import.meta.env.VITE_AIRTABLE_TOKEN || 'patbQSj0HBj9e6fnX';
 
 interface AirtableResponse<T> {
   records: AirtableRecord<T>[];
