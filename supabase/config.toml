@@ -1,1 +1,4 @@
 project_id = "zdxeefhazrqndogfsaru"
+
+[functions.airtable-proxy]
+verify_jwt = false
