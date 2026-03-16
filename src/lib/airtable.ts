@@ -1,10 +1,4 @@
-const BASE_URL = `https://api.airtable.com/v0/${import.meta.env.VITE_AIRTABLE_BASE_ID || 'appsnsExBG8ZeEZEk'}`;
-const TOKEN = import.meta.env.VITE_AIRTABLE_TOKEN || 'patbQSj0HBj9e6fnX';
-
-interface AirtableResponse<T> {
-  records: AirtableRecord<T>[];
-  offset?: string;
-}
+import { supabase } from '@/integrations/supabase/client';
 
 export interface AirtableRecord<T> {
   id: string;
@@ -13,53 +7,30 @@ export interface AirtableRecord<T> {
 }
 
 async function fetchAll<T>(tableName: string, params?: Record<string, string>): Promise<AirtableRecord<T>[]> {
-  const allRecords: AirtableRecord<T>[] = [];
-  let offset: string | undefined;
+  const { data, error } = await supabase.functions.invoke('airtable-proxy', {
+    body: { table: tableName, method: 'GET', params },
+  });
 
-  do {
-    const searchParams = new URLSearchParams({ pageSize: '100', ...params });
-    if (offset) searchParams.set('offset', offset);
-
-    const res = await fetch(`${BASE_URL}/${encodeURIComponent(tableName)}?${searchParams}`, {
-      headers: { Authorization: `Bearer ${TOKEN}` },
-    });
-
-    if (!res.ok) {
-      throw new Error(`Airtable error: ${res.status} ${res.statusText}`);
-    }
-
-    const data: AirtableResponse<T> = await res.json();
-    allRecords.push(...data.records);
-    offset = data.offset;
-  } while (offset);
-
-  return allRecords;
+  if (error) throw new Error(`Airtable proxy error: ${error.message}`);
+  return data.records;
 }
 
 async function createRecord<T>(tableName: string, fields: Partial<T>): Promise<AirtableRecord<T>> {
-  const res = await fetch(`${BASE_URL}/${encodeURIComponent(tableName)}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ fields }),
+  const { data, error } = await supabase.functions.invoke('airtable-proxy', {
+    body: { table: tableName, method: 'POST', fields },
   });
-  if (!res.ok) throw new Error(`Airtable create error: ${res.status}`);
-  return res.json();
+
+  if (error) throw new Error(`Airtable create error: ${error.message}`);
+  return data;
 }
 
 async function updateRecord<T>(tableName: string, recordId: string, fields: Partial<T>): Promise<AirtableRecord<T>> {
-  const res = await fetch(`${BASE_URL}/${encodeURIComponent(tableName)}/${recordId}`, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ fields }),
+  const { data, error } = await supabase.functions.invoke('airtable-proxy', {
+    body: { table: tableName, method: 'PATCH', recordId, fields },
   });
-  if (!res.ok) throw new Error(`Airtable update error: ${res.status}`);
-  return res.json();
+
+  if (error) throw new Error(`Airtable update error: ${error.message}`);
+  return data;
 }
 
 export const airtable = { fetchAll, createRecord, updateRecord };
