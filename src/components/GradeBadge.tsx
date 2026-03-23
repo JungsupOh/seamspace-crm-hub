@@ -1,20 +1,16 @@
 import { cn } from '@/lib/utils';
-import { getMQLStyles, getHealthStyles, type MQLGrade, type HealthGrade } from '@/lib/grades';
+import { STAGE_COLOR } from '@/lib/grades';
 
 interface GradeBadgeProps {
   grade: string;
-  type: 'mql' | 'health';
   className?: string;
 }
 
-export function GradeBadge({ grade, type, className }: GradeBadgeProps) {
-  const styles = type === 'mql'
-    ? getMQLStyles(grade as MQLGrade)
-    : getHealthStyles(grade as HealthGrade);
-
+export function GradeBadge({ grade, className }: GradeBadgeProps) {
+  const styles = STAGE_COLOR[grade] ?? 'bg-muted text-muted-foreground';
   return (
     <span className={cn(
-      'inline-flex items-center px-2 py-0.5 rounded-md text-meta font-medium tracking-wide uppercase',
+      'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium',
       styles,
       className
     )}>

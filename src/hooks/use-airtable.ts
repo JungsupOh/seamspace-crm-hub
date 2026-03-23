@@ -1,11 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { airtable, AirtableRecord } from '@/lib/airtable';
-import { ContactFields, DealFields, OrganizationFields, TrialFields } from '@/types/airtable';
+import { airtable } from '@/lib/airtable';
+import { ContactFields, DealFields } from '@/types/airtable';
 
 export function useContacts() {
   return useQuery({
     queryKey: ['contacts'],
     queryFn: () => airtable.fetchAll<ContactFields>('01_Contacts'),
+    staleTime: 0,
+    refetchOnMount: true,
   });
 }
 
@@ -13,20 +15,8 @@ export function useDeals() {
   return useQuery({
     queryKey: ['deals'],
     queryFn: () => airtable.fetchAll<DealFields>('03_Deals'),
-  });
-}
-
-export function useOrganizations() {
-  return useQuery({
-    queryKey: ['organizations'],
-    queryFn: () => airtable.fetchAll<OrganizationFields>('02_Organizations'),
-  });
-}
-
-export function useTrials() {
-  return useQuery({
-    queryKey: ['trials'],
-    queryFn: () => airtable.fetchAll<TrialFields>('05_Trial_PQL'),
+    staleTime: 0,
+    refetchOnMount: true,
   });
 }
 
@@ -61,5 +51,21 @@ export function useUpdateDeal() {
     mutationFn: ({ id, fields }: { id: string; fields: Partial<DealFields> }) =>
       airtable.updateRecord<DealFields>('03_Deals', id, fields),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['deals'] }),
+  });
+}
+
+export function useDeleteDeal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => airtable.deleteRecord('03_Deals', id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['deals'] }),
+  });
+}
+
+export function useDeleteContact() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => airtable.deleteRecord('01_Contacts', id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['contacts'] }),
   });
 }
