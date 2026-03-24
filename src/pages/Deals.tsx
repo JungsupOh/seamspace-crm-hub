@@ -268,14 +268,19 @@ function xlDate(v: unknown): string {
 }
 
 const DEAL_STAGE_MAP: Record<string, string> = {
-  '계약 완료':       'Closed_Won',
-  '세무서류 발급요청': 'Closed_Won',
-  '알림톡 발송요청':  'Contract',
-  '입금 대기':       'Contract',
-  '계약체결 대기':   'Contract',
-  '템플릿 회신대기':  'Contract',
-  '견적 문의':       'Proposal',
-  '계약 취소':       'Closed_Lost',
+  '계약 완료':        '입금완료',
+  '세무서류 발급요청': '입금완료',
+  '알림톡 발송요청':   '이용권 발송완료',
+  '입금 대기':        '입금대기',
+  '입금완료':         '입금완료',
+  '계약체결 대기':    '계약체결/구매',
+  '계약체결':         '계약체결/구매',
+  '템플릿 회신대기':  '템플릿 회신대기',
+  '견적 문의':        '견적',
+  '견적':             '견적',
+  '결제 예정':        '결제예정',
+  '계약 취소':        '딜취소',
+  '취소':             '딜취소',
 };
 const DEAL_PLAN_MAP: Record<string, string> = {
   '학교플랜 소': '학교(소)',
