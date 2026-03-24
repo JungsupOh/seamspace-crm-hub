@@ -283,6 +283,69 @@ export async function updateLicenseStatus(id: string, status: LicenseStatus): Pr
   if (!res.ok) throw new Error(`이용권 상태 업데이트 실패: ${res.status}`);
 }
 
+export async function updateLicenseDeal(id: string, dealId: string): Promise<void> {
+  const res = await fetch(`${LICENSE_URL}?id=eq.${id}`, {
+    method: 'PATCH',
+    headers: DB_HEADERS,
+    body: JSON.stringify({ deal_id: dealId }),
+  });
+  if (!res.ok) throw new Error(`딜 연결 실패: ${res.status}`);
+}
+
+export async function attachCouponToDeal(
+  couponCode: string,
+  dealId: string,
+  info: { contact_name?: string; contact_phone?: string; org_name?: string; duration?: string; user_count?: string }
+): Promise<DealLicenseRecord> {
+  const MDIARY_URL = `${SUPABASE_URL}/rest/v1/mdiary_coupons`;
+
+  // Check if already in deal_licenses
+  const existRes = await fetch(
+    `${LICENSE_URL}?coupon_code=eq.${encodeURIComponent(couponCode)}&limit=1`,
+    { headers: DB_HEADERS }
+  );
+  const existing: DealLicenseRecord[] = existRes.ok ? await existRes.json() : [];
+
+  if (existing.length > 0) {
+    const patchRes = await fetch(`${LICENSE_URL}?id=eq.${existing[0].id}`, {
+      method: 'PATCH',
+      headers: { ...DB_HEADERS, Prefer: 'return=representation' },
+      body: JSON.stringify({ deal_id: dealId }),
+    });
+    if (!patchRes.ok) throw new Error(`이용권 연결 실패: ${patchRes.status}`);
+    const updated = await patchRes.json();
+    return updated[0];
+  }
+
+  // Look up coupon details from mdiary_coupons
+  const couponRes = await fetch(
+    `${MDIARY_URL}?coupon_code=eq.${encodeURIComponent(couponCode)}&limit=1`,
+    { headers: DB_HEADERS }
+  );
+  const coupons: Array<{
+    duration: number; user_limit: number; is_used: boolean;
+    descript: string | null; service_expire_at: string | null;
+  }> = couponRes.ok ? await couponRes.json() : [];
+
+  const c = coupons[0];
+  if (!c) throw new Error(`쿠폰 코드를 찾을 수 없습니다: ${couponCode}`);
+
+  const record: Omit<DealLicenseRecord, 'id' | 'created_at'> = {
+    deal_id:          dealId,
+    coupon_code:      couponCode,
+    contact_name:     info.contact_name  ?? '',
+    contact_phone:    info.contact_phone ?? '',
+    org_name:         info.org_name      ?? (c.descript ?? ''),
+    duration:         info.duration      ?? String(c.duration),
+    user_count:       info.user_count    ?? String(c.user_limit),
+    status:           c.is_used ? '사용중' : '대기',
+    service_expire_at: c.service_expire_at ?? null,
+  };
+
+  const saved = await saveDealLicenses([record]);
+  return saved[0];
+}
+
 // ── 레거시 호환 (기존 Notes 파싱 — 마이그레이션 기간용) ──
 export interface StoredFile {
   name: string;

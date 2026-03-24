@@ -21,9 +21,12 @@ import {
 import { airtable, AirtableRecord } from '@/lib/airtable';
 import { DealFields, ContactFields } from '@/types/airtable';
 import { DEAL_STAGES, ALL_DEAL_STAGES } from '@/lib/grades';
-import { uploadDealFile, parseFileLinks, getDealFiles, saveDealFileRecord, deleteDealFileRecord, DealFileRecord, saveDealLicenses, getDealLicenses, DealLicenseRecord, getDealQuotes, saveDealQuote, updateDealQuote, deleteDealQuote, selectDealQuote, DealQuote } from '@/lib/storage';
+import { uploadDealFile, parseFileLinks, getDealFiles, saveDealFileRecord, deleteDealFileRecord, DealFileRecord, saveDealLicenses, getDealLicenses, DealLicenseRecord, getDealQuotes, saveDealQuote, updateDealQuote, deleteDealQuote, selectDealQuote, DealQuote, attachCouponToDeal } from '@/lib/storage';
 import { searchSchools, SchoolInfo } from '@/lib/neis';
 import { toast } from 'sonner';
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 // ── 전화번호 정규화 ───────────────────────────────
 function normalizePhone(raw: string): string {
@@ -1580,6 +1583,13 @@ export default function Deals() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [dealFiles, setDealFiles]           = useState<DealFileRecord[]>([]);
   const [dealLicenses, setDealLicenses]     = useState<DealLicenseRecord[]>([]);
+  const [attachCode, setAttachCode]         = useState('');
+  const [attachLoading, setAttachLoading]   = useState(false);
+  const [autoDealLinking, setAutoDealLinking] = useState(false);
+  const [autoDealLinkProgress, setAutoDealLinkProgress] = useState('');
+  const [autoDealLinkResult, setAutoDealLinkResult] = useState<{
+    linked: number; skipped_multi: number; skipped_no_match: number;
+  } | null>(null);
   const [dealQuotes, setDealQuotes]         = useState<DealQuote[]>([]);
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
   const [editingQuote, setEditingQuote]     = useState<DealQuote | null>(null);
@@ -1731,6 +1741,90 @@ export default function Deals() {
     await updateDeal.mutateAsync({ id: selected.id, fields: { Deal_Stage: stage } });
     setSelected(prev => prev ? { ...prev, fields: { ...prev.fields, Deal_Stage: stage } } : null);
     toast.success('스테이지 변경됨');
+  };
+
+  const handleAttachCoupon = async () => {
+    if (!attachCode || !selected) return;
+    setAttachLoading(true);
+    try {
+      const f = selected.fields;
+      await attachCouponToDeal(attachCode, selected.id, {
+        contact_name:  f.Contact_Name  ?? '',
+        contact_phone: f.Contact_Phone ?? '',
+        org_name:      f.Org_Name      ?? '',
+      });
+      const updated = await getDealLicenses(selected.id);
+      setDealLicenses(updated);
+      setAttachCode('');
+      toast.success(`쿠폰 ${attachCode} 연결 완료`);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '쿠폰 연결 실패');
+    } finally {
+      setAttachLoading(false);
+    }
+  };
+
+  const handleAutoDealLink = async () => {
+    setAutoDealLinking(true);
+    setAutoDealLinkResult(null);
+    const headers = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY };
+    try {
+      setAutoDealLinkProgress('딜 목록 불러오는 중...');
+      const allDeals = await airtable.fetchAll<DealFields>('03_Deals');
+      const normalize = (s: string) => s.trim().replace(/\s+/g, '').toLowerCase();
+      const orgMap = new Map<string, string[]>();
+      for (const d of allDeals) {
+        const org = d.fields.Org_Name?.trim();
+        if (!org) continue;
+        const key = normalize(org);
+        orgMap.set(key, [...(orgMap.get(key) ?? []), d.id]);
+      }
+
+      setAutoDealLinkProgress('미연결 이용권 불러오는 중...');
+      const [cRes, dlRes] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/mdiary_coupons?group_name=not.is.null&select=id,coupon_code,group_name,extracted_name,is_used,duration,user_limit,service_expire_at&limit=5000`, { headers }),
+        fetch(`${SUPABASE_URL}/rest/v1/deal_licenses?select=coupon_code&limit=5000`, { headers }),
+      ]);
+      const rawCoupons: Array<{
+        id: number; coupon_code: string; group_name: string; extracted_name: string | null;
+        is_used: boolean; duration: number; user_limit: number; service_expire_at: string | null;
+      }> = cRes.ok ? await cRes.json() : [];
+      const existingCodes = new Set<string>(
+        (dlRes.ok ? await dlRes.json() : []).map((r: { coupon_code: string }) => r.coupon_code)
+      );
+      const unlinked = rawCoupons.filter(c => !existingCodes.has(c.coupon_code));
+
+      let linked = 0, skipped_multi = 0, skipped_no_match = 0;
+      const BATCH = 10;
+      for (let i = 0; i < unlinked.length; i += BATCH) {
+        const batch = unlinked.slice(i, i + BATCH);
+        setAutoDealLinkProgress(`처리 중... ${i + batch.length}/${unlinked.length}`);
+        await Promise.all(batch.map(async (c) => {
+          const matches = orgMap.get(normalize(c.group_name)) ?? [];
+          if (matches.length === 1) {
+            const deal = allDeals.find(d => d.id === matches[0])!;
+            try {
+              await saveDealLicenses([{
+                deal_id: matches[0], coupon_code: c.coupon_code,
+                contact_name: c.extracted_name ?? '', contact_phone: deal.fields.Contact_Phone ?? '',
+                org_name: c.group_name, duration: String(c.duration), user_count: String(c.user_limit),
+                status: c.is_used ? '사용중' : '대기', service_expire_at: c.service_expire_at ?? null,
+              }]);
+              linked++;
+            } catch { /* 중복 무시 */ }
+          } else if (matches.length > 1) { skipped_multi++; }
+          else { skipped_no_match++; }
+        }));
+      }
+      setAutoDealLinkResult({ linked, skipped_multi, skipped_no_match });
+      qc.invalidateQueries({ queryKey: ['deals'] });
+      toast.success(`자동 딜 연결 완료 — ${linked}건 연결됨`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '자동 딜 연결 실패');
+    } finally {
+      setAutoDealLinking(false);
+      setAutoDealLinkProgress('');
+    }
   };
 
   const handleDelete = async () => {
@@ -1983,12 +2077,33 @@ export default function Deals() {
         <div className="flex gap-2">
           {canEdit && <DealUploadDialog existingDeals={deals} onDone={() => qc.invalidateQueries({ queryKey: ['deals'] })} />}
           {canEdit && (
+            <Button size="sm" variant="outline" onClick={handleAutoDealLink} disabled={autoDealLinking}
+              title="mDiary 학교명 기준으로 이용권을 딜에 자동 연결">
+              <CheckCircle2 className={`h-4 w-4 mr-1 ${autoDealLinking ? 'animate-pulse' : ''}`} />
+              {autoDealLinking ? autoDealLinkProgress || '연결 중...' : '이용권 자동 연결'}
+            </Button>
+          )}
+          {canEdit && (
             <Button size="sm" onClick={() => { setSelected(null); setEditMode('add'); setDialogOpen(true); }}>
               <Plus className="h-4 w-4 mr-1" />딜 추가
             </Button>
           )}
         </div>
       </div>
+      {autoDealLinkResult && (
+        <div className="flex items-center gap-4 rounded-lg border border-blue-200 bg-blue-50/60 px-4 py-2.5 text-sm">
+          <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />
+          <span className="text-blue-800 font-medium">이용권 자동 연결 완료</span>
+          <span className="text-blue-700">연결 <b>{autoDealLinkResult.linked}</b>건</span>
+          {autoDealLinkResult.skipped_multi > 0 && (
+            <span className="text-amber-700">동일 학교 딜 복수 <b>{autoDealLinkResult.skipped_multi}</b>건 (수동 필요)</span>
+          )}
+          {autoDealLinkResult.skipped_no_match > 0 && (
+            <span className="text-muted-foreground">매칭 없음 <b>{autoDealLinkResult.skipped_no_match}</b>건</span>
+          )}
+          <button onClick={() => setAutoDealLinkResult(null)} className="ml-auto text-muted-foreground hover:text-foreground">✕</button>
+        </div>
+      )}
 
       {/* 파이프라인 */}
       <div className="surface-card ring-container p-4 space-y-3">
@@ -2427,8 +2542,7 @@ export default function Deals() {
                   </Section>
 
                   {/* 이용권 */}
-                  {(f.License_Code_Count || f.License_Send_Date || f.Renewal_Date || f.License_Template || dealLicenses.length > 0) && (
-                    <Section icon={Package} title="이용권">
+                  <Section icon={Package} title="이용권">
                       <div className="grid grid-cols-2 gap-2">
                         {[
                           { l: '코드 수량', v: f.License_Code_Count ? `${f.License_Code_Count.toLocaleString('ko-KR')}개` : undefined },
@@ -2462,8 +2576,31 @@ export default function Deals() {
                           ))}
                         </div>
                       )}
-                    </Section>
-                  )}
+                      {/* 쿠폰 코드 연결 */}
+                      <div className="mt-3 flex gap-2">
+                        <Input
+                          className="h-7 text-xs font-mono flex-1"
+                          placeholder="쿠폰 코드 입력 후 연결"
+                          value={attachCode}
+                          onChange={e => setAttachCode(e.target.value.trim())}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && attachCode && selected) {
+                              e.preventDefault();
+                              handleAttachCoupon();
+                            }
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs px-2"
+                          disabled={!attachCode || attachLoading}
+                          onClick={handleAttachCoupon}
+                        >
+                          {attachLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : '연결'}
+                        </Button>
+                      </div>
+                  </Section>
 
                   {/* 세무 */}
                   {(f.Lead_Source || f.Order_Date || f.Contract_Date || f.Payment_Date || f.Receipt_Date) && (

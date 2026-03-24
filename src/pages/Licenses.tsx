@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
 import { Search, ChevronRight, RefreshCw, ExternalLink, Send, Download, Upload as UploadIcon, CheckCircle2, XCircle, Loader2, Info, Users } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { getAllLicenses, updateLicenseStatus, DealLicenseRecord, LicenseStatus, saveDealLicenses } from '@/lib/storage';
+import { getAllLicenses, updateLicenseStatus, updateLicenseDeal, attachCouponToDeal, DealLicenseRecord, LicenseStatus, saveDealLicenses } from '@/lib/storage';
 import { toast } from 'sonner';
 import { useDeals } from '@/hooks/use-airtable';
 import { airtable } from '@/lib/airtable';
@@ -800,6 +800,11 @@ export default function Licenses() {
 
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | LicenseStatus>('all');
+  const [linkingId, setLinkingId]       = useState<string | null>(null);
+  const [linkingDealId, setLinkingDealId] = useState('');
+  const [linkLoading, setLinkLoading]   = useState(false);
+
+  const { data: deals } = useDeals();
   const { widths: colW, startResize } = useResizableColumns('licenses_col_widths', {
     상태: 90, '쿠폰 코드': 120, 담당자: 100, '학교/기관': 140, 전화번호: 110, 기간: 80, 만료일: 100, 딜: 70,
   });
@@ -821,6 +826,33 @@ export default function Licenses() {
   const lastSync = licenses && licenses.length > 0
     ? licenses.reduce((a, b) => a.created_at > b.created_at ? a : b).created_at.slice(0, 10)
     : null;
+
+  const handleLinkDeal = async (lic: DealLicenseRecord, dealId: string) => {
+    if (!dealId) return;
+    setLinkLoading(true);
+    try {
+      if (lic.id.startsWith('mdiary_')) {
+        // mdiary 쿠폰 → 새 deal_licenses 레코드 생성
+        await attachCouponToDeal(lic.coupon_code, dealId, {
+          contact_name:  lic.contact_name,
+          contact_phone: lic.contact_phone,
+          org_name:      lic.org_name,
+          duration:      lic.duration,
+          user_count:    lic.user_count,
+        });
+      } else {
+        await updateLicenseDeal(lic.id, dealId);
+      }
+      qc.invalidateQueries({ queryKey: ['licenses'] });
+      setLinkingId(null);
+      setLinkingDealId('');
+      toast.success('딜 연결 완료');
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '딜 연결 실패');
+    } finally {
+      setLinkLoading(false);
+    }
+  };
 
   if (isLoading) return (
     <div className="space-y-4">
@@ -849,7 +881,7 @@ export default function Licenses() {
             </Button>
           )}
           <Button size="sm" variant="outline" onClick={handleAutoMatch}
-            disabled={autoMatching || syncing}
+            disabled={autoMatching || autoDealLinking || syncing}
             title="Airtable 고객과 자동 매칭 · 미등록 사용자 신규 등록">
             <Users className={`h-4 w-4 mr-1.5 ${autoMatching ? 'animate-pulse' : ''}`} />
             {autoMatching ? autoMatchProgress || '매칭 중...' : '고객 자동 매칭'}
@@ -879,6 +911,7 @@ export default function Licenses() {
           <button onClick={() => setAutoMatchResult(null)} className="ml-auto text-muted-foreground hover:text-foreground">✕</button>
         </div>
       )}
+
 
       {/* 파이프라인 */}
       <div className="surface-card ring-container p-4">
@@ -1031,9 +1064,48 @@ export default function Licenses() {
                     </td>
                     <td className="px-4 py-3">
                       {lic.deal_id === 'mdiary' ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60">
-                          mDiary
-                        </span>
+                        linkingId === lic.id ? (
+                          <div className="flex items-center gap-1">
+                            <select
+                              className="text-[11px] border rounded px-1 py-0.5 max-w-[120px]"
+                              value={linkingDealId}
+                              onChange={e => setLinkingDealId(e.target.value)}
+                            >
+                              <option value="">딜 선택</option>
+                              {(deals ?? []).map(d => (
+                                <option key={d.id} value={d.id}>
+                                  {d.fields.Deal_Name || d.fields.Org_Name || d.id.slice(-6)}
+                                </option>
+                              ))}
+                            </select>
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="h-5 text-[10px] px-1.5"
+                              disabled={!linkingDealId || linkLoading}
+                              onClick={() => handleLinkDeal(lic, linkingDealId)}
+                            >
+                              {linkLoading ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : '확인'}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-5 text-[10px] px-1"
+                              onClick={() => { setLinkingId(null); setLinkingDealId(''); }}
+                            >
+                              <XCircle className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-5 text-[10px] px-1.5 text-muted-foreground hover:text-primary"
+                            onClick={() => { setLinkingId(lic.id); setLinkingDealId(''); }}
+                          >
+                            딜 연결
+                          </Button>
+                        )
                       ) : (
                         <a
                           href={`/deals?id=${lic.deal_id}`}
