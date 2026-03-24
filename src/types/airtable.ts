@@ -60,6 +60,7 @@ export interface DealFields {
   // 이용권
   License_Code_Count?: number;
   License_Send_Date?: string;
+  License_Template?: string;
   Renewal_Date?: string;
 
   // 세무

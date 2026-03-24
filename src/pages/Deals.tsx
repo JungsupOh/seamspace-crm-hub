@@ -310,7 +310,6 @@ function parseExcelRow(row: unknown[]): Partial<DealFields> | null {
   return {
     Deal_Name:            contactName ? `${contactName} (${orgName})` : orgName,
     Deal_Stage:           stage,
-    Deal_Type:            'New',
     Org_Name:             orgName,
     Org_Address:          String(row[8] || row[5] || '').trim() || undefined,
     Contact_Name:         contactName  || undefined,
@@ -347,7 +346,7 @@ function DealUploadDialog({ existingDeals, onDone }: {
   const [dupeKeys, setDupeKeys] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [result, setResult]     = useState<{ ok: number; skip: number; fail: number } | null>(null);
+  const [result, setResult]     = useState<{ ok: number; skip: number; fail: number; errMsg?: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // 중복 판별 키: 학교명 + 계약일 (계약일 없으면 학교명 + 견적일)
@@ -387,19 +386,19 @@ function DealUploadDialog({ existingDeals, onDone }: {
   const runImport = async () => {
     setImporting(true);
     let ok = 0, fail = 0;
-    const BATCH = 10;
-    for (let i = 0; i < newDeals.length; i += BATCH) {
-      const batch = newDeals.slice(i, i + BATCH);
+    let lastErr = '';
+    for (let i = 0; i < newDeals.length; i++) {
       try {
-        await airtable.createBatch<DealFields>('03_Deals', batch);
-        ok += batch.length;
-      } catch {
-        fail += batch.length;
+        await airtable.createRecord<DealFields>('03_Deals', newDeals[i]);
+        ok++;
+      } catch (e) {
+        fail++;
+        if (!lastErr) lastErr = e instanceof Error ? e.message : String(e);
       }
-      setProgress(Math.round(((i + BATCH) / newDeals.length) * 100));
-      if (i + BATCH < newDeals.length) await new Promise(r => setTimeout(r, 250));
+      setProgress(Math.round(((i + 1) / newDeals.length) * 100));
+      if ((i + 1) % 5 === 0 && i + 1 < newDeals.length) await new Promise(r => setTimeout(r, 250));
     }
-    setResult({ ok, skip: skipCount, fail });
+    setResult({ ok, skip: skipCount, fail, errMsg: lastErr || undefined });
     setImporting(false);
     onDone();
   };
@@ -523,6 +522,7 @@ function DealUploadDialog({ existingDeals, onDone }: {
                     {result.fail > 0 && (
                       <p className="text-xs text-orange-600 mt-0.5 flex items-center gap-1">
                         <AlertCircle className="h-3 w-3" />{result.fail.toLocaleString()}건 실패
+                        {result.errMsg && <span className="ml-1 text-[10px] opacity-70">({result.errMsg})</span>}
                       </p>
                     )}
                   </div>
