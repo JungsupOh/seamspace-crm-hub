@@ -297,9 +297,10 @@ function parseExcelRow(row: unknown[]): Partial<DealFields> | null {
   if (!orgName || orgName === '학교명') return null;
 
   const statusRaw = String(row[1] || '').trim();
-  const stage = DEAL_STAGE_MAP[statusRaw] || 'Lead';
+  const stage = DEAL_STAGE_MAP[statusRaw] || '체험권';
   const planRaw = String(row[21] || '').trim();
-  const plan = DEAL_PLAN_MAP[planRaw] ?? (planRaw === '선택안함' ? '' : planRaw);
+  const planMapped = DEAL_PLAN_MAP[planRaw];
+  const plan = planMapped !== undefined ? planMapped : (planRaw === '선택안함' ? '' : planRaw);
   const contactName  = String(row[10] || row[14] || '').trim();
   const contactPhone = String(row[11] || row[15] || '').trim();
   const contactEmail = String(row[13] || row[16] || '').trim();
