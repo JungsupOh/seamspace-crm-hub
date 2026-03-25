@@ -1626,7 +1626,11 @@ export default function Deals() {
     linked: number; skipped_multi: number; skipped_no_match: number;
   } | null>(null);
   const [stageSyncing, setStageSyncing] = useState(false);
-  const [stageSyncResult, setStageSyncResult] = useState<{ updated: number } | null>(null);
+  const [stageSyncResult, setStageSyncResult] = useState<{
+    updated: number;
+    names: string[];
+    unmatched: string[];
+  } | null>(null);
   const [dealQuotes, setDealQuotes]         = useState<DealQuote[]>([]);
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
   const [editingQuote, setEditingQuote]     = useState<DealQuote | null>(null);
@@ -1821,14 +1825,18 @@ export default function Deals() {
 
       // 3. 딜별로 고객에게 줄 최고 스테이지 계산
       const bestStage = new Map<string, string>(); // contactId → 최고 contactStage
+      const unmatched: string[] = [];
       for (const d of allDeals) {
         const name  = (d.fields.Contact_Name  ?? '').trim();
         const phone = (d.fields.Contact_Phone ?? '').replace(/\D/g, '');
         if (!name) continue;
-        const contact = contactMap.get(`${name}||${phone}`) ?? contactMap.get(`${name}||`);
-        if (!contact) continue;
         const newStage = DEAL_TO_CONTACT_STAGE[d.fields.Deal_Stage ?? ''];
         if (!newStage) continue;
+        const contact = contactMap.get(`${name}||${phone}`) ?? contactMap.get(`${name}||`);
+        if (!contact) {
+          if (!unmatched.includes(name)) unmatched.push(name);
+          continue;
+        }
         const current = bestStage.get(contact.id);
         if (!current || (STAGE_PRIORITY[newStage] ?? 0) > (STAGE_PRIORITY[current] ?? 0)) {
           bestStage.set(contact.id, newStage);
@@ -1847,7 +1855,8 @@ export default function Deals() {
         )
       );
 
-      setStageSyncResult({ updated: toUpdate.length });
+      const names = toUpdate.map(c => c.fields.Name ?? '').filter(Boolean);
+      setStageSyncResult({ updated: toUpdate.length, names, unmatched });
       qc.invalidateQueries({ queryKey: ['contacts'] });
       toast.success(`고객 스테이지 동기화 완료 — ${toUpdate.length}명 업데이트`);
     } catch (e) {
@@ -2212,11 +2221,26 @@ export default function Deals() {
         </div>
       </div>
       {stageSyncResult && (
-        <div className="flex items-center gap-4 rounded-lg border border-teal-200 bg-teal-50/60 px-4 py-2.5 text-sm">
-          <CheckCircle2 className="h-4 w-4 text-teal-600 shrink-0" />
-          <span className="text-teal-800 font-medium">고객 스테이지 동기화 완료</span>
-          <span className="text-teal-700"><b>{stageSyncResult.updated}</b>명 업데이트됨</span>
-          <button onClick={() => setStageSyncResult(null)} className="ml-auto text-muted-foreground hover:text-foreground">✕</button>
+        <div className="rounded-lg border border-teal-200 bg-teal-50/60 px-4 py-3 text-sm space-y-1.5">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="h-4 w-4 text-teal-600 shrink-0" />
+            <span className="text-teal-800 font-medium">고객 스테이지 동기화 완료</span>
+            <span className="text-teal-700"><b>{stageSyncResult.updated}</b>명 업데이트</span>
+            {stageSyncResult.unmatched.length > 0 && (
+              <span className="text-amber-700"><b>{stageSyncResult.unmatched.length}</b>건 고객 미매칭</span>
+            )}
+            <button onClick={() => setStageSyncResult(null)} className="ml-auto text-muted-foreground hover:text-foreground">✕</button>
+          </div>
+          {stageSyncResult.names.length > 0 && (
+            <p className="text-xs text-teal-700 pl-7">
+              업데이트: {stageSyncResult.names.join(', ')}
+            </p>
+          )}
+          {stageSyncResult.unmatched.length > 0 && (
+            <p className="text-xs text-amber-700 pl-7">
+              미매칭 (고객 없음): {stageSyncResult.unmatched.join(', ')}
+            </p>
+          )}
         </div>
       )}
       {autoDealLinkResult && (
