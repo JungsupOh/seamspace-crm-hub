@@ -383,14 +383,49 @@ function DealUploadDialog({ existingDeals, onDone }: {
     return acc;
   }, {});
 
+  const DEAL_TO_CONTACT_STAGE: Record<string, string> = {
+    '입금완료':        '구매',
+    '이용권 발송완료': '구매',
+    '계약체결/구매':   '구매',
+    '결제예정':        '구매',
+    '입금대기':        '구매',
+    '견적':            '관심',
+    '템플릿 회신대기': '관심',
+    '체험권':          '체험',
+  };
+
   const runImport = async () => {
     setImporting(true);
     let ok = 0, fail = 0;
     let lastErr = '';
+
+    // 고객 목록 로드 → 이름+전화번호 기준 Map
+    const contacts = await airtable.fetchAll<ContactFields>('01_Contacts').catch(() => []);
+    const contactMap = new Map<string, string>(); // "name||phone" → record id
+    for (const c of contacts) {
+      const key = `${(c.fields.Name ?? '').trim()}||${(c.fields.Phone ?? '').replace(/\D/g, '')}`;
+      contactMap.set(key, c.id);
+      // 이름만으로도 매칭 (전화번호 없는 경우 대비)
+      const nameOnly = `${(c.fields.Name ?? '').trim()}||`;
+      if (!contactMap.has(nameOnly)) contactMap.set(nameOnly, c.id);
+    }
+
     for (let i = 0; i < newDeals.length; i++) {
+      const deal = newDeals[i];
       try {
-        await airtable.createRecord<DealFields>('03_Deals', newDeals[i]);
+        await airtable.createRecord<DealFields>('03_Deals', deal);
         ok++;
+
+        // 매칭 고객 Lead_Stage 업데이트
+        const targetStage = DEAL_TO_CONTACT_STAGE[deal.Deal_Stage ?? ''];
+        if (targetStage && deal.Contact_Name) {
+          const phone = (deal.Contact_Phone ?? '').replace(/\D/g, '');
+          const contactId = contactMap.get(`${deal.Contact_Name.trim()}||${phone}`)
+            ?? contactMap.get(`${deal.Contact_Name.trim()}||`);
+          if (contactId) {
+            await airtable.updateRecord<ContactFields>('01_Contacts', contactId, { Lead_Stage: targetStage }).catch(() => {});
+          }
+        }
       } catch (e) {
         fail++;
         if (!lastErr) lastErr = e instanceof Error ? e.message : String(e);
