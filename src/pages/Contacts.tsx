@@ -99,6 +99,25 @@ async function getLicensesByPhone(phone: string): Promise<LicenseRecord[]> {
   return all.filter(l => l.contact_phone?.replace(/\D/g, '') === normalized);
 }
 
+async function getLicensesByName(name: string): Promise<LicenseRecord[]> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/deal_licenses?contact_name=eq.${encodeURIComponent(name)}&order=created_at.desc`,
+    { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+  );
+  if (!res.ok) return [];
+  return res.json();
+}
+
+async function getDealsByContactName(name: string): Promise<import('@/types/airtable').DealFields[]> {
+  if (!name) return [];
+  const { airtable: at } = await import('@/lib/airtable');
+  const records = await at.fetchAll<import('@/types/airtable').DealFields>('03_Deals', {
+    filterByFormula: `{Contact_Name}="${name.replace(/"/g, '\\"')}"`,
+    sort: '[{"field":"Contract_Date","direction":"desc"}]',
+  }).catch(() => []);
+  return records.map(r => r.fields);
+}
+
 const STATUS_COLOR: Record<string, string> = {
   '대기':   'bg-slate-100 text-slate-600',
   '사용중': 'bg-teal-100 text-teal-700',
@@ -462,10 +481,21 @@ export default function Contacts() {
   const [sortDir, setSortDir]         = useState<'asc' | 'desc'>('asc');
   const [licenses, setLicenses]             = useState<LicenseRecord[]>([]);
   const [mDiaryCoupons, setMDiaryCoupons]   = useState<MDiaryCoupon[]>([]);
+  const [contactDeals, setContactDeals]     = useState<import('@/types/airtable').DealFields[]>([]);
 
   useEffect(() => {
-    if (!selected?.fields.Phone) { setLicenses([]); return; }
-    getLicensesByPhone(selected.fields.Phone).then(setLicenses).catch(() => setLicenses([]));
+    if (!selected) { setLicenses([]); setContactDeals([]); return; }
+    const name  = selected.fields.Name ?? '';
+    const phone = selected.fields.Phone ?? '';
+
+    // 이용권: 전화번호 우선, 없으면 이름으로 폴백
+    (phone
+      ? getLicensesByPhone(phone).then(data => data.length > 0 ? data : getLicensesByName(name))
+      : getLicensesByName(name)
+    ).then(setLicenses).catch(() => setLicenses([]));
+
+    // 관련 딜
+    getDealsByContactName(name).then(setContactDeals).catch(() => setContactDeals([]));
   }, [selected?.id]);
 
   useEffect(() => {
@@ -1025,8 +1055,8 @@ export default function Contacts() {
                     </section>
                   )}
 
-                  {/* 활동 이력 (Notes + mDiary 인라인) */}
-                  {(selected.fields.Notes || mDiaryCoupons.length > 0) && (() => {
+                  {/* 활동 이력 (Notes + mDiary + 딜) */}
+                  {(selected.fields.Notes || mDiaryCoupons.length > 0 || contactDeals.length > 0) && (() => {
                     // 활동이력 날짜별로 mDiary 쿠폰 매칭 (±14일)
                     const matchedIds = new Set<number>();
                     const getCouponsNear = (actDate: string) => mDiaryCoupons.filter(c => {
@@ -1066,11 +1096,39 @@ export default function Contacts() {
                       </div>
                     );
 
+                    const DEAL_STAGE_COLOR: Record<string, string> = {
+                      '입금완료': 'bg-green-100 text-green-700', '이용권 발송완료': 'bg-purple-100 text-purple-700',
+                      '계약체결/구매': 'bg-violet-100 text-violet-700', '결제예정': 'bg-sky-100 text-sky-700',
+                      '입금대기': 'bg-amber-100 text-amber-700', '견적': 'bg-blue-100 text-blue-700',
+                      '템플릿 회신대기': 'bg-orange-100 text-orange-700', '체험권': 'bg-yellow-100 text-yellow-700',
+                      '딜취소': 'bg-red-100 text-red-700',
+                    };
                     const noteLines = (selected.fields.Notes ?? '').split('\n').filter(Boolean);
                     return (
                       <section>
                         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">활동 이력</p>
                         <div className="space-y-1 bg-muted/30 rounded-lg p-3">
+                          {/* 딜 타임라인 */}
+                          {contactDeals.map((d, i) => {
+                            const date = d.Payment_Date || d.Contract_Date || d.Quote_Date || '';
+                            const stageColor = DEAL_STAGE_COLOR[d.Deal_Stage ?? ''] ?? 'bg-slate-100 text-slate-600';
+                            return (
+                              <div key={i} className="flex gap-2 text-sm items-start">
+                                <span className="text-xs font-mono text-primary flex-shrink-0 pt-0.5 w-[72px]">{date.slice(0,10) || '-'}</span>
+                                <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium shrink-0 ${stageColor}`}>{d.Deal_Stage}</span>
+                                  <span className="text-muted-foreground text-xs truncate">{d.Org_Name}</span>
+                                  {d.Quote_Plan && <span className="text-muted-foreground/70 text-xs">{d.Quote_Plan}</span>}
+                                  {d.Final_Contract_Value != null && (
+                                    <span className="text-xs font-medium">{d.Final_Contract_Value.toLocaleString('ko-KR')}원</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {contactDeals.length > 0 && noteLines.length > 0 && (
+                            <div className="border-t border-border/40 my-1" />
+                          )}
                           {noteLines.map((line, i) => {
                             const clean = line.replace(/\s*·rec\w+/, '');
                             const dateMatch = clean.match(/^\[(\d{4}-\d{2}-\d{2})\]\s*/);
