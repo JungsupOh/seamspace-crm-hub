@@ -1625,6 +1625,8 @@ export default function Deals() {
   const [autoDealLinkResult, setAutoDealLinkResult] = useState<{
     linked: number; skipped_multi: number; skipped_no_match: number;
   } | null>(null);
+  const [stageSyncing, setStageSyncing] = useState(false);
+  const [stageSyncResult, setStageSyncResult] = useState<{ updated: number } | null>(null);
   const [dealQuotes, setDealQuotes]         = useState<DealQuote[]>([]);
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
   const [editingQuote, setEditingQuote]     = useState<DealQuote | null>(null);
@@ -1776,6 +1778,83 @@ export default function Deals() {
     await updateDeal.mutateAsync({ id: selected.id, fields: { Deal_Stage: stage } });
     setSelected(prev => prev ? { ...prev, fields: { ...prev.fields, Deal_Stage: stage } } : null);
     toast.success('스테이지 변경됨');
+  };
+
+  // 딜 스테이지 기준 고객 Lead_Stage 일괄 동기화
+  const DEAL_TO_CONTACT_STAGE: Record<string, string> = {
+    '입금완료':        '구매',
+    '이용권 발송완료': '구매',
+    '계약체결/구매':   '구매',
+    '결제예정':        '구매',
+    '입금대기':        '구매',
+    '견적':            '관심',
+    '템플릿 회신대기': '관심',
+    '체험권':          '체험',
+  };
+  // 스테이지 우선순위 (높을수록 우선)
+  const STAGE_PRIORITY: Record<string, number> = {
+    '구매': 3, '관심': 2, '체험': 1,
+  };
+
+  const handleStageSync = async () => {
+    setStageSyncing(true);
+    setStageSyncResult(null);
+    try {
+      // 1. 전체 딜 + 고객 로드
+      const [allDeals, allContacts] = await Promise.all([
+        airtable.fetchAll<DealFields>('03_Deals'),
+        airtable.fetchAll<ContactFields>('01_Contacts'),
+      ]);
+
+      // 2. 고객 Map: "이름||전화번호" → {id, currentStage}
+      const contactMap = new Map<string, { id: string; stage: string }>();
+      for (const c of allContacts) {
+        const name  = (c.fields.Name  ?? '').trim();
+        const phone = (c.fields.Phone ?? '').replace(/\D/g, '');
+        if (name) {
+          contactMap.set(`${name}||${phone}`, { id: c.id, stage: c.fields.Lead_Stage ?? '' });
+          if (!contactMap.has(`${name}||`)) {
+            contactMap.set(`${name}||`, { id: c.id, stage: c.fields.Lead_Stage ?? '' });
+          }
+        }
+      }
+
+      // 3. 딜별로 고객에게 줄 최고 스테이지 계산
+      const bestStage = new Map<string, string>(); // contactId → 최고 contactStage
+      for (const d of allDeals) {
+        const name  = (d.fields.Contact_Name  ?? '').trim();
+        const phone = (d.fields.Contact_Phone ?? '').replace(/\D/g, '');
+        if (!name) continue;
+        const contact = contactMap.get(`${name}||${phone}`) ?? contactMap.get(`${name}||`);
+        if (!contact) continue;
+        const newStage = DEAL_TO_CONTACT_STAGE[d.fields.Deal_Stage ?? ''];
+        if (!newStage) continue;
+        const current = bestStage.get(contact.id);
+        if (!current || (STAGE_PRIORITY[newStage] ?? 0) > (STAGE_PRIORITY[current] ?? 0)) {
+          bestStage.set(contact.id, newStage);
+        }
+      }
+
+      // 4. 실제로 변경이 필요한 고객만 업데이트
+      const toUpdate = allContacts.filter(c => {
+        const target = bestStage.get(c.id);
+        return target && target !== c.fields.Lead_Stage;
+      });
+
+      await Promise.all(
+        toUpdate.map(c =>
+          airtable.updateRecord<ContactFields>('01_Contacts', c.id, { Lead_Stage: bestStage.get(c.id)! })
+        )
+      );
+
+      setStageSyncResult({ updated: toUpdate.length });
+      qc.invalidateQueries({ queryKey: ['contacts'] });
+      toast.success(`고객 스테이지 동기화 완료 — ${toUpdate.length}명 업데이트`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '동기화 실패');
+    } finally {
+      setStageSyncing(false);
+    }
   };
 
   const handleAttachCoupon = async () => {
@@ -2112,10 +2191,17 @@ export default function Deals() {
         <div className="flex gap-2">
           {canEdit && <DealUploadDialog existingDeals={deals} onDone={() => qc.invalidateQueries({ queryKey: ['deals'] })} />}
           {canEdit && (
-            <Button size="sm" variant="outline" onClick={handleAutoDealLink} disabled={autoDealLinking}
+            <Button size="sm" variant="outline" onClick={handleAutoDealLink} disabled={autoDealLinking || stageSyncing}
               title="mDiary 학교명 기준으로 이용권을 딜에 자동 연결">
               <CheckCircle2 className={`h-4 w-4 mr-1 ${autoDealLinking ? 'animate-pulse' : ''}`} />
               {autoDealLinking ? autoDealLinkProgress || '연결 중...' : '이용권 자동 연결'}
+            </Button>
+          )}
+          {canEdit && (
+            <Button size="sm" variant="outline" onClick={handleStageSync} disabled={stageSyncing || autoDealLinking}
+              title="딜 스테이지 기준으로 고객 Lead_Stage 일괄 업데이트">
+              <Users className={`h-4 w-4 mr-1 ${stageSyncing ? 'animate-pulse' : ''}`} />
+              {stageSyncing ? '동기화 중...' : '고객 스테이지 동기화'}
             </Button>
           )}
           {canEdit && (
@@ -2125,6 +2211,14 @@ export default function Deals() {
           )}
         </div>
       </div>
+      {stageSyncResult && (
+        <div className="flex items-center gap-4 rounded-lg border border-teal-200 bg-teal-50/60 px-4 py-2.5 text-sm">
+          <CheckCircle2 className="h-4 w-4 text-teal-600 shrink-0" />
+          <span className="text-teal-800 font-medium">고객 스테이지 동기화 완료</span>
+          <span className="text-teal-700"><b>{stageSyncResult.updated}</b>명 업데이트됨</span>
+          <button onClick={() => setStageSyncResult(null)} className="ml-auto text-muted-foreground hover:text-foreground">✕</button>
+        </div>
+      )}
       {autoDealLinkResult && (
         <div className="flex items-center gap-4 rounded-lg border border-blue-200 bg-blue-50/60 px-4 py-2.5 text-sm">
           <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />
