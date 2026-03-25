@@ -328,7 +328,6 @@ function parseExcelRow(row: unknown[]): Partial<DealFields> | null {
     License_Code_Count:   toNum(row[35]),
     License_Send_Date:    xlDate(row[37]) || undefined,
     License_Template:     String(row[38] || '').trim() || undefined,
-    Lead_Source:          String(row[39] || '').trim() || undefined,
     Contract_Date:        xlDate(row[40]) || undefined,
     Payment_Date:         xlDate(row[41]) || undefined,
     Receipt_Date:         xlDate(row[46]) || undefined,
