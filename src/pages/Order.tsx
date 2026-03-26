@@ -170,11 +170,12 @@ interface ProductDef {
   code: string; name: string; desc: string; icon: string;
 }
 const PRODUCTS: ProductDef[] = [
-  { code: '01', name: 'AI마음일기',              desc: '학교·기관용 AI 감정일기 서비스',          icon: '📔' },
-  { code: '02', name: '마음여행 (보드게임)',      desc: '감정 소통 보드게임 (한국어판)',             icon: '🎲' },
-  { code: '03', name: '마음여행 (보드게임, 영문판)', desc: '감정 소통 보드게임 (영문판)',            icon: '🌐' },
-  { code: '04', name: '키링',                   desc: '심스페이스 공식 키링',                     icon: '🔑' },
-  { code: '05', name: '마인드스튜디오',          desc: '마음 성장 워크숍 & 프로그램',              icon: '🎨' },
+  { code: '01', name: 'AI마음일기', desc: '학교·기관용 AI 감정일기 서비스', icon: '📔' },
+  // 추후 추가 예정
+  // { code: '02', name: '마음여행 (보드게임)', desc: '감정 소통 보드게임 (한국어판)', icon: '🎲' },
+  // { code: '03', name: '마음여행 (보드게임, 영문판)', desc: '감정 소통 보드게임 (영문판)', icon: '🌐' },
+  // { code: '04', name: '키링', desc: '심스페이스 공식 키링', icon: '🔑' },
+  // { code: '05', name: '마인드스튜디오', desc: '마음 성장 워크숍 & 프로그램', icon: '🎨' },
 ];
 
 // ── 타입 ──────────────────────────────────────────
@@ -468,7 +469,10 @@ export default function Order() {
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {/* 새롭게 견적알아보기 */}
-              <button type="button" onClick={() => setMode('product-select')}
+              <button type="button" onClick={() => {
+                setSelectedProduct(PRODUCTS[0]);
+                PRODUCTS.length === 1 ? (setMode('new'), setStep(1)) : setMode('product-select');
+              }}
                 className="group bg-white rounded-2xl border-2 border-border hover:border-primary shadow-sm p-6 text-left transition-all hover:shadow-md">
                 <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/15 transition-colors">
                   <School className="h-6 w-6 text-primary" />
