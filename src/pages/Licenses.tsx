@@ -8,9 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
-import { Search, ChevronRight, RefreshCw, ExternalLink, Send, Download, Upload as UploadIcon, CheckCircle2, XCircle, Loader2, Info, Users } from 'lucide-react';
+import { Search, ChevronRight, RefreshCw, ExternalLink, Send, Download, Upload as UploadIcon, CheckCircle2, XCircle, Loader2, Info, Users, Trash2 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { getAllLicenses, updateLicenseStatus, updateLicenseDeal, attachCouponToDeal, DealLicenseRecord, LicenseStatus, saveDealLicenses } from '@/lib/storage';
+import { getAllLicenses, updateLicenseStatus, updateLicenseDeal, attachCouponToDeal, deleteDealLicense, hideMdiaryCoupon, DealLicenseRecord, LicenseStatus, saveDealLicenses } from '@/lib/storage';
 import { toast } from 'sonner';
 import { useDeals } from '@/hooks/use-airtable';
 import { airtable } from '@/lib/airtable';
@@ -25,9 +25,10 @@ const STATUS_META: Record<LicenseStatus, { label: string; color: string }> = {
   사용중: { label: '사용중', color: 'bg-teal-100 text-teal-700'    },
   만료:   { label: '만료',   color: 'bg-orange-100 text-orange-700' },
   이탈:   { label: '이탈',   color: 'bg-red-100 text-red-700'      },
+  삭제:   { label: '삭제',   color: 'bg-zinc-100 text-zinc-400 line-through' },
 };
 
-const PIPELINE: LicenseStatus[] = ['대기', '사용중', '만료', '이탈'];
+const PIPELINE: LicenseStatus[] = ['대기', '사용중', '만료', '이탈', '삭제'];
 
 // ── 이용권 발송 다이얼로그 ────────────────────────
 
@@ -249,8 +250,17 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
     duration: '12', user_count: '40', coupon_code: '', status: 'pending',
   }]);
 
+  const formatPhone = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 11);
+    if (digits.length <= 3) return digits;
+    if (digits.length <= 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  };
+
   const updateRecipient = (i: number, key: keyof Recipient, val: string) =>
-    setRecipients(prev => prev.map((r, idx) => idx === i ? { ...r, [key]: val } : r));
+    setRecipients(prev => prev.map((r, idx) =>
+      idx === i ? { ...r, [key]: key === 'contact_phone' ? formatPhone(val) : val } : r
+    ));
 
   const removeRecipient = (i: number) =>
     setRecipients(prev => prev.filter((_, idx) => idx !== i));
@@ -268,8 +278,9 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
       const r = updated[i];
       if (r.status === 'done') continue;
 
-      // 수신자별 description: [기본명] [학교/기관] [이름]
-      const descParts = [baseName, r.org_name, r.contact_name].filter(Boolean);
+      // 수신자별 description: [기본명] [학교/기관(중복 제외)] [이름]
+      const orgPart = r.org_name && r.org_name !== baseName ? r.org_name : null;
+      const descParts = [baseName, orgPart, r.contact_name].filter(Boolean);
       const description = (descParts.length > 0 ? descParts.join(' ') : baseName) + ' ' + suffix;
 
       // 1. 쿠폰 생성 (코드가 이미 있으면 스킵)
@@ -622,6 +633,7 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
 // 클라이언트 사이드 상태 계산 (Supabase 저장값 기준)
 function computeStatus(lic: DealLicenseRecord): LicenseStatus {
   if (lic.status === '이탈') return '이탈'; // 수동 설정값 유지
+  if (lic.status === '삭제') return '삭제'; // 운영DB 삭제 — 유지
   if (lic.status === '대기')  return '대기';
   // 사용중/만료: service_expire_at으로 재계산
   if (lic.service_expire_at) {
@@ -764,6 +776,7 @@ export default function Licenses() {
       const PAGE = 15;
       let offset = 0;
       let totalUpdated = 0;
+      let totalDeleted = 0;
       let totalCount = 0;
       while (true) {
         const syncRes = await fetch(`${SUPABASE_URL}/functions/v1/get-coupon-status`, {
@@ -774,6 +787,7 @@ export default function Licenses() {
         if (!syncRes.ok) throw new Error(`동기화 실패: ${syncRes.status}`);
         const data = await syncRes.json();
         totalUpdated += data.updated ?? 0;
+        totalDeleted += data.deleted ?? 0;
         totalCount    = data.total   ?? totalCount;
         if (!data.hasMore) break;
         offset += PAGE;
@@ -783,6 +797,7 @@ export default function Licenses() {
       const parts: string[] = [];
       if (inserted > 0) parts.push(`새 쿠폰 ${inserted}건 추가`);
       parts.push(`${totalCount}건 조회 · ${totalUpdated}건 업데이트`);
+      if (totalDeleted > 0) parts.push(`${totalDeleted}건 삭제 감지`);
       toast.success(`운영DB 동기화 완료 — ${parts.join(' · ')}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '동기화 실패');
@@ -802,6 +817,8 @@ export default function Licenses() {
   const [statusFilter, setStatusFilter] = useState<'all' | LicenseStatus>('all');
   const [linkingId, setLinkingId]       = useState<string | null>(null);
   const [linkingDealId, setLinkingDealId] = useState('');
+  const [checkedIds, setCheckedIds]     = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [linkLoading, setLinkLoading]   = useState(false);
 
   const { data: deals } = useDeals();
@@ -854,6 +871,32 @@ export default function Licenses() {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (checkedIds.size === 0) return;
+    if (!confirm(`선택한 ${checkedIds.size}건의 이용권을 목록에서 삭제하시겠습니까?`)) return;
+    setBulkDeleting(true);
+    try {
+      const ids = [...checkedIds];
+      await Promise.all(ids.map(async id => {
+        const lic = all.find(l => l.id === id);
+        if (!lic) return;
+        if (id.startsWith('mdiary_')) {
+          // mdiary 전용 레코드 → link_confirmed=false 로 숨김
+          await hideMdiaryCoupon(lic.coupon_code);
+        } else {
+          await deleteDealLicense(id);
+        }
+      }));
+      setCheckedIds(new Set());
+      qc.invalidateQueries({ queryKey: ['licenses'] });
+      toast.success(`${ids.length}건 삭제 완료`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '삭제 실패');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   if (isLoading) return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold">이용권 관리</h1>
@@ -875,13 +918,19 @@ export default function Licenses() {
           </p>
         </div>
         <div className="flex gap-2">
+          {canEdit && checkedIds.size > 0 && (
+            <Button size="sm" variant="destructive" onClick={handleBulkDelete} disabled={bulkDeleting}>
+              {bulkDeleting ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
+              선택 삭제 ({checkedIds.size}건)
+            </Button>
+          )}
           {canEdit && (
             <Button size="sm" onClick={() => setSendDialogOpen(true)}>
               <Send className="h-4 w-4 mr-1.5" />이용권 발송
             </Button>
           )}
           <Button size="sm" variant="outline" onClick={handleAutoMatch}
-            disabled={autoMatching || autoDealLinking || syncing}
+            disabled={autoMatching || syncing}
             title="Airtable 고객과 자동 매칭 · 미등록 사용자 신규 등록">
             <Users className={`h-4 w-4 mr-1.5 ${autoMatching ? 'animate-pulse' : ''}`} />
             {autoMatching ? autoMatchProgress || '매칭 중...' : '고객 자동 매칭'}
@@ -969,6 +1018,16 @@ export default function Licenses() {
           <table className="w-full text-sm table-fixed">
             <thead className="sticky top-0 z-10">
               <tr className="border-b border-border bg-muted/60 backdrop-blur">
+                {canEdit && (
+                  <th className="px-3 py-3 w-8">
+                    <input type="checkbox" className="rounded border-border"
+                      checked={filtered.length > 0 && filtered.every(l => checkedIds.has(l.id))}
+                      onChange={e => {
+                        if (e.target.checked) setCheckedIds(new Set(filtered.map(l => l.id)));
+                        else setCheckedIds(new Set());
+                      }} />
+                  </th>
+                )}
                 {['상태', '쿠폰 코드', '담당자', '학교/기관', '전화번호', '기간', '만료일', '딜'].map(h => (
                   <th key={h} style={{ width: colW[h] }}
                     className="relative px-4 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">
@@ -982,7 +1041,7 @@ export default function Licenses() {
             <tbody className="divide-y divide-border">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                  <td colSpan={canEdit ? 9 : 8} className="px-4 py-12 text-center text-muted-foreground text-sm">
                     {all.length === 0
                       ? '이용권이 없습니다. 딜에서 이용권 템플릿을 업로드하면 자동으로 등록됩니다.'
                       : '검색 결과가 없습니다.'}
@@ -992,8 +1051,21 @@ export default function Licenses() {
                 const today = new Date().toISOString().split('T')[0];
                 const isExpired = lic.service_expire_at && lic.service_expire_at < today;
                 const meta = STATUS_META[lic.displayStatus];
+                const isChecked = checkedIds.has(lic.id);
                 return (
-                  <tr key={lic.id} className="hover:bg-muted/30 transition-colors">
+                  <tr key={lic.id} className={`hover:bg-muted/30 transition-colors ${isChecked ? 'bg-primary/5' : ''}`}>
+                    {canEdit && (
+                      <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" className="rounded border-border"
+                          checked={isChecked}
+                          onChange={e => setCheckedIds(prev => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(lic.id);
+                            else next.delete(lic.id);
+                            return next;
+                          })} />
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
                         <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${meta.color}`}>

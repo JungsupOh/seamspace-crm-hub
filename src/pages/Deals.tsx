@@ -114,27 +114,16 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-// ── 날짜 입력 (YYYYMMDD → YYYY-MM-DD 자동변환) ──
+// ── 날짜 입력 (달력 피커) ──────────────────────────
 function DateInput({ value, onChange, className }: {
   value?: string; onChange: (v: string) => void; className?: string;
 }) {
-  const [raw, setRaw] = useState(value ?? '');
-  useEffect(() => { setRaw(value ?? ''); }, [value]);
-
-  const normalize = (s: string) => {
-    const d = s.replace(/\D/g, '');
-    if (d.length === 8) return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`;
-    return s;
-  };
-
   return (
     <Input
-      type="text"
-      value={raw}
-      onChange={e => setRaw(e.target.value)}
-      onBlur={() => { const v = normalize(raw); setRaw(v); onChange(v); }}
+      type="date"
+      value={value ?? ''}
+      onChange={e => onChange(e.target.value)}
       className={className}
-      placeholder="YYYY-MM-DD"
     />
   );
 }
@@ -1465,20 +1454,38 @@ function DealForm({
 }
 
 // ── 견적 추가/편집 다이얼로그 ──────────────────────
+// 견적서 번호 자동 생성: YYYY-01-NNN (01 = AI마음일기)
+function generateQuoteNumber(existingNumbers: string[]): string {
+  const year = new Date().getFullYear();
+  const prefix = `${year}-01-`;
+  const max = existingNumbers
+    .filter(n => n?.startsWith(prefix))
+    .map(n => parseInt(n.slice(prefix.length), 10))
+    .filter(n => !isNaN(n))
+    .reduce((a, b) => Math.max(a, b), 0);
+  return `${prefix}${String(max + 1).padStart(3, '0')}`;
+}
+
 function QuoteDialog({
-  open, onClose, dealId, quote, onSaved,
+  open, onClose, dealId, quote, onSaved, existingNumbers,
 }: {
   open: boolean;
   onClose: () => void;
   dealId: string;
   quote?: DealQuote | null;
   onSaved: (q: DealQuote) => void;
+  existingNumbers: string[];
 }) {
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<Partial<DealQuote>>(
-    quote ?? {}
-  );
-  useEffect(() => { setForm(quote ?? {}); }, [quote, open]);
+  const [form, setForm] = useState<Partial<DealQuote>>(quote ?? {});
+  useEffect(() => {
+    if (quote) {
+      setForm(quote);
+    } else {
+      // 새 견적 — 번호 자동 생성
+      setForm({ quote_number: generateQuoteNumber(existingNumbers) });
+    }
+  }, [quote, open]);
 
   const up = (k: keyof DealQuote, v: unknown) => setForm(p => ({ ...p, [k]: v }));
   const n = (k: keyof DealQuote) => (form[k] as string) ?? '';
@@ -1534,7 +1541,7 @@ function QuoteDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label className="text-xs">견적일</Label>
-              <Input value={n('quote_date')} onChange={e => up('quote_date', e.target.value)} className="h-8 text-sm" placeholder="YYYY-MM-DD" />
+              <Input type="date" value={n('quote_date')} onChange={e => up('quote_date', e.target.value)} className="h-8 text-sm" />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">견적서 번호</Label>
@@ -1542,18 +1549,38 @@ function QuoteDialog({
             </div>
             <div className="col-span-2 space-y-1">
               <Label className="text-xs">플랜</Label>
-              <div className="flex flex-wrap gap-1.5">
-                {['학급플랜', '학년플랜', '학교(소)', '학교(중)', '학교(대)'].map(p => (
-                  <button key={p} type="button" onClick={() => up('plan', p)}
-                    className={`text-xs rounded-md px-2.5 py-1 border transition-colors
-                      ${n('plan') === p ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50 text-muted-foreground'}`}>
-                    {p}
-                  </button>
-                ))}
-              </div>
+              {(() => {
+                const PLAN_CAP: Record<string, number> = {
+                  '학급플랜': 40, '학년플랜': 200, '학교(소)': 500, '학교(중)': 1000, '학교(대)': Infinity,
+                };
+                const cap = PLAN_CAP[n('plan')] ?? 0;
+                const totalQty = num('qty') ?? 0;
+                const planCount = cap > 0 && cap < Infinity ? Math.ceil(totalQty / cap) : null;
+                return (
+                  <div className="flex items-start gap-3">
+                    <div className="flex flex-wrap gap-1.5 flex-1">
+                      {['학급플랜', '학년플랜', '학교(소)', '학교(중)', '학교(대)'].map(p => (
+                        <button key={p} type="button" onClick={() => up('plan', p)}
+                          className={`text-xs rounded-md px-2.5 py-1 border transition-colors
+                            ${n('plan') === p ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50 text-muted-foreground'}`}>
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                    {n('plan') && (
+                      <div className="shrink-0 text-right">
+                        <div className="text-[10px] text-muted-foreground">플랜별 수량</div>
+                        <div className="text-sm font-semibold text-primary">
+                          {planCount != null ? `${planCount}개` : '무제한'}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">수량 (명)</Label>
+              <Label className="text-xs">총인원 (명)</Label>
               <NumericInput value={num('qty')} onChange={v => up('qty', v)} className="h-8 text-sm" />
             </div>
             <div className="space-y-1">
@@ -1625,6 +1652,8 @@ export default function Deals() {
   const [autoDealLinkResult, setAutoDealLinkResult] = useState<{
     linked: number; skipped_multi: number; skipped_no_match: number;
   } | null>(null);
+  const [checkedIds, setCheckedIds]         = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting]     = useState(false);
   const [stageSyncing, setStageSyncing] = useState(false);
   const [stageSyncResult, setStageSyncResult] = useState<{
     updated: number;
@@ -1636,8 +1665,15 @@ export default function Deals() {
   const [editingQuote, setEditingQuote]     = useState<DealQuote | null>(null);
   const [periodFilter, setPeriodFilter]     = useState(String(new Date().getFullYear()));
   const { widths: colW, startResize } = useResizableColumns('deals_col_widths', {
-    담당자: 130, '학교/기관': 140, 유형: 72, 스테이지: 80, 실결제금액: 100, 계약일: 90, 만료일: 90, 구매처: 90, '📎': 36,
+    견적번호: 120, 담당자: 130, '학교/기관': 140, 유형: 72, 스테이지: 80, 실결제금액: 100, 계약일: 90, 만료일: 90, 구매처: 90, '📎': 36,
   });
+  // 고정 열 sticky left 오프셋 (체크박스 32px + 각 열 너비 누적)
+  const CHECKBOX_W = 32;
+  const stickyLeft = {
+    견적번호: canEdit ? CHECKBOX_W : 0,
+    담당자:   canEdit ? CHECKBOX_W + (colW['견적번호'] ?? 120) : (colW['견적번호'] ?? 120),
+    '학교/기관': canEdit ? CHECKBOX_W + (colW['견적번호'] ?? 120) + (colW['담당자'] ?? 130) : (colW['견적번호'] ?? 120) + (colW['담당자'] ?? 130),
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 딜 선택 시 파일 + 이용권 + 비교 견적 목록 fetch
@@ -1957,6 +1993,23 @@ export default function Deals() {
     toast.success('딜이 삭제되었습니다');
   };
 
+  const handleBulkDelete = async () => {
+    if (checkedIds.size === 0) return;
+    setBulkDeleting(true);
+    try {
+      await Promise.all([...checkedIds].map(id => deleteDeal.mutateAsync(id)));
+      toast.success(`${checkedIds.size}개 딜 삭제 완료`);
+      setCheckedIds(new Set());
+      if (selected && checkedIds.has(selected.id)) {
+        setSheetOpen(false); setSelected(null);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '삭제 실패');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   // 딜 저장 + 파일 업로드 + 이용권 고객 등록
   const handleSave = async (
     fields: Partial<DealFields>,
@@ -2213,6 +2266,12 @@ export default function Deals() {
               {stageSyncing ? '동기화 중...' : '고객 스테이지 동기화'}
             </Button>
           )}
+          {canEdit && checkedIds.size > 0 && (
+            <Button size="sm" variant="destructive" onClick={handleBulkDelete} disabled={bulkDeleting}>
+              {bulkDeleting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1" />}
+              선택 삭제 ({checkedIds.size}건)
+            </Button>
+          )}
           {canEdit && (
             <Button size="sm" onClick={() => { setSelected(null); setEditMode('add'); setDialogOpen(true); }}>
               <Plus className="h-4 w-4 mr-1" />딜 추가
@@ -2356,7 +2415,21 @@ export default function Deals() {
           <table className="w-full text-sm table-fixed">
             <thead className="sticky top-0 z-10">
               <tr className="border-b border-border bg-muted/60 backdrop-blur">
+                {canEdit && (
+                  <th className="px-3 py-3 w-8 bg-muted/60" style={{ position: 'sticky', left: 0, zIndex: 2 }}>
+                    <input
+                      type="checkbox"
+                      className="rounded border-border"
+                      checked={sorted.length > 0 && sorted.every(d => checkedIds.has(d.id))}
+                      onChange={e => {
+                        if (e.target.checked) setCheckedIds(new Set(sorted.map(d => d.id)));
+                        else setCheckedIds(new Set());
+                      }}
+                    />
+                  </th>
+                )}
                 {([
+                  { label: '견적번호',   field: 'Quote_Number'         },
                   { label: '담당자',     field: 'Contact_Name'         },
                   { label: '학교/기관',  field: 'Org_Name'             },
                   { label: '유형',       field: null                   },
@@ -2366,10 +2439,15 @@ export default function Deals() {
                   { label: '만료일',     field: 'Renewal_Date'         },
                   { label: '구매처',     field: null                   },
                   { label: '📎',         field: null                   },
-                ] as { label: string; field: string | null }[]).map(({ label, field }) => (
+                ] as { label: string; field: string | null }[]).map(({ label, field }) => {
+                  const isSticky = label in stickyLeft;
+                  return (
                   <th key={label} onClick={() => field && handleSort(field)}
-                    style={{ width: colW[label] }}
-                    className={`relative px-4 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap select-none
+                    style={{
+                      width: colW[label],
+                      ...(isSticky ? { position: 'sticky', left: stickyLeft[label as keyof typeof stickyLeft], zIndex: 2 } : {}),
+                    }}
+                    className={`relative px-4 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap select-none bg-muted/60
                       ${field ? 'cursor-pointer hover:text-foreground' : ''}`}>
                     <span className="inline-flex items-center gap-1">
                       {label}
@@ -2380,25 +2458,52 @@ export default function Deals() {
                     <div onMouseDown={e => startResize(label, e)}
                       className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/40 z-10" />
                   </th>
-                ))}
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
               {sorted.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">딜이 없습니다.</td></tr>
+                <tr><td colSpan={canEdit ? 11 : 10} className="px-4 py-10 text-center text-muted-foreground">딜이 없습니다.</td></tr>
               ) : sorted.map(d => {
                 const fileCount = d.fields.Notes ? parseFileLinks(d.fields.Notes).length : 0;
+                const isChecked = checkedIds.has(d.id);
                 return (
                   <tr key={d.id}
                     onClick={() => { setSelected(d); setConfirmDelete(false); setSheetOpen(true); }}
-                    className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer transition-colors">
-                    <td className="px-4 py-2.5 overflow-hidden">
+                    className={`border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer transition-colors ${isChecked ? 'bg-primary/5' : ''}`}>
+                    {canEdit && (
+                      <td className="px-3 py-2.5 bg-background" style={{ position: 'sticky', left: 0, zIndex: 1 }} onClick={e => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          className="rounded border-border"
+                          checked={isChecked}
+                          onChange={e => {
+                            setCheckedIds(prev => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(d.id);
+                              else next.delete(d.id);
+                              return next;
+                            });
+                          }}
+                        />
+                      </td>
+                    )}
+                    <td className={`px-4 py-2.5 text-xs font-mono text-muted-foreground whitespace-nowrap ${isChecked ? 'bg-primary/5' : 'bg-background'}`}
+                      style={{ position: 'sticky', left: stickyLeft['견적번호'], zIndex: 1 }}>
+                      {d.fields.Quote_Number || '-'}
+                    </td>
+                    <td className={`px-4 py-2.5 overflow-hidden ${isChecked ? 'bg-primary/5' : 'bg-background'}`}
+                      style={{ position: 'sticky', left: stickyLeft['담당자'], zIndex: 1 }}>
                       <p className="font-medium truncate">{d.fields.Contact_Name || '-'}</p>
                       {d.fields.Contact_Phone && (
                         <p className="text-xs text-muted-foreground tabular-nums truncate">{d.fields.Contact_Phone}</p>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-muted-foreground truncate overflow-hidden">{d.fields.Org_Name}</td>
+                    <td className={`px-4 py-2.5 text-xs text-muted-foreground truncate overflow-hidden ${isChecked ? 'bg-primary/5' : 'bg-background'}`}
+                      style={{ position: 'sticky', left: stickyLeft['학교/기관'], zIndex: 1 }}>
+                      {d.fields.Org_Name}
+                    </td>
                     <td className="px-4 py-2.5">
                       <span className={`text-xs rounded-full px-2 py-0.5 ${d.fields.Deal_Type === 'Renewal' ? 'bg-orange-100 text-orange-700' : 'bg-muted text-muted-foreground'}`}>
                         {d.fields.Deal_Type === 'Renewal' ? '재구매' : '신규'}
@@ -2836,6 +2941,7 @@ export default function Deals() {
           onClose={() => { setQuoteDialogOpen(false); setEditingQuote(null); }}
           dealId={selected.id}
           quote={editingQuote}
+          existingNumbers={(deals ?? []).flatMap(d => d.fields.Quote_Number ? [d.fields.Quote_Number] : [])}
           onSaved={q => {
             setDealQuotes(prev => {
               const idx = prev.findIndex(dq => dq.id === q.id);
