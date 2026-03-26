@@ -13,6 +13,9 @@ import Licenses from "./pages/Licenses";
 import Upload from "./pages/Upload";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
+import Order from "./pages/Order";
+import OrderComplete from "./pages/OrderComplete";
+import OrderFail from "./pages/OrderFail";
 import ChangePassword from "./pages/ChangePassword";
 import Users from "./pages/Users";
 
@@ -84,6 +87,9 @@ function AppRoutes() {
     <Routes>
       {/* Public routes */}
       <Route path="/login" element={<Login />} />
+      <Route path="/order" element={<Order />} />
+      <Route path="/order/complete" element={<OrderComplete />} />
+      <Route path="/order/fail" element={<OrderFail />} />
 
       {/* Change password - requires auth but not full layout */}
       <Route
