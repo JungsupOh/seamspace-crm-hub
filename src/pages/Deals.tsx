@@ -1777,6 +1777,7 @@ export default function Deals() {
     Org_Name:             d => d.fields.Org_Name ?? '',
     Final_Contract_Value: d => String(d.fields.Final_Contract_Value ?? 0).padStart(12, '0'),
     Contract_Date:        d => d.fields.Contract_Date ?? d.fields.Order_Date ?? '',
+    Payment_Date:         d => d.fields.Payment_Date ?? '',
     Renewal_Date:         d => d.fields.Renewal_Date ?? '',
   };
   const sorted = [...filtered].sort((a, b) => {
@@ -2436,7 +2437,7 @@ export default function Deals() {
                   { label: '스테이지',   field: null                   },
                   { label: '실결제금액', field: 'Final_Contract_Value' },
                   { label: '계약일',     field: 'Contract_Date'        },
-                  { label: '만료일',     field: 'Renewal_Date'         },
+                  { label: '입금일',     field: 'Payment_Date'         },
                   { label: '구매처',     field: null                   },
                   { label: '📎',         field: null                   },
                 ] as { label: string; field: string | null }[]).map(({ label, field }) => {
@@ -2516,7 +2517,7 @@ export default function Deals() {
                         : '-'}
                     </td>
                     <td className="px-4 py-2.5 text-xs tabular-nums text-muted-foreground">{d.fields.Contract_Date || d.fields.Order_Date}</td>
-                    <td className="px-4 py-2.5 text-xs tabular-nums text-muted-foreground">{d.fields.Renewal_Date}</td>
+                    <td className="px-4 py-2.5 text-xs tabular-nums text-muted-foreground">{d.fields.Payment_Date}</td>
                     <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[100px] truncate">{d.fields.Lead_Source}</td>
                     <td className="px-4 py-2.5">
                       {fileCount > 0 && (

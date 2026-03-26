@@ -94,7 +94,7 @@ export async function deleteDealFileRecord(id: string): Promise<void> {
 // 이용권 발급 수량만큼 각 코드를 '대기' 상태로 등록
 // 실제 사용 여부는 추후 서비스 DB 연동으로 조회
 
-export type LicenseStatus = '대기' | '사용중' | '만료' | '이탈';
+export type LicenseStatus = '대기' | '사용중' | '만료' | '이탈' | '삭제';
 
 export interface DealLicenseRecord {
   id: string;
@@ -272,6 +272,24 @@ export async function selectDealQuote(dealId: string, quoteId: string): Promise<
     headers: DB_HEADERS,
     body: JSON.stringify({ is_selected: true }),
   });
+}
+
+export async function deleteDealLicense(id: string): Promise<void> {
+  const res = await fetch(`${LICENSE_URL}?id=eq.${id}`, {
+    method: 'DELETE',
+    headers: DB_HEADERS,
+  });
+  if (!res.ok) throw new Error(`이용권 삭제 실패: ${res.status}`);
+}
+
+export async function hideMdiaryCoupon(couponCode: string): Promise<void> {
+  const MDIARY_URL = `${SUPABASE_URL}/rest/v1/mdiary_coupons`;
+  const res = await fetch(`${MDIARY_URL}?coupon_code=eq.${encodeURIComponent(couponCode)}`, {
+    method: 'PATCH',
+    headers: DB_HEADERS,
+    body: JSON.stringify({ link_confirmed: false }),
+  });
+  if (!res.ok) throw new Error(`이용권 숨김 처리 실패: ${res.status}`);
 }
 
 export async function updateLicenseStatus(id: string, status: LicenseStatus): Promise<void> {
