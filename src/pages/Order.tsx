@@ -165,6 +165,18 @@ function SchoolSearch({ onSelect }: { onSelect: (s: SchoolInfo) => void }) {
   );
 }
 
+// ── 상품 코드 ──────────────────────────────────────
+interface ProductDef {
+  code: string; name: string; desc: string; icon: string;
+}
+const PRODUCTS: ProductDef[] = [
+  { code: '01', name: 'AI마음일기',              desc: '학교·기관용 AI 감정일기 서비스',          icon: '📔' },
+  { code: '02', name: '마음여행 (보드게임)',      desc: '감정 소통 보드게임 (한국어판)',             icon: '🎲' },
+  { code: '03', name: '마음여행 (보드게임, 영문판)', desc: '감정 소통 보드게임 (영문판)',            icon: '🌐' },
+  { code: '04', name: '키링',                   desc: '심스페이스 공식 키링',                     icon: '🔑' },
+  { code: '05', name: '마인드스튜디오',          desc: '마음 성장 워크숍 & 프로그램',              icon: '🎨' },
+];
+
 // ── 타입 ──────────────────────────────────────────
 interface OrderInfo {
   school: SchoolInfo | null;
@@ -273,8 +285,9 @@ function TossPaySection({
 
 // ── 메인 컴포넌트 ──────────────────────────────────
 export default function Order() {
-  // 모드: entry | new | quote
-  const [mode, setMode] = useState<'entry' | 'new' | 'quote'>('entry');
+  // 모드: entry | product-select | new | quote
+  const [mode, setMode] = useState<'entry' | 'product-select' | 'new' | 'quote'>('entry');
+  const [selectedProduct, setSelectedProduct] = useState<ProductDef>(PRODUCTS[0]);
 
   // 기관정보 경로 상태
   const [step, setStep] = useState(1);
@@ -353,14 +366,28 @@ export default function Order() {
   const quoteSupply = quoteRecord?.supply_price ?? Math.round(quoteFinal / 1.1);
   const quoteTax = quoteRecord?.tax_amount ?? (quoteFinal - quoteSupply);
 
-  // 견적 Supabase 저장
+  // 견적 Supabase 저장 (형식: YYYY-상품코드-순번)
   const saveWebQuote = async (): Promise<string | null> => {
     const today = new Date().toISOString().slice(0, 10);
-    const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
-    const qNum = `WEB-${today.replace(/-/g, '')}-${rand}`;
+    const year = today.slice(0, 4);
+    const pCode = selectedProduct.code;
+    const prefix = `${year}-${pCode}-`;
     setSavingQuote(true);
     try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/deal_quotes`, {
+      // 현재 연도+상품코드의 최대 순번 조회
+      const seqRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=like.${encodeURIComponent(prefix + '%')}&select=quote_number&order=quote_number.desc&limit=1`,
+        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+      );
+      const seqData: { quote_number: string }[] = await seqRes.json();
+      let seq = 1;
+      if (Array.isArray(seqData) && seqData.length > 0) {
+        const lastSeq = parseInt(seqData[0].quote_number.split('-')[2] ?? '0', 10);
+        if (!isNaN(lastSeq)) seq = lastSeq + 1;
+      }
+      const qNum = `${prefix}${String(seq).padStart(4, '0')}`;
+
+      const saveRes = await fetch(`${SUPABASE_URL}/rest/v1/deal_quotes`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${SUPABASE_KEY}`,
@@ -370,18 +397,18 @@ export default function Order() {
         },
         body: JSON.stringify({
           quote_number: qNum,
-          plan: activePlan.label,
+          plan: selectedProduct.code === '01' ? activePlan.label : selectedProduct.name,
           qty: info.qty,
-          duration: info.months,
-          unit_price: unitPrice,
-          supply_price: supply,
-          tax_amount: tax,
-          final_value: total,
+          duration: selectedProduct.code === '01' ? info.months : undefined,
+          unit_price: selectedProduct.code === '01' ? unitPrice : undefined,
+          supply_price: selectedProduct.code === '01' ? supply : undefined,
+          tax_amount: selectedProduct.code === '01' ? tax : undefined,
+          final_value: selectedProduct.code === '01' ? total : undefined,
           quote_date: today,
-          notes: `[웹주문] 기관: ${info.orgName} / 담당자: ${info.contactName} / 연락처: ${info.phone}${info.email ? ` / 이메일: ${info.email}` : ''}`,
+          notes: `[웹주문] 상품: 심스페이스-${selectedProduct.name} / 기관: ${info.orgName} / 담당자: ${info.contactName} / 연락처: ${info.phone}${info.email ? ` / 이메일: ${info.email}` : ''}`,
         }),
       });
-      if (res.ok || res.status === 201) {
+      if (saveRes.ok || saveRes.status === 201) {
         setSavedQuoteNum(qNum);
         return qNum;
       }
@@ -397,7 +424,7 @@ export default function Order() {
     setMode('entry'); setStep(1); setStep3('choose');
     setQuoteRecord(null); setQuoteNum(''); setQuoteError('');
     setQuoteReadyToPay(false); setQuoteContact({ name: '', phone: '', email: '' });
-    setSavedQuoteNum(null);
+    setSavedQuoteNum(null); setSelectedProduct(PRODUCTS[0]);
   };
 
   return (
@@ -407,7 +434,8 @@ export default function Order() {
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             {mode !== 'entry' && (
-              <button type="button" onClick={goEntry}
+              <button type="button"
+                onClick={mode === 'product-select' ? () => setMode('entry') : goEntry}
                 className="mr-1 p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground">
                 <ArrowLeft className="h-4 w-4" />
               </button>
@@ -440,7 +468,7 @@ export default function Order() {
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {/* 새롭게 견적알아보기 */}
-              <button type="button" onClick={() => { setMode('new'); setStep(1); }}
+              <button type="button" onClick={() => setMode('product-select')}
                 className="group bg-white rounded-2xl border-2 border-border hover:border-primary shadow-sm p-6 text-left transition-all hover:shadow-md">
                 <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/15 transition-colors">
                   <School className="h-6 w-6 text-primary" />
@@ -469,6 +497,41 @@ export default function Order() {
             <div className="text-center text-xs text-muted-foreground space-y-1 pt-4">
               <p>구매 관련 문의: 042-864-5566 · contact@tebahsoft.com</p>
             </div>
+          </div>
+        )}
+
+        {/* ══ 상품 선택 ════════════════════════════════ */}
+        {mode === 'product-select' && (
+          <div className="space-y-6">
+            <div className="text-center">
+              <h1 className="text-xl font-bold mb-1">상품 선택</h1>
+              <p className="text-sm text-muted-foreground">견적을 받을 상품을 선택해 주세요.</p>
+            </div>
+            <div className="grid grid-cols-1 gap-3">
+              {PRODUCTS.map(p => (
+                <button key={p.code} type="button"
+                  onClick={() => {
+                    setSelectedProduct(p);
+                    setMode('new'); setStep(1);
+                  }}
+                  className="group bg-white rounded-2xl border-2 border-border hover:border-primary shadow-sm p-4 text-left transition-all hover:shadow-md flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center text-2xl shrink-0 group-hover:bg-primary/10 transition-colors">
+                    {p.icon}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono bg-muted text-muted-foreground px-1.5 py-0.5 rounded">{p.code}</span>
+                      <span className="font-bold text-sm">심스페이스-{p.name}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{p.desc}</p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary shrink-0" />
+                </button>
+              ))}
+            </div>
+            <Button variant="outline" className="w-full h-11" onClick={() => setMode('entry')}>
+              <ArrowLeft className="h-4 w-4 mr-2" />이전
+            </Button>
           </div>
         )}
 
@@ -1022,7 +1085,8 @@ export default function Order() {
                   <div className="flex items-center justify-between border-b pb-4">
                     <div>
                       <h2 className="font-bold text-lg">견 적 서</h2>
-                      <p className="text-xs text-muted-foreground mt-0.5">Tebahsoft, Inc. · 심스페이스</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Tebahsoft, Inc. · 심스페이스-{selectedProduct.name}</p>
+                      {savedQuoteNum && <p className="text-xs font-mono text-primary mt-0.5">{savedQuoteNum}</p>}
                     </div>
                     <div className="text-right text-xs text-muted-foreground">
                       <p>Tebahsoft, Inc.</p>
