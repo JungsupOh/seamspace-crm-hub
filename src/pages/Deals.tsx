@@ -1665,7 +1665,7 @@ export default function Deals() {
   const [editingQuote, setEditingQuote]     = useState<DealQuote | null>(null);
   const [periodFilter, setPeriodFilter]     = useState(String(new Date().getFullYear()));
   const { widths: colW, startResize } = useResizableColumns('deals_col_widths', {
-    견적번호: 120, 담당자: 130, '학교/기관': 140, 유형: 72, 스테이지: 80, 실결제금액: 100, 계약일: 90, 만료일: 90, 구매처: 90, '📎': 36,
+    견적번호: 120, 담당자: 130, '학교/기관': 140, 유형: 72, 스테이지: 80, 실결제금액: 100, 계약일: 90, 입금일: 90, 구매처: 90, '📎': 36,
   });
   // 고정 열 sticky left 오프셋 (체크박스 32px + 각 열 너비 누적)
   const CHECKBOX_W = 32;
