@@ -2413,7 +2413,7 @@ export default function Deals() {
       {/* 테이블 */}
       <div className="surface-card ring-container overflow-hidden">
         <div className="overflow-x-auto max-h-[calc(100vh-320px)] overflow-y-auto">
-          <table className="w-full text-sm table-fixed">
+          <table className="w-full text-sm table-fixed min-w-[900px]">
             <thead className="sticky top-0 z-10">
               <tr className="border-b border-border bg-muted/60 backdrop-blur">
                 {canEdit && (
