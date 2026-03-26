@@ -11,8 +11,8 @@ export default function OrderFail() {
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white flex flex-col">
       <header className="border-b bg-white/80 backdrop-blur">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-sm">m</div>
-          <span className="font-semibold text-base">mDiary for Schools</span>
+          <img src="/logo2.png" alt="Seamspace" className="h-8 w-auto" />
+          <span className="font-semibold text-base">심스페이스</span>
         </div>
       </header>
 

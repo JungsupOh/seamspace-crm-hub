@@ -298,6 +298,10 @@ export default function Order() {
   const [quoteContact, setQuoteContact] = useState({ name: '', phone: '', email: '' });
   const [quoteReadyToPay, setQuoteReadyToPay] = useState(false);
 
+  // 새 견적 저장 상태
+  const [savedQuoteNum, setSavedQuoteNum] = useState<string | null>(null);
+  const [savingQuote, setSavingQuote] = useState(false);
+
   // 계산값
   const activePlan = PLANS.find(p => p.id === info.planId) ?? PLANS[1];
   const { price: unitPrice, isEvent: priceIsEvent } = getUnitPrice(info.months, info.planId);
@@ -349,10 +353,51 @@ export default function Order() {
   const quoteSupply = quoteRecord?.supply_price ?? Math.round(quoteFinal / 1.1);
   const quoteTax = quoteRecord?.tax_amount ?? (quoteFinal - quoteSupply);
 
+  // 견적 Supabase 저장
+  const saveWebQuote = async (): Promise<string | null> => {
+    const today = new Date().toISOString().slice(0, 10);
+    const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
+    const qNum = `WEB-${today.replace(/-/g, '')}-${rand}`;
+    setSavingQuote(true);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/deal_quotes`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          apikey: SUPABASE_KEY,
+          'Content-Type': 'application/json',
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify({
+          quote_number: qNum,
+          plan: activePlan.label,
+          qty: info.qty,
+          duration: info.months,
+          unit_price: unitPrice,
+          supply_price: supply,
+          tax_amount: tax,
+          final_value: total,
+          quote_date: today,
+          notes: `[웹주문] 기관: ${info.orgName} / 담당자: ${info.contactName} / 연락처: ${info.phone}${info.email ? ` / 이메일: ${info.email}` : ''}`,
+        }),
+      });
+      if (res.ok || res.status === 201) {
+        setSavedQuoteNum(qNum);
+        return qNum;
+      }
+    } catch (e) {
+      console.error('견적 저장 실패', e);
+    } finally {
+      setSavingQuote(false);
+    }
+    return null;
+  };
+
   const goEntry = () => {
     setMode('entry'); setStep(1); setStep3('choose');
     setQuoteRecord(null); setQuoteNum(''); setQuoteError('');
     setQuoteReadyToPay(false); setQuoteContact({ name: '', phone: '', email: '' });
+    setSavedQuoteNum(null);
   };
 
   return (
@@ -368,7 +413,7 @@ export default function Order() {
               </button>
             )}
             <img src="/logo2.png" alt="Seamspace" className="h-8 w-auto" />
-            <span className="font-semibold text-base">mDiary for Schools</span>
+            <span className="font-semibold text-base">심스페이스</span>
           </div>
           <a href="https://seamspace.co.kr" target="_blank" rel="noopener noreferrer"
             className="text-xs text-muted-foreground hover:text-foreground transition-colors">서비스 소개 →</a>
@@ -389,32 +434,32 @@ export default function Order() {
         {mode === 'entry' && (
           <div className="space-y-8">
             <div className="text-center">
-              <h1 className="text-2xl font-bold mb-2">mDiary 이용권 구매</h1>
+              <h1 className="text-2xl font-bold mb-2">심스페이스 이용권 구매</h1>
               <p className="text-muted-foreground text-sm">학교·기관 전용 구독 서비스입니다.</p>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {/* 기관정보로 시작 */}
+              {/* 새롭게 견적알아보기 */}
               <button type="button" onClick={() => { setMode('new'); setStep(1); }}
                 className="group bg-white rounded-2xl border-2 border-border hover:border-primary shadow-sm p-6 text-left transition-all hover:shadow-md">
                 <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/15 transition-colors">
                   <School className="h-6 w-6 text-primary" />
                 </div>
-                <h2 className="font-bold text-base mb-1">기관정보로 시작</h2>
-                <p className="text-sm text-muted-foreground">기관 정보와 플랜을 선택하면<br />견적서 발송 또는 즉시 결제를<br />선택할 수 있습니다.</p>
+                <h2 className="font-bold text-base mb-1">새롭게 견적알아보기</h2>
+                <p className="text-sm text-muted-foreground">기관 정보와 플랜을 선택하면<br />견적서를 받거나 즉시 결제할<br />수 있습니다.</p>
                 <div className="mt-4 flex items-center gap-1 text-xs text-primary font-medium">
                   시작하기 <ChevronRight className="h-3.5 w-3.5" />
                 </div>
               </button>
 
-              {/* 견적서번호로 결제 */}
+              {/* 받은 견적으로 결제하기 */}
               <button type="button" onClick={() => setMode('quote')}
                 className="group bg-white rounded-2xl border-2 border-border hover:border-primary shadow-sm p-6 text-left transition-all hover:shadow-md">
                 <div className="w-12 h-12 rounded-xl bg-teal-50 flex items-center justify-center mb-4 group-hover:bg-teal-100 transition-colors">
                   <FileText className="h-6 w-6 text-teal-600" />
                 </div>
-                <h2 className="font-bold text-base mb-1">견적서번호로 결제</h2>
-                <p className="text-sm text-muted-foreground">이미 견적서를 받으셨나요?<br />견적서 번호를 조회하면<br />바로 결제할 수 있습니다.</p>
+                <h2 className="font-bold text-base mb-1">받은 견적으로 결제하기</h2>
+                <p className="text-sm text-muted-foreground">견적서 번호가 있으신가요?<br />번호 조회 후 바로 결제할<br />수 있습니다.</p>
                 <div className="mt-4 flex items-center gap-1 text-xs text-teal-600 font-medium">
                   번호 조회하기 <ChevronRight className="h-3.5 w-3.5" />
                 </div>
@@ -458,7 +503,7 @@ export default function Order() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   견적서 번호는 담당자로부터 받은 문서에서 확인하실 수 있습니다.<br />
-                  번호가 없으시다면 <button type="button" onClick={() => setMode('new')} className="underline text-primary">기관정보로 시작</button>해 주세요.
+                  번호가 없으시다면 <button type="button" onClick={() => setMode('new')} className="underline text-primary">새롭게 견적알아보기</button>를 이용해 주세요.
                 </p>
               </div>
             )}
@@ -912,8 +957,13 @@ export default function Order() {
 
                 <div className="flex gap-3">
                   <Button variant="outline" className="flex-1 h-12" onClick={() => setStep(1)}>이전</Button>
-                  <Button className="flex-[2] h-12 text-base" onClick={() => { setStep(3); setStep3('choose'); }}
-                    disabled={aiTab || !unitPrice}>
+                  <Button className="flex-[2] h-12 text-base"
+                    onClick={async () => {
+                      await saveWebQuote();
+                      setStep(3); setStep3('choose');
+                    }}
+                    disabled={aiTab || !unitPrice || savingQuote}>
+                    {savingQuote ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                     다음 <ChevronRight className="h-4 w-4 ml-1" />
                   </Button>
                 </div>
@@ -925,6 +975,12 @@ export default function Order() {
               <div className="space-y-4">
                 <div className="bg-muted/40 rounded-2xl p-5 text-sm space-y-2">
                   <h3 className="font-semibold text-base mb-3">주문 요약</h3>
+                  {savedQuoteNum && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">견적번호</span>
+                      <span className="font-mono font-medium text-primary">{savedQuoteNum}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between"><span className="text-muted-foreground">기관</span><span className="font-medium">{info.orgName}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">담당자</span><span>{info.contactName} · {info.phone}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">플랜</span><span>{activePlan.label} · {info.months}개월{info.qty > 1 ? ` × ${info.qty}장` : ''}</span></div>
@@ -966,7 +1022,7 @@ export default function Order() {
                   <div className="flex items-center justify-between border-b pb-4">
                     <div>
                       <h2 className="font-bold text-lg">견 적 서</h2>
-                      <p className="text-xs text-muted-foreground mt-0.5">Tebahsoft, Inc. · mDiary for Schools</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Tebahsoft, Inc. · 심스페이스</p>
                     </div>
                     <div className="text-right text-xs text-muted-foreground">
                       <p>Tebahsoft, Inc.</p>
@@ -1035,10 +1091,22 @@ export default function Order() {
 
                 <div className="bg-blue-50 rounded-2xl border border-blue-200 p-4 text-sm">
                   <p className="font-medium text-blue-800 mb-1">견적서 번호 안내</p>
-                  <p className="text-blue-700 text-xs">
-                    견적서를 저장하시면, 결제 시 견적서 번호로 바로 결제하실 수 있습니다.<br />
-                    견적서 번호는 담당자 확인 후 별도 안내드립니다. (042-864-5566)
-                  </p>
+                  {savedQuoteNum ? (
+                    <div>
+                      <p className="text-blue-700 text-xs mb-2">아래 번호를 저장해두시면 나중에 결제할 수 있습니다.</p>
+                      <div className="flex items-center gap-2 bg-white rounded-lg px-3 py-2 border border-blue-200">
+                        <span className="font-mono font-bold text-blue-900 text-base tracking-wider">{savedQuoteNum}</span>
+                        <button type="button"
+                          onClick={() => navigator.clipboard.writeText(savedQuoteNum)}
+                          className="ml-auto text-xs text-blue-600 hover:text-blue-800 underline">복사</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-blue-700 text-xs">
+                      견적서를 저장하시면, 결제 시 견적서 번호로 바로 결제하실 수 있습니다.<br />
+                      문의: 042-864-5566
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex gap-3">
