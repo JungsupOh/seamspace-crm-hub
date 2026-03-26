@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { loadPaymentWidget, PaymentWidgetInstance } from '@tosspayments/payment-widget-sdk';
+// Toss Payments widget loaded via CDN (avoids Rollup/Vercel bundling issues)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PaymentWidgetInstance = any;
 import { searchSchools, SchoolInfo } from '@/lib/neis';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -193,15 +195,32 @@ function TossPaySection({
   useEffect(() => {
     setLoading(true);
     const customerKey = `cus_${nanoid(12)}`;
-    loadPaymentWidget(TOSS_CLIENT_KEY, customerKey)
-      .then(async w => {
-        await w.renderPaymentMethods('#toss-pay-widget', { value: amount });
-        const ag = await w.renderAgreement('#toss-agree-widget');
-        setAgreementRef(ag);
-        setPayWidget(w);
-      })
-      .catch(e => console.error('위젯 로드 실패', e))
-      .finally(() => setLoading(false));
+
+    const loadWidget = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const PaymentWidget = (window as any).PaymentWidget;
+      if (!PaymentWidget) { console.error('Toss PaymentWidget not loaded'); setLoading(false); return; }
+      PaymentWidget(TOSS_CLIENT_KEY, customerKey)
+        .then(async (w: PaymentWidgetInstance) => {
+          await w.renderPaymentMethods('#toss-pay-widget', { value: amount });
+          const ag = await w.renderAgreement('#toss-agree-widget');
+          setAgreementRef(ag);
+          setPayWidget(w);
+        })
+        .catch((e: unknown) => console.error('위젯 로드 실패', e))
+        .finally(() => setLoading(false));
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if ((window as any).PaymentWidget) {
+      loadWidget();
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://js.tosspayments.com/v1/payment-widget';
+      script.onload = loadWidget;
+      script.onerror = () => { console.error('Toss script load failed'); setLoading(false); };
+      document.head.appendChild(script);
+    }
   }, []);
 
   useEffect(() => { payWidget?.updateAmount(amount); }, [amount, payWidget]);
