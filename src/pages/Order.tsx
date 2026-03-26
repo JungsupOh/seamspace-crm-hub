@@ -348,7 +348,7 @@ export default function Order() {
                 <ArrowLeft className="h-4 w-4" />
               </button>
             )}
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-sm">m</div>
+            <img src="/logo2.png" alt="Seamspace" className="h-8 w-auto" />
             <span className="font-semibold text-base">mDiary for Schools</span>
           </div>
           <a href="https://seamspace.co.kr" target="_blank" rel="noopener noreferrer"
@@ -403,7 +403,7 @@ export default function Order() {
             </div>
 
             <div className="text-center text-xs text-muted-foreground space-y-1 pt-4">
-              <p>구매 관련 문의: 042-864-5566 · tebahsoft@tebahsoft.com</p>
+              <p>구매 관련 문의: 042-864-5566 · contact@tebahsoft.com</p>
             </div>
           </div>
         )}
@@ -947,10 +947,10 @@ export default function Order() {
                   <div className="flex items-center justify-between border-b pb-4">
                     <div>
                       <h2 className="font-bold text-lg">견 적 서</h2>
-                      <p className="text-xs text-muted-foreground mt-0.5">mDiary for Schools</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Tebahsoft, Inc. · mDiary for Schools</p>
                     </div>
                     <div className="text-right text-xs text-muted-foreground">
-                      <p>씸스페이스(주)</p>
+                      <p>Tebahsoft, Inc.</p>
                       <p>042-864-5566</p>
                       <p>{new Date().toLocaleDateString('ko-KR')}</p>
                     </div>
@@ -1059,13 +1059,17 @@ export default function Order() {
         )}
       </main>
 
-      <footer className="border-t mt-16 py-8 print:hidden">
-        <div className="max-w-2xl mx-auto px-4 text-center text-xs text-muted-foreground space-y-1">
-          <p>씸스페이스(주) · 042-864-5566 · tebahsoft@tebahsoft.com</p>
-          <div className="flex items-center justify-center gap-4 mt-2">
+      <footer className="border-t mt-16 py-10 print:hidden bg-muted/30">
+        <div className="max-w-2xl mx-auto px-4 text-xs text-muted-foreground space-y-1.5">
+          <p className="font-semibold text-foreground/70">Tebahsoft, Inc. (테바소프트 주식회사)</p>
+          <p>대표이사: 오정섭 · 사업자등록번호: 440-87-02207</p>
+          <p>통신판매업 신고번호: 제2022-대전유성-0475호</p>
+          <p>주소: 대전시 유성구 궁동로2번길 81, 107호</p>
+          <p>고객센터: 042-864-5566 · contact@tebahsoft.com</p>
+          <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border">
             <a href="/terms" className="hover:text-foreground transition-colors">이용약관</a>
             <a href="/privacy" className="hover:text-foreground transition-colors">개인정보처리방침</a>
-            <a href="mailto:tebahsoft@tebahsoft.com" className="hover:text-foreground transition-colors">고객문의</a>
+            <a href="mailto:contact@tebahsoft.com" className="hover:text-foreground transition-colors">고객문의</a>
           </div>
         </div>
       </footer>
