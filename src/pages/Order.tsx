@@ -7,10 +7,13 @@ import { Label } from '@/components/ui/label';
 import {
   Search, ChevronRight, CheckCircle2, Loader2,
   School, User, Phone, Mail, Building2, Sparkles, Tag,
+  FileText, CreditCard, ArrowLeft, Printer,
 } from 'lucide-react';
 import { nanoid } from 'nanoid';
 
 const TOSS_CLIENT_KEY = import.meta.env.VITE_TOSS_CLIENT_KEY ?? 'test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 // ── 플랜 정의 ──────────────────────────────────────
 type PlanKey = '학급' | '학년' | '학교(소)' | '학교(중)' | '학교(대)';
@@ -32,7 +35,6 @@ const PLANS: PlanDef[] = [
   { id: '학교(대)', label: '학교 플랜 (대)', shortLabel: '학교(대)', capacity: '무제한',        multiLicense: true },
 ];
 
-// 인원수로 적합 플랜 찾기
 const PLAN_CAPACITY: Record<PlanKey, number> = {
   '학급': 40, '학년': 200, '학교(소)': 500, '학교(중)': 1000, '학교(대)': 99999,
 };
@@ -44,20 +46,17 @@ function recommendPlan(students: number): PlanKey {
   return '학교(대)';
 }
 
-// ── 가격표 (공급가액, VAT 별도) ─────────────────────
+// ── 가격표 ──────────────────────────────────────────
 const REG: Record<number, Record<PlanKey, number>> = {
   1:  { '학급':  40000, '학년':  180000, '학교(소)':  440000, '학교(중)':  850000, '학교(대)':  1200000 },
   4:  { '학급': 150000, '학년':  700000, '학교(소)': 1700000, '학교(중)': 3300000, '학교(대)':  4600000 },
   6:  { '학급': 200000, '학년': 1000000, '학교(소)': 2500000, '학교(중)': 4800000, '학교(대)':  6500000 },
   12: { '학급': 390000, '학년': 1950000, '학교(소)': 4800000, '학교(중)': 9500000, '학교(대)': 11000000 },
 };
-
-// 이벤트 가격 (6개월 / 12개월) — 2026-03-31 까지
 const EVT: Record<number, Record<PlanKey, number>> = {
   6:  { '학급': 180000, '학년':  780000, '학교(소)': 1980000, '학교(중)': 3780000, '학교(대)':  4980000 },
   12: { '학급': 280000, '학년': 1180000, '학교(소)': 2880000, '학교(중)': 5680000, '학교(대)':  6580000 },
 };
-
 const EVENT_END = new Date('2026-04-01');
 const IS_EVENT = new Date() < EVENT_END;
 
@@ -68,19 +67,13 @@ function getUnitPrice(months: number, plan: PlanKey): { price: number; isEvent: 
 
 // ── 스마트 기간 추천 ────────────────────────────────
 interface Suggestion {
-  months: number;
-  total: number;
-  label: string;
-  breakdown: string;
-  isEvent: boolean;
-  recommended: boolean;
+  months: number; total: number; label: string;
+  breakdown: string; isEvent: boolean; recommended: boolean;
 }
 
 function getSuggestions(targetMonths: number, plan: PlanKey): Suggestion[] {
   if (targetMonths <= 0 || targetMonths > 60) return [];
   const periods = [12, 6, 4, 1];
-
-  // DP — 최저 비용 조합 탐색
   const dp: { cost: number; combo: number[] }[] = Array.from(
     { length: targetMonths + 1 }, () => ({ cost: Infinity, combo: [] })
   );
@@ -94,38 +87,26 @@ function getSuggestions(targetMonths: number, plan: PlanKey): Suggestion[] {
       if (c < dp[i].cost) dp[i] = { cost: c, combo: [...dp[i - p].combo, p] };
     }
   }
-
   const results: Suggestion[] = [];
-
-  // 정확한 조합
   if (dp[targetMonths].cost < Infinity) {
     const grouped: Record<number, number> = {};
     for (const m of dp[targetMonths].combo) grouped[m] = (grouped[m] ?? 0) + 1;
     const breakdown = Object.entries(grouped)
       .sort((a, b) => Number(b[0]) - Number(a[0]))
-      .map(([m, q]) => `${m}개월${q > 1 ? ` × ${q}` : ''}`)
-      .join(' + ');
+      .map(([m, q]) => `${m}개월${q > 1 ? ` × ${q}` : ''}`).join(' + ');
     results.push({ months: targetMonths, total: dp[targetMonths].cost, label: `${targetMonths}개월 구성`, breakdown, isEvent: false, recommended: false });
   }
-
-  // 가장 가까운 상위 기간으로 올림 (더 저렴하면 추천)
   for (const roundUp of [6, 12]) {
     if (roundUp > targetMonths) {
       const { price, isEvent } = getUnitPrice(roundUp, plan);
       const exactCost = dp[targetMonths].cost;
       const saving = exactCost < Infinity ? exactCost - price : 0;
-      results.push({
-        months: roundUp,
-        total: price,
-        label: `${roundUp}개월${isEvent ? ' (이벤트)' : ''}`,
+      results.push({ months: roundUp, total: price, label: `${roundUp}개월${isEvent ? ' (이벤트)' : ''}`,
         breakdown: saving > 0 ? `조합 대비 ${fmt(saving)} 절약` : `${roundUp - targetMonths}개월 추가 이용`,
-        isEvent,
-        recommended: saving > 0 || exactCost === Infinity,
-      });
+        isEvent, recommended: saving > 0 || exactCost === Infinity });
       break;
     }
   }
-
   results.sort((a, b) => a.total - b.total);
   if (results.length > 0) results[0].recommended = true;
   return results;
@@ -133,38 +114,12 @@ function getSuggestions(targetMonths: number, plan: PlanKey): Suggestion[] {
 
 function fmt(n: number) { return n.toLocaleString('ko-KR') + '원'; }
 
-// ── 단계 표시 ──────────────────────────────────────
-function StepBar({ step }: { step: number }) {
-  const steps = ['기관 정보', '플랜 선택', '결제'];
-  return (
-    <div className="flex items-center justify-center gap-0 mb-8">
-      {steps.map((s, i) => (
-        <div key={s} className="flex items-center">
-          <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors
-            ${i + 1 === step ? 'bg-primary text-primary-foreground' :
-              i + 1 < step ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'}`}>
-            <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold
-              ${i + 1 === step ? 'bg-white/30' : i + 1 < step ? 'bg-primary text-white' : 'bg-muted-foreground/20'}`}>
-              {i + 1 < step ? '✓' : i + 1}
-            </span>
-            {s}
-          </div>
-          {i < steps.length - 1 && (
-            <ChevronRight className={`h-4 w-4 mx-1 ${i + 1 < step ? 'text-primary' : 'text-muted-foreground/30'}`} />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ── 학교 검색 ──────────────────────────────────────
 function SchoolSearch({ onSelect }: { onSelect: (s: SchoolInfo) => void }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<SchoolInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
-
   const doSearch = async () => {
     if (!q.trim()) return;
     setLoading(true);
@@ -172,7 +127,6 @@ function SchoolSearch({ onSelect }: { onSelect: (s: SchoolInfo) => void }) {
     catch { setResults([]); }
     finally { setLoading(false); }
   };
-
   return (
     <div className="relative">
       <div className="flex gap-2">
@@ -209,83 +163,48 @@ function SchoolSearch({ onSelect }: { onSelect: (s: SchoolInfo) => void }) {
   );
 }
 
-// ── 메인 컴포넌트 ──────────────────────────────────
+// ── 타입 ──────────────────────────────────────────
 interface OrderInfo {
   school: SchoolInfo | null;
-  orgName: string;
-  contactName: string;
-  phone: string;
-  email: string;
-  planId: PlanKey;
-  months: number;
-  qty: number;
+  orgName: string; contactName: string; phone: string; email: string;
+  planId: PlanKey; months: number; qty: number;
+}
+interface QuoteRecord {
+  id: string; deal_id: string; quote_number: string;
+  plan?: string; qty?: number; duration?: number;
+  unit_price?: number; supply_price?: number; tax_amount?: number; final_value?: number;
+  quote_date?: string; notes?: string;
 }
 
 const DEFAULT_MONTHS = IS_EVENT ? 6 : 12;
 
-export default function Order() {
-  const [step, setStep]     = useState(1);
-  const [info, setInfo]     = useState<OrderInfo>({
-    school: null, orgName: '', contactName: '', phone: '', email: '',
-    planId: '학년', months: DEFAULT_MONTHS, qty: 1,
-  });
-  const [showCustom, setShowCustom]     = useState(false);
-  const [customMonths, setCustomMonths] = useState('');
-  const [aiTab, setAiTab]               = useState(false);  // AI추천 탭 활성 여부
-  const [aiStudents, setAiStudents]     = useState('');     // AI추천: 원하는 인원수
-  const [aiMonths, setAiMonths]         = useState('');     // AI추천: 원하는 기간(개월)
-  const [payWidget, setPayWidget]       = useState<PaymentWidgetInstance | null>(null);
-  const [widgetLoading, setWidgetLoading] = useState(false);
+// ── Toss 결제 공통 섹션 ───────────────────────────
+function TossPaySection({
+  amount, orderName, customerName, customerPhone, customerEmail, onBack,
+}: {
+  amount: number; orderName: string; customerName: string;
+  customerPhone: string; customerEmail?: string; onBack: () => void;
+}) {
+  const [payWidget, setPayWidget] = useState<PaymentWidgetInstance | null>(null);
+  const [loading, setLoading] = useState(true);
   const [agreementRef, setAgreementRef] = useState<ReturnType<PaymentWidgetInstance['renderAgreement']> | null>(null);
-  const paymentMethodRef = useRef<HTMLDivElement>(null);
-  const agreementDivRef  = useRef<HTMLDivElement>(null);
-  const orderIdRef       = useRef(nanoid());
+  const orderIdRef = useRef(nanoid());
 
-  const activePlan = PLANS.find(p => p.id === info.planId) ?? PLANS[1];
-  const { price: unitPrice, isEvent: priceIsEvent } = getUnitPrice(info.months, info.planId);
-  const supply = unitPrice * info.qty;
-  const tax    = Math.round(supply * 0.1);
-  const total  = supply + tax;
-
-  const customNum = parseInt(customMonths, 10);
-  const suggestions = (!isNaN(customNum) && customNum > 0) ? getSuggestions(customNum, info.planId) : [];
-
-  // AI추천 계산
-  const aiStudentsNum = parseInt(aiStudents, 10);
-  const aiMonthsNum   = parseInt(aiMonths, 10);
-  const aiRecommendedPlan = (!isNaN(aiStudentsNum) && aiStudentsNum > 0)
-    ? recommendPlan(aiStudentsNum) : null;
-  const aiSuggestions = (aiRecommendedPlan && !isNaN(aiMonthsNum) && aiMonthsNum > 0)
-    ? getSuggestions(aiMonthsNum, aiRecommendedPlan) : [];
-
-  // 결제 위젯 초기화 (step 3 진입 시)
   useEffect(() => {
-    if (step !== 3) return;
-    setWidgetLoading(true);
+    setLoading(true);
     const customerKey = `cus_${nanoid(12)}`;
     loadPaymentWidget(TOSS_CLIENT_KEY, customerKey)
-      .then(async widget => {
-        await widget.renderPaymentMethods('#toss-payment-widget', { value: total });
-        const ag = await widget.renderAgreement('#toss-agreement-widget');
+      .then(async w => {
+        await w.renderPaymentMethods('#toss-pay-widget', { value: amount });
+        const ag = await w.renderAgreement('#toss-agree-widget');
         setAgreementRef(ag);
-        setPayWidget(widget);
+        setPayWidget(w);
       })
       .catch(e => console.error('위젯 로드 실패', e))
-      .finally(() => setWidgetLoading(false));
-  }, [step]);
+      .finally(() => setLoading(false));
+  }, []);
 
-  useEffect(() => {
-    if (!payWidget) return;
-    payWidget.updateAmount(total);
-  }, [total, payWidget]);
-
-  // 플랜 변경 시 qty 리셋
-  const selectPlan = (planId: PlanKey) => {
-    const plan = PLANS.find(p => p.id === planId)!;
-    setInfo(prev => ({ ...prev, planId, qty: 1, months: !plan.multiLicense && showCustom ? DEFAULT_MONTHS : prev.months }));
-    setShowCustom(false);
-    setCustomMonths('');
-  };
+  useEffect(() => { payWidget?.updateAmount(amount); }, [amount, payWidget]);
 
   const handlePay = async () => {
     if (!payWidget) return;
@@ -294,10 +213,10 @@ export default function Order() {
       if (agreed === false) { alert('이용약관에 동의해 주세요.'); return; }
       await payWidget.requestPayment({
         orderId: orderIdRef.current,
-        orderName: `${info.orgName} · ${activePlan.label} ${info.months}개월${info.qty > 1 ? ` × ${info.qty}` : ''}`,
-        customerName: info.contactName,
-        customerEmail: info.email || undefined,
-        customerMobilePhone: info.phone.replace(/\D/g, ''),
+        orderName,
+        customerName,
+        customerEmail: customerEmail || undefined,
+        customerMobilePhone: customerPhone.replace(/\D/g, ''),
         successUrl: `${window.location.origin}/order/complete`,
         failUrl: `${window.location.origin}/order/fail`,
       });
@@ -306,7 +225,116 @@ export default function Order() {
     }
   };
 
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl border shadow-sm p-5">
+        {loading && (
+          <div className="flex items-center justify-center py-16 gap-3 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">결제 모듈 로딩 중...</span>
+          </div>
+        )}
+        <div id="toss-pay-widget" />
+        <div id="toss-agree-widget" className="mt-4" />
+      </div>
+      <div className="flex gap-3">
+        <Button variant="outline" className="flex-1 h-12" onClick={onBack}>이전</Button>
+        <Button className="flex-[2] h-12 text-base font-semibold" onClick={handlePay}
+          disabled={loading || !payWidget}>
+          {fmt(amount)} 결제하기
+        </Button>
+      </div>
+      <p className="text-center text-xs text-muted-foreground px-4">
+        결제 완료 즉시 이용권이 발급되어 입력하신 휴대폰 번호로 발송됩니다.<br />
+        세금계산서가 필요하신 경우 결제 후 별도 신청이 가능합니다.
+      </p>
+    </div>
+  );
+}
+
+// ── 메인 컴포넌트 ──────────────────────────────────
+export default function Order() {
+  // 모드: entry | new | quote
+  const [mode, setMode] = useState<'entry' | 'new' | 'quote'>('entry');
+
+  // 기관정보 경로 상태
+  const [step, setStep] = useState(1);
+  const [info, setInfo] = useState<OrderInfo>({
+    school: null, orgName: '', contactName: '', phone: '', email: '',
+    planId: '학년', months: DEFAULT_MONTHS, qty: 1,
+  });
+  const [aiTab, setAiTab] = useState(false);
+  const [aiStudents, setAiStudents] = useState('');
+  const [aiMonths, setAiMonths] = useState('');
+  const [showCustom, setShowCustom] = useState(false);
+  const [customMonths, setCustomMonths] = useState('');
+  // step 3 선택: choose | quote-preview | pay
+  const [step3, setStep3] = useState<'choose' | 'quote-preview' | 'pay'>('choose');
+
+  // 견적서번호 조회 경로 상태
+  const [quoteNum, setQuoteNum] = useState('');
+  const [quoteRecord, setQuoteRecord] = useState<QuoteRecord | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState('');
+  const [quoteContact, setQuoteContact] = useState({ name: '', phone: '', email: '' });
+  const [quoteReadyToPay, setQuoteReadyToPay] = useState(false);
+
+  // 계산값
+  const activePlan = PLANS.find(p => p.id === info.planId) ?? PLANS[1];
+  const { price: unitPrice, isEvent: priceIsEvent } = getUnitPrice(info.months, info.planId);
+  const supply = unitPrice * info.qty;
+  const tax = Math.round(supply * 0.1);
+  const total = supply + tax;
+
+  const aiStudentsNum = parseInt(aiStudents, 10);
+  const aiMonthsNum   = parseInt(aiMonths, 10);
+  const aiRecommendedPlan = (!isNaN(aiStudentsNum) && aiStudentsNum > 0) ? recommendPlan(aiStudentsNum) : null;
+  const aiSuggestions = (aiRecommendedPlan && !isNaN(aiMonthsNum) && aiMonthsNum > 0)
+    ? getSuggestions(aiMonthsNum, aiRecommendedPlan) : [];
+  const customNum = parseInt(customMonths, 10);
+  const suggestions = (!isNaN(customNum) && customNum > 0) ? getSuggestions(customNum, info.planId) : [];
+
+  const selectPlan = (planId: PlanKey) => {
+    const plan = PLANS.find(p => p.id === planId)!;
+    setInfo(prev => ({ ...prev, planId, qty: 1, months: !plan.multiLicense && showCustom ? DEFAULT_MONTHS : prev.months }));
+    setShowCustom(false); setCustomMonths('');
+  };
+
   const step1Valid = info.orgName.trim() && info.contactName.trim() && info.phone.trim();
+
+  // 견적서 조회
+  const handleQuoteLookup = async () => {
+    if (!quoteNum.trim()) return;
+    setQuoteLoading(true);
+    setQuoteError('');
+    setQuoteRecord(null);
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=eq.${encodeURIComponent(quoteNum.trim())}&select=*`,
+        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+      );
+      const data: QuoteRecord[] = await res.json();
+      if (!Array.isArray(data) || data.length === 0) {
+        setQuoteError('견적서를 찾을 수 없습니다. 번호를 다시 확인해 주세요.');
+      } else {
+        setQuoteRecord(data[0]);
+      }
+    } catch {
+      setQuoteError('조회 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setQuoteLoading(false);
+    }
+  };
+
+  const quoteFinal = quoteRecord?.final_value ?? 0;
+  const quoteSupply = quoteRecord?.supply_price ?? Math.round(quoteFinal / 1.1);
+  const quoteTax = quoteRecord?.tax_amount ?? (quoteFinal - quoteSupply);
+
+  const goEntry = () => {
+    setMode('entry'); setStep(1); setStep3('choose');
+    setQuoteRecord(null); setQuoteNum(''); setQuoteError('');
+    setQuoteReadyToPay(false); setQuoteContact({ name: '', phone: '', email: '' });
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
@@ -314,6 +342,12 @@ export default function Order() {
       <header className="border-b bg-white/80 backdrop-blur sticky top-0 z-10">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
+            {mode !== 'entry' && (
+              <button type="button" onClick={goEntry}
+                className="mr-1 p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground">
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+            )}
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-sm">m</div>
             <span className="font-semibold text-base">mDiary for Schools</span>
           </div>
@@ -331,439 +365,701 @@ export default function Order() {
       )}
 
       <main className="max-w-2xl mx-auto px-4 py-10">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold mb-2">이용권 구매</h1>
-          <p className="text-muted-foreground text-sm">
-            기관 정보를 입력하고 원하는 플랜을 선택하면<br />결제 즉시 이용권이 발급됩니다.
-          </p>
-        </div>
 
-        <StepBar step={step} />
-
-        {/* ── Step 1: 기관/담당자 정보 ───────────────── */}
-        {step === 1 && (
-          <div className="bg-white rounded-2xl border shadow-sm p-6 space-y-5">
-            <div className="flex items-center gap-2 mb-1">
-              <School className="h-5 w-5 text-primary" />
-              <h2 className="font-semibold text-base">기관 정보</h2>
+        {/* ══ ENTRY ══════════════════════════════════════ */}
+        {mode === 'entry' && (
+          <div className="space-y-8">
+            <div className="text-center">
+              <h1 className="text-2xl font-bold mb-2">mDiary 이용권 구매</h1>
+              <p className="text-muted-foreground text-sm">학교·기관 전용 구독 서비스입니다.</p>
             </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium">학교/기관 검색</Label>
-              <SchoolSearch onSelect={s => setInfo(p => ({ ...p, school: s, orgName: s.name }))} />
-              {info.school && (
-                <div className="flex items-center gap-1.5 text-xs text-teal-700 bg-teal-50 px-3 py-1.5 rounded-lg mt-1">
-                  <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0" />
-                  {info.school.eduOffice} · {info.school.address}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {/* 기관정보로 시작 */}
+              <button type="button" onClick={() => { setMode('new'); setStep(1); }}
+                className="group bg-white rounded-2xl border-2 border-border hover:border-primary shadow-sm p-6 text-left transition-all hover:shadow-md">
+                <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/15 transition-colors">
+                  <School className="h-6 w-6 text-primary" />
                 </div>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium">기관명 <span className="text-muted-foreground font-normal">(학교 검색 후 자동입력)</span></Label>
-              <div className="relative">
-                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input value={info.orgName} onChange={e => setInfo(p => ({ ...p, orgName: e.target.value }))}
-                  placeholder="○○초등학교" className="pl-9 h-11" />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-sm font-medium">담당자 이름 *</Label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input value={info.contactName} onChange={e => setInfo(p => ({ ...p, contactName: e.target.value }))}
-                    placeholder="홍길동" className="pl-9 h-11" />
+                <h2 className="font-bold text-base mb-1">기관정보로 시작</h2>
+                <p className="text-sm text-muted-foreground">기관 정보와 플랜을 선택하면<br />견적서 발송 또는 즉시 결제를<br />선택할 수 있습니다.</p>
+                <div className="mt-4 flex items-center gap-1 text-xs text-primary font-medium">
+                  시작하기 <ChevronRight className="h-3.5 w-3.5" />
                 </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-sm font-medium">휴대폰 번호 *</Label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input value={info.phone} onChange={e => setInfo(p => ({ ...p, phone: e.target.value }))}
-                    placeholder="010-1234-5678" className="pl-9 h-11" type="tel" />
+              </button>
+
+              {/* 견적서번호로 결제 */}
+              <button type="button" onClick={() => setMode('quote')}
+                className="group bg-white rounded-2xl border-2 border-border hover:border-primary shadow-sm p-6 text-left transition-all hover:shadow-md">
+                <div className="w-12 h-12 rounded-xl bg-teal-50 flex items-center justify-center mb-4 group-hover:bg-teal-100 transition-colors">
+                  <FileText className="h-6 w-6 text-teal-600" />
                 </div>
-              </div>
+                <h2 className="font-bold text-base mb-1">견적서번호로 결제</h2>
+                <p className="text-sm text-muted-foreground">이미 견적서를 받으셨나요?<br />견적서 번호를 조회하면<br />바로 결제할 수 있습니다.</p>
+                <div className="mt-4 flex items-center gap-1 text-xs text-teal-600 font-medium">
+                  번호 조회하기 <ChevronRight className="h-3.5 w-3.5" />
+                </div>
+              </button>
             </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-sm font-medium">이메일 <span className="text-muted-foreground font-normal">(선택 · 영수증 발송)</span></Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input value={info.email} onChange={e => setInfo(p => ({ ...p, email: e.target.value }))}
-                  placeholder="example@school.kr" className="pl-9 h-11" type="email" />
-              </div>
+            <div className="text-center text-xs text-muted-foreground space-y-1 pt-4">
+              <p>구매 관련 문의: 042-864-5566 · tebahsoft@tebahsoft.com</p>
             </div>
-
-            <Button className="w-full h-12 text-base mt-2" disabled={!step1Valid} onClick={() => setStep(2)}>
-              다음 — 플랜 선택 <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
           </div>
         )}
 
-        {/* ── Step 2: 플랜 선택 ──────────────────────── */}
-        {step === 2 && (
-          <div className="space-y-4">
-            {/* 플랜 탭 */}
-            <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
-              {/* 탭 헤더 */}
-              <div className="flex border-b overflow-x-auto">
-                {/* AI추천 탭 */}
-                <button type="button" onClick={() => { setAiTab(true); }}
-                  className={`relative flex-1 min-w-[72px] py-3 px-2 text-center text-xs font-medium transition-colors whitespace-nowrap
-                    ${aiTab
-                      ? 'text-purple-600 border-b-2 border-purple-500 bg-purple-50/50'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
-                  ✨ AI추천
-                </button>
-                {PLANS.map(p => (
-                  <button key={p.id} type="button" onClick={() => { selectPlan(p.id); setAiTab(false); }}
-                    className={`relative flex-1 min-w-[60px] py-3 px-2 text-center text-xs font-medium transition-colors whitespace-nowrap
-                      ${!aiTab && info.planId === p.id
-                        ? 'text-primary border-b-2 border-primary bg-primary/5'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
-                    {p.shortLabel}
-                    {p.badge && (
-                      <span className="absolute top-1 right-1 text-[8px] bg-orange-500 text-white px-1 py-0.5 rounded-full leading-none">
-                        {p.badge}
-                      </span>
-                    )}
-                  </button>
-                ))}
+        {/* ══ 견적서번호 조회 경로 ═══════════════════════ */}
+        {mode === 'quote' && (
+          <div className="space-y-6">
+            <div className="text-center">
+              <h1 className="text-xl font-bold mb-1">견적서 번호로 결제</h1>
+              <p className="text-sm text-muted-foreground">담당자로부터 받은 견적서 번호를 입력해 주세요.</p>
+            </div>
+
+            {/* 번호 입력 */}
+            {!quoteRecord && (
+              <div className="bg-white rounded-2xl border shadow-sm p-6 space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">견적서 번호</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={quoteNum}
+                      onChange={e => { setQuoteNum(e.target.value); setQuoteError(''); }}
+                      onKeyDown={e => { if (e.key === 'Enter') handleQuoteLookup(); }}
+                      placeholder="예: 2026-01-001"
+                      className="h-11 font-mono"
+                    />
+                    <Button onClick={handleQuoteLookup} disabled={quoteLoading || !quoteNum.trim()} className="h-11 px-5 shrink-0">
+                      {quoteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : '조회'}
+                    </Button>
+                  </div>
+                  {quoteError && (
+                    <p className="text-sm text-destructive">{quoteError}</p>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  견적서 번호는 담당자로부터 받은 문서에서 확인하실 수 있습니다.<br />
+                  번호가 없으시다면 <button type="button" onClick={() => setMode('new')} className="underline text-primary">기관정보로 시작</button>해 주세요.
+                </p>
               </div>
+            )}
 
-              {/* ── AI추천 탭 내용 ── */}
-              {aiTab ? (
-                <div className="p-5 space-y-5">
-                  <div className="flex items-center gap-2 text-purple-700">
-                    <span className="text-lg">✨</span>
-                    <p className="font-semibold text-sm">인원수와 기간을 입력하면 최적 플랜을 추천해드립니다</p>
+            {/* 조회 결과 */}
+            {quoteRecord && !quoteReadyToPay && (
+              <div className="space-y-4">
+                <div className="bg-white rounded-2xl border shadow-sm p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-semibold">견적서 확인</h2>
+                    <span className="text-xs font-mono bg-muted px-2.5 py-1 rounded-full">{quoteRecord.quote_number}</span>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-sm font-medium">학생 수 (명)</Label>
-                      <div className="flex items-center gap-1.5">
-                        <Input type="number" value={aiStudents} onChange={e => setAiStudents(e.target.value)}
-                          placeholder="예: 150" className="h-10" min={1} />
-                        <span className="text-sm text-muted-foreground shrink-0">명</span>
+                  <div className="space-y-2 text-sm divide-y divide-border">
+                    {quoteRecord.plan && (
+                      <div className="flex justify-between py-2">
+                        <span className="text-muted-foreground">플랜</span>
+                        <span className="font-medium">{quoteRecord.plan}</span>
                       </div>
+                    )}
+                    {quoteRecord.qty != null && (
+                      <div className="flex justify-between py-2">
+                        <span className="text-muted-foreground">이용 인원</span>
+                        <span>{quoteRecord.qty.toLocaleString('ko-KR')}명</span>
+                      </div>
+                    )}
+                    {quoteRecord.duration != null && (
+                      <div className="flex justify-between py-2">
+                        <span className="text-muted-foreground">이용 기간</span>
+                        <span>{quoteRecord.duration}개월</span>
+                      </div>
+                    )}
+                    {quoteRecord.quote_date && (
+                      <div className="flex justify-between py-2">
+                        <span className="text-muted-foreground">견적일</span>
+                        <span>{quoteRecord.quote_date}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between py-2">
+                      <span className="text-muted-foreground">공급가액</span>
+                      <span>{fmt(quoteSupply)}</span>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-sm font-medium">이용 기간 (개월)</Label>
-                      <div className="flex items-center gap-1.5">
-                        <Input type="number" value={aiMonths} onChange={e => setAiMonths(e.target.value)}
-                          placeholder="예: 6" className="h-10" min={1} max={60} />
-                        <span className="text-sm text-muted-foreground shrink-0">개월</span>
-                      </div>
+                    <div className="flex justify-between py-2">
+                      <span className="text-muted-foreground">부가세 (10%)</span>
+                      <span>{fmt(quoteTax)}</span>
+                    </div>
+                    <div className="flex justify-between pt-3 font-bold text-base">
+                      <span>결제금액</span>
+                      <span className="text-primary">{fmt(quoteFinal)}</span>
                     </div>
                   </div>
-
-                  {aiRecommendedPlan && (
-                    <div className="bg-purple-50 rounded-xl p-4 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <span className="text-purple-600 font-semibold text-sm">추천 플랜</span>
-                        <span className="bg-purple-600 text-white text-xs px-2.5 py-0.5 rounded-full font-medium">
-                          {PLANS.find(p => p.id === aiRecommendedPlan)?.label}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {PLAN_CAPACITY[aiRecommendedPlan] === 99999 ? '무제한' : `최대 ${PLAN_CAPACITY[aiRecommendedPlan].toLocaleString()}명`}
-                        </span>
-                      </div>
-
-                      {aiSuggestions.length > 0 ? (
-                        <div className="space-y-2">
-                          <p className="text-xs text-muted-foreground font-medium">최적 구매 방법</p>
-                          {aiSuggestions.map((s, i) => (
-                            <button key={i} type="button"
-                              onClick={() => {
-                                selectPlan(aiRecommendedPlan);
-                                setInfo(prev => ({ ...prev, months: s.months }));
-                                setAiTab(false);
-                              }}
-                              className={`w-full text-left rounded-xl border-2 p-3.5 transition-all
-                                ${s.recommended
-                                  ? 'border-purple-400 bg-white hover:border-purple-500'
-                                  : 'border-border bg-white hover:border-primary/40'}`}>
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="font-semibold text-sm">{s.label}</span>
-                                    {s.recommended && <span className="text-[10px] bg-purple-500 text-white px-1.5 py-0.5 rounded-full">추천</span>}
-                                    {s.isEvent && <span className="text-[10px] bg-pink-500 text-white px-1.5 py-0.5 rounded-full">이벤트</span>}
-                                  </div>
-                                  <p className="text-xs text-muted-foreground mt-0.5">{s.breakdown}</p>
-                                </div>
-                                <div className="text-right shrink-0 ml-3">
-                                  <p className={`font-bold text-sm ${s.recommended ? 'text-purple-700' : ''}`}>{fmt(s.total)}</p>
-                                  <p className="text-[10px] text-muted-foreground">VAT 포함 {fmt(Math.round(s.total * 1.1))}</p>
-                                </div>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      ) : !isNaN(aiMonthsNum) && aiMonthsNum > 0 ? (
-                        <p className="text-xs text-muted-foreground">계산 중...</p>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">이용 기간을 입력하면 최적 구매 방법을 추천해드립니다.</p>
-                      )}
-                    </div>
-                  )}
-
-                  {!aiRecommendedPlan && (
-                    <p className="text-sm text-muted-foreground text-center py-4">학생 수를 입력하면 적합한 플랜을 찾아드립니다.</p>
+                  {quoteRecord.notes && (
+                    <p className="text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">{quoteRecord.notes}</p>
                   )}
                 </div>
-              ) : (
 
-              /* ── 플랜별 탭 내용 ── */
-              <div className="p-5 space-y-5">
-                {/* 플랜 설명 */}
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold">{activePlan.label}</p>
-                    <p className="text-sm text-muted-foreground">{activePlan.capacity}</p>
-                  </div>
-                  <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-                    activePlan.multiLicense
-                      ? 'bg-teal-50 text-teal-700'
-                      : 'bg-slate-100 text-slate-600'}`}>
-                    {activePlan.multiLicense ? '수량 분할 발송 가능' : '이용권 1장 발송'}
-                  </span>
-                </div>
-
-                {/* 이용 기간 선택 */}
-                <div>
-                  <Label className="text-sm font-medium mb-3 block">이용 기간</Label>
-
-                  {/* 이벤트 기간 (이벤트 중일 때만) */}
-                  {IS_EVENT && (
-                    <div className="mb-3">
-                      <div className="flex items-center gap-1.5 text-xs font-semibold text-pink-600 mb-2">
-                        <Sparkles className="h-3.5 w-3.5" />
-                        신학기 이벤트 특가 (~ 3/31)
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {([6, 12] as const).map(m => (
-                          <button key={m} type="button"
-                            onClick={() => { setInfo(p => ({ ...p, months: m })); setShowCustom(false); }}
-                            className={`relative rounded-xl border-2 p-3.5 text-left transition-all
-                              ${info.months === m && !showCustom
-                                ? 'border-pink-500 bg-pink-50 shadow-sm'
-                                : 'border-pink-200 bg-pink-50/30 hover:border-pink-400'}`}>
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <p className="font-semibold text-sm">{m === 6 ? '6개월' : '12개월'}</p>
-                                <p className="text-[11px] text-muted-foreground">{m === 6 ? '1학기' : '1학기 + 2학기'}</p>
-                              </div>
-                              <span className="text-[10px] bg-pink-500 text-white px-1.5 py-0.5 rounded-full leading-none mt-0.5">SALE</span>
-                            </div>
-                            <p className="text-[11px] text-muted-foreground line-through mt-1.5">{fmt(REG[m][info.planId])}</p>
-                            <p className="text-base font-bold text-pink-600">{fmt(EVT[m][info.planId])}</p>
-                            {info.months === m && !showCustom && (
-                              <CheckCircle2 className="absolute bottom-3 right-3 h-4 w-4 text-pink-500" />
-                            )}
-                          </button>
-                        ))}
+                {/* 담당자 정보 입력 */}
+                <div className="bg-white rounded-2xl border shadow-sm p-6 space-y-4">
+                  <h2 className="font-semibold text-sm">결제자 정보 입력</h2>
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-sm">담당자 이름 *</Label>
+                      <div className="relative">
+                        <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input value={quoteContact.name}
+                          onChange={e => setQuoteContact(p => ({ ...p, name: e.target.value }))}
+                          placeholder="홍길동" className="pl-9 h-11" />
                       </div>
                     </div>
-                  )}
+                    <div className="space-y-1.5">
+                      <Label className="text-sm">휴대폰 번호 *</Label>
+                      <div className="relative">
+                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input value={quoteContact.phone}
+                          onChange={e => setQuoteContact(p => ({ ...p, phone: e.target.value }))}
+                          placeholder="010-1234-5678" className="pl-9 h-11" type="tel" />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-sm">이메일 <span className="text-muted-foreground font-normal">(선택 · 영수증)</span></Label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input value={quoteContact.email}
+                          onChange={e => setQuoteContact(p => ({ ...p, email: e.target.value }))}
+                          placeholder="example@school.kr" className="pl-9 h-11" type="email" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-                  {/* 일반 기간 */}
-                  <div className="grid grid-cols-2 gap-2 mb-2">
-                    {[1, 4].map(m => (
-                      <button key={m} type="button"
-                        onClick={() => { setInfo(p => ({ ...p, months: m })); setShowCustom(false); }}
-                        className={`relative rounded-xl border-2 p-3.5 text-left transition-all
-                          ${info.months === m && !showCustom
-                            ? 'border-primary bg-primary/5 shadow-sm'
-                            : 'border-border hover:border-primary/40'}`}>
-                        <p className="font-semibold text-sm">{m}개월</p>
-                        <p className="text-base font-bold mt-1">{fmt(REG[m][info.planId])}</p>
-                        {info.months === m && !showCustom && (
-                          <CheckCircle2 className="absolute bottom-3 right-3 h-4 w-4 text-primary" />
+                <div className="flex gap-3">
+                  <Button variant="outline" className="flex-1 h-12"
+                    onClick={() => { setQuoteRecord(null); setQuoteNum(''); }}>다른 번호 조회</Button>
+                  <Button className="flex-[2] h-12 text-base"
+                    disabled={!quoteContact.name.trim() || !quoteContact.phone.trim()}
+                    onClick={() => setQuoteReadyToPay(true)}>
+                    <CreditCard className="h-4 w-4 mr-2" />결제하기
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* 결제 */}
+            {quoteRecord && quoteReadyToPay && (
+              <div className="space-y-4">
+                <div className="bg-muted/40 rounded-2xl p-4 text-sm">
+                  <div className="flex justify-between mb-1">
+                    <span className="text-muted-foreground">견적서번호</span>
+                    <span className="font-mono font-medium">{quoteRecord.quote_number}</span>
+                  </div>
+                  {quoteRecord.plan && (
+                    <div className="flex justify-between mb-1">
+                      <span className="text-muted-foreground">플랜</span>
+                      <span>{quoteRecord.plan}{quoteRecord.duration ? ` · ${quoteRecord.duration}개월` : ''}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between font-bold border-t pt-2 mt-1">
+                    <span>결제금액</span>
+                    <span className="text-primary">{fmt(quoteFinal)}</span>
+                  </div>
+                </div>
+                <TossPaySection
+                  amount={quoteFinal}
+                  orderName={`${quoteRecord.quote_number}${quoteRecord.plan ? ` · ${quoteRecord.plan}` : ''}`}
+                  customerName={quoteContact.name}
+                  customerPhone={quoteContact.phone}
+                  customerEmail={quoteContact.email}
+                  onBack={() => setQuoteReadyToPay(false)}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ══ 기관정보 경로 ══════════════════════════════ */}
+        {mode === 'new' && (
+          <>
+            {/* 단계 표시 */}
+            <div className="flex items-center justify-center gap-0 mb-8">
+              {['기관 정보', '플랜 선택', '결제 방법'].map((s, i) => (
+                <div key={s} className="flex items-center">
+                  <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors
+                    ${i + 1 === step ? 'bg-primary text-primary-foreground' :
+                      i + 1 < step ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold
+                      ${i + 1 === step ? 'bg-white/30' : i + 1 < step ? 'bg-primary text-white' : 'bg-muted-foreground/20'}`}>
+                      {i + 1 < step ? '✓' : i + 1}
+                    </span>
+                    {s}
+                  </div>
+                  {i < 2 && <ChevronRight className={`h-4 w-4 mx-1 ${i + 1 < step ? 'text-primary' : 'text-muted-foreground/30'}`} />}
+                </div>
+              ))}
+            </div>
+
+            {/* Step 1: 기관정보 */}
+            {step === 1 && (
+              <div className="bg-white rounded-2xl border shadow-sm p-6 space-y-5">
+                <div className="flex items-center gap-2 mb-1">
+                  <School className="h-5 w-5 text-primary" />
+                  <h2 className="font-semibold text-base">기관 정보</h2>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">학교/기관 검색</Label>
+                  <SchoolSearch onSelect={s => setInfo(p => ({ ...p, school: s, orgName: s.name }))} />
+                  {info.school && (
+                    <div className="flex items-center gap-1.5 text-xs text-teal-700 bg-teal-50 px-3 py-1.5 rounded-lg mt-1">
+                      <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                      {info.school.eduOffice} · {info.school.address}
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">기관명 <span className="text-muted-foreground font-normal">(학교 검색 후 자동입력)</span></Label>
+                  <div className="relative">
+                    <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input value={info.orgName} onChange={e => setInfo(p => ({ ...p, orgName: e.target.value }))}
+                      placeholder="○○초등학교" className="pl-9 h-11" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">담당자 이름 *</Label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input value={info.contactName} onChange={e => setInfo(p => ({ ...p, contactName: e.target.value }))}
+                        placeholder="홍길동" className="pl-9 h-11" />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">휴대폰 번호 *</Label>
+                    <div className="relative">
+                      <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input value={info.phone} onChange={e => setInfo(p => ({ ...p, phone: e.target.value }))}
+                        placeholder="010-1234-5678" className="pl-9 h-11" type="tel" />
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">이메일 <span className="text-muted-foreground font-normal">(선택 · 영수증 발송)</span></Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input value={info.email} onChange={e => setInfo(p => ({ ...p, email: e.target.value }))}
+                      placeholder="example@school.kr" className="pl-9 h-11" type="email" />
+                  </div>
+                </div>
+                <Button className="w-full h-12 text-base mt-2" disabled={!step1Valid} onClick={() => setStep(2)}>
+                  다음 — 플랜 선택 <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            )}
+
+            {/* Step 2: 플랜 선택 */}
+            {step === 2 && (
+              <div className="space-y-4">
+                <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+                  {/* 탭 헤더 */}
+                  <div className="flex border-b overflow-x-auto">
+                    <button type="button" onClick={() => setAiTab(true)}
+                      className={`relative flex-1 min-w-[72px] py-3 px-2 text-center text-xs font-medium transition-colors whitespace-nowrap
+                        ${aiTab ? 'text-purple-600 border-b-2 border-purple-500 bg-purple-50/50'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
+                      ✨ AI추천
+                    </button>
+                    {PLANS.map(p => (
+                      <button key={p.id} type="button" onClick={() => { selectPlan(p.id); setAiTab(false); }}
+                        className={`relative flex-1 min-w-[60px] py-3 px-2 text-center text-xs font-medium transition-colors whitespace-nowrap
+                          ${!aiTab && info.planId === p.id
+                            ? 'text-primary border-b-2 border-primary bg-primary/5'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}>
+                        {p.shortLabel}
+                        {p.badge && (
+                          <span className="absolute top-1 right-1 text-[8px] bg-orange-500 text-white px-1 py-0.5 rounded-full leading-none">{p.badge}</span>
                         )}
                       </button>
                     ))}
                   </div>
 
-                  {/* 직접 입력 토글 */}
-                  <button type="button"
-                    onClick={() => setShowCustom(v => !v)}
-                    className={`w-full text-sm border rounded-xl py-2.5 transition-colors
-                      ${showCustom
-                        ? 'border-primary text-primary bg-primary/5'
-                        : 'border-dashed border-muted-foreground/40 text-muted-foreground hover:border-primary/50 hover:text-primary'}`}>
-                    {showCustom ? '직접 입력 닫기' : '+ 원하는 개월 수 직접 입력'}
-                  </button>
-
-                  {/* 직접 입력 + 추천 */}
-                  {showCustom && (
-                    <div className="mt-3 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <Input type="number" value={customMonths}
-                          onChange={e => setCustomMonths(e.target.value)}
-                          placeholder="예: 9" className="h-10 w-28" min={1} max={60} />
-                        <span className="text-sm text-muted-foreground">개월</span>
+                  {/* AI추천 탭 */}
+                  {aiTab ? (
+                    <div className="p-5 space-y-5">
+                      <div className="flex items-center gap-2 text-purple-700">
+                        <span className="text-lg">✨</span>
+                        <p className="font-semibold text-sm">인원수와 기간을 입력하면 최적 플랜을 추천해드립니다</p>
                       </div>
-
-                      {suggestions.length > 0 && (
-                        <div className="space-y-2">
-                          <p className="text-xs text-muted-foreground font-medium">최저가 구매 방법 추천</p>
-                          {suggestions.map((s, i) => (
-                            <button key={i} type="button"
-                              onClick={() => { setInfo(p => ({ ...p, months: s.months })); setShowCustom(false); setCustomMonths(''); }}
-                              className={`w-full text-left rounded-xl border-2 p-3.5 transition-all
-                                ${s.recommended
-                                  ? 'border-teal-400 bg-teal-50/60 hover:border-teal-500'
-                                  : 'border-border hover:border-primary/40'}`}>
-                              <div className="flex items-start justify-between">
-                                <div>
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="font-semibold text-sm">{s.label}</span>
-                                    {s.recommended && (
-                                      <span className="text-[10px] bg-teal-500 text-white px-1.5 py-0.5 rounded-full">추천</span>
-                                    )}
-                                    {s.isEvent && (
-                                      <span className="text-[10px] bg-pink-500 text-white px-1.5 py-0.5 rounded-full">이벤트</span>
-                                    )}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-sm font-medium">학생 수 (명)</Label>
+                          <div className="flex items-center gap-1.5">
+                            <Input type="number" value={aiStudents} onChange={e => setAiStudents(e.target.value)}
+                              placeholder="예: 150" className="h-10" min={1} />
+                            <span className="text-sm text-muted-foreground shrink-0">명</span>
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-sm font-medium">이용 기간 (개월)</Label>
+                          <div className="flex items-center gap-1.5">
+                            <Input type="number" value={aiMonths} onChange={e => setAiMonths(e.target.value)}
+                              placeholder="예: 6" className="h-10" min={1} max={60} />
+                            <span className="text-sm text-muted-foreground shrink-0">개월</span>
+                          </div>
+                        </div>
+                      </div>
+                      {aiRecommendedPlan && (
+                        <div className="bg-purple-50 rounded-xl p-4 space-y-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-purple-600 font-semibold text-sm">추천 플랜</span>
+                            <span className="bg-purple-600 text-white text-xs px-2.5 py-0.5 rounded-full font-medium">
+                              {PLANS.find(p => p.id === aiRecommendedPlan)?.label}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {PLAN_CAPACITY[aiRecommendedPlan] === 99999 ? '무제한' : `최대 ${PLAN_CAPACITY[aiRecommendedPlan].toLocaleString()}명`}
+                            </span>
+                          </div>
+                          {aiSuggestions.length > 0 ? (
+                            <div className="space-y-2">
+                              <p className="text-xs text-muted-foreground font-medium">최적 구매 방법</p>
+                              {aiSuggestions.map((s, i) => (
+                                <button key={i} type="button"
+                                  onClick={() => {
+                                    selectPlan(aiRecommendedPlan);
+                                    setInfo(prev => ({ ...prev, months: s.months }));
+                                    setAiTab(false);
+                                  }}
+                                  className={`w-full text-left rounded-xl border-2 p-3.5 transition-all
+                                    ${s.recommended ? 'border-purple-400 bg-white hover:border-purple-500'
+                                                    : 'border-border bg-white hover:border-primary/40'}`}>
+                                  <div className="flex items-center justify-between">
+                                    <div>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-semibold text-sm">{s.label}</span>
+                                        {s.recommended && <span className="text-[10px] bg-purple-500 text-white px-1.5 py-0.5 rounded-full">추천</span>}
+                                        {s.isEvent && <span className="text-[10px] bg-pink-500 text-white px-1.5 py-0.5 rounded-full">이벤트</span>}
+                                      </div>
+                                      <p className="text-xs text-muted-foreground mt-0.5">{s.breakdown}</p>
+                                    </div>
+                                    <div className="text-right shrink-0 ml-3">
+                                      <p className={`font-bold text-sm ${s.recommended ? 'text-purple-700' : ''}`}>{fmt(s.total)}</p>
+                                      <p className="text-[10px] text-muted-foreground">VAT 포함 {fmt(Math.round(s.total * 1.1))}</p>
+                                    </div>
                                   </div>
-                                  <p className="text-xs text-muted-foreground mt-0.5">{s.breakdown}</p>
-                                </div>
-                                <span className={`font-bold text-sm ${s.recommended ? 'text-teal-700' : ''}`}>{fmt(s.total)}</span>
-                              </div>
+                                </button>
+                              ))}
+                            </div>
+                          ) : !isNaN(aiMonthsNum) && aiMonthsNum > 0 ? (
+                            <p className="text-xs text-muted-foreground">계산 중...</p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">이용 기간을 입력하면 최적 구매 방법을 추천해드립니다.</p>
+                          )}
+                        </div>
+                      )}
+                      {!aiRecommendedPlan && (
+                        <p className="text-sm text-muted-foreground text-center py-4">학생 수를 입력하면 적합한 플랜을 찾아드립니다.</p>
+                      )}
+                    </div>
+                  ) : (
+                    /* 플랜별 탭 */
+                    <div className="p-5 space-y-5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold">{activePlan.label}</p>
+                          <p className="text-sm text-muted-foreground">{activePlan.capacity}</p>
+                        </div>
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${activePlan.multiLicense ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {activePlan.multiLicense ? '수량 분할 발송 가능' : '이용권 1장 발송'}
+                        </span>
+                      </div>
+                      <div>
+                        <Label className="text-sm font-medium mb-3 block">이용 기간</Label>
+                        {IS_EVENT && (
+                          <div className="mb-3">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-pink-600 mb-2">
+                              <Sparkles className="h-3.5 w-3.5" />신학기 이벤트 특가 (~ 3/31)
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {([6, 12] as const).map(m => (
+                                <button key={m} type="button"
+                                  onClick={() => { setInfo(p => ({ ...p, months: m })); setShowCustom(false); }}
+                                  className={`relative rounded-xl border-2 p-3.5 text-left transition-all
+                                    ${info.months === m && !showCustom ? 'border-pink-500 bg-pink-50 shadow-sm' : 'border-pink-200 bg-pink-50/30 hover:border-pink-400'}`}>
+                                  <div className="flex items-start justify-between">
+                                    <div>
+                                      <p className="font-semibold text-sm">{m === 6 ? '6개월' : '12개월'}</p>
+                                      <p className="text-[11px] text-muted-foreground">{m === 6 ? '1학기' : '1학기 + 2학기'}</p>
+                                    </div>
+                                    <span className="text-[10px] bg-pink-500 text-white px-1.5 py-0.5 rounded-full leading-none mt-0.5">SALE</span>
+                                  </div>
+                                  <p className="text-[11px] text-muted-foreground line-through mt-1.5">{fmt(REG[m][info.planId])}</p>
+                                  <p className="text-base font-bold text-pink-600">{fmt(EVT[m][info.planId])}</p>
+                                  {info.months === m && !showCustom && <CheckCircle2 className="absolute bottom-3 right-3 h-4 w-4 text-pink-500" />}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-2 mb-2">
+                          {[1, 4].map(m => (
+                            <button key={m} type="button"
+                              onClick={() => { setInfo(p => ({ ...p, months: m })); setShowCustom(false); }}
+                              className={`relative rounded-xl border-2 p-3.5 text-left transition-all
+                                ${info.months === m && !showCustom ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/40'}`}>
+                              <p className="font-semibold text-sm">{m}개월</p>
+                              <p className="text-base font-bold mt-1">{fmt(REG[m][info.planId])}</p>
+                              {info.months === m && !showCustom && <CheckCircle2 className="absolute bottom-3 right-3 h-4 w-4 text-primary" />}
                             </button>
                           ))}
+                        </div>
+                        <button type="button" onClick={() => setShowCustom(v => !v)}
+                          className={`w-full text-sm border rounded-xl py-2.5 transition-colors
+                            ${showCustom ? 'border-primary text-primary bg-primary/5' : 'border-dashed border-muted-foreground/40 text-muted-foreground hover:border-primary/50 hover:text-primary'}`}>
+                          {showCustom ? '직접 입력 닫기' : '+ 원하는 개월 수 직접 입력'}
+                        </button>
+                        {showCustom && (
+                          <div className="mt-3 space-y-3">
+                            <div className="flex items-center gap-2">
+                              <Input type="number" value={customMonths}
+                                onChange={e => setCustomMonths(e.target.value)}
+                                placeholder="예: 9" className="h-10 w-28" min={1} max={60} />
+                              <span className="text-sm text-muted-foreground">개월</span>
+                            </div>
+                            {suggestions.length > 0 && (
+                              <div className="space-y-2">
+                                <p className="text-xs text-muted-foreground font-medium">최저가 구매 방법 추천</p>
+                                {suggestions.map((s, i) => (
+                                  <button key={i} type="button"
+                                    onClick={() => { setInfo(p => ({ ...p, months: s.months })); setShowCustom(false); setCustomMonths(''); }}
+                                    className={`w-full text-left rounded-xl border-2 p-3.5 transition-all
+                                      ${s.recommended ? 'border-teal-400 bg-teal-50/60 hover:border-teal-500' : 'border-border hover:border-primary/40'}`}>
+                                    <div className="flex items-start justify-between">
+                                      <div>
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="font-semibold text-sm">{s.label}</span>
+                                          {s.recommended && <span className="text-[10px] bg-teal-500 text-white px-1.5 py-0.5 rounded-full">추천</span>}
+                                          {s.isEvent && <span className="text-[10px] bg-pink-500 text-white px-1.5 py-0.5 rounded-full">이벤트</span>}
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-0.5">{s.breakdown}</p>
+                                      </div>
+                                      <span className={`font-bold text-sm ${s.recommended ? 'text-teal-700' : ''}`}>{fmt(s.total)}</span>
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      {activePlan.multiLicense && (
+                        <div>
+                          <Label className="text-sm font-medium mb-1 block">
+                            이용권 수량
+                            <span className="text-xs text-muted-foreground font-normal ml-1.5">(이용권 1장 = 그룹 1개 관리)</span>
+                          </Label>
+                          <div className="flex items-center gap-3 mt-2">
+                            <button type="button"
+                              onClick={() => setInfo(p => ({ ...p, qty: Math.max(1, p.qty - 1) }))}
+                              className="w-10 h-10 rounded-lg border flex items-center justify-center text-lg font-bold hover:bg-muted transition-colors">−</button>
+                            <span className="w-12 text-center font-bold text-xl">{info.qty}</span>
+                            <button type="button"
+                              onClick={() => setInfo(p => ({ ...p, qty: Math.min(30, p.qty + 1) }))}
+                              className="w-10 h-10 rounded-lg border flex items-center justify-center text-lg font-bold hover:bg-muted transition-colors">+</button>
+                            <span className="text-sm text-muted-foreground">장</span>
+                          </div>
                         </div>
                       )}
                     </div>
                   )}
                 </div>
 
-                {/* 이용권 수량 (학년플랜 이상) */}
-                {activePlan.multiLicense && (
-                  <div>
-                    <Label className="text-sm font-medium mb-1 block">
-                      이용권 수량
-                      <span className="text-xs text-muted-foreground font-normal ml-1.5">(이용권 1장 = 그룹 1개 관리)</span>
-                    </Label>
-                    <div className="flex items-center gap-3 mt-2">
-                      <button type="button"
-                        onClick={() => setInfo(p => ({ ...p, qty: Math.max(1, p.qty - 1) }))}
-                        className="w-10 h-10 rounded-lg border flex items-center justify-center text-lg font-bold hover:bg-muted transition-colors">−</button>
-                      <span className="w-12 text-center font-bold text-xl">{info.qty}</span>
-                      <button type="button"
-                        onClick={() => setInfo(p => ({ ...p, qty: Math.min(30, p.qty + 1) }))}
-                        className="w-10 h-10 rounded-lg border flex items-center justify-center text-lg font-bold hover:bg-muted transition-colors">+</button>
-                      <span className="text-sm text-muted-foreground">장</span>
+                {/* 금액 요약 */}
+                {!aiTab && (
+                  <div className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
+                    <h3 className="font-semibold text-sm text-muted-foreground">결제 금액 미리보기</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">플랜</span>
+                        <span>{activePlan.label} · {info.months}개월{info.qty > 1 ? ` × ${info.qty}장` : ''}</span>
+                      </div>
+                      {priceIsEvent && (
+                        <div className="flex justify-between text-pink-600 text-xs">
+                          <span className="flex items-center gap-1"><Tag className="h-3 w-3" />이벤트 할인 적용</span>
+                          <span>정가 {fmt(REG[info.months]?.[info.planId] * info.qty ?? 0)} → {fmt(supply)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between"><span className="text-muted-foreground">공급가액</span><span>{fmt(supply)}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">부가세 (10%)</span><span>{fmt(tax)}</span></div>
+                      <div className="flex justify-between font-bold text-base border-t pt-2 mt-1">
+                        <span>최종 결제금액</span><span className="text-primary">{fmt(total)}</span>
+                      </div>
                     </div>
                   </div>
                 )}
-              </div>
-              )} {/* end aiTab ? ... : (...) */}
-            </div>
 
-            {/* 금액 요약 — AI추천 탭에서는 숨김 */}
-            {!aiTab && (<>
-            <div className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
-              <h3 className="font-semibold text-sm text-muted-foreground">결제 금액 미리보기</h3>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">플랜</span>
-                  <span>{activePlan.label} · {info.months}개월{info.qty > 1 ? ` × ${info.qty}장` : ''}</span>
+                <div className="flex gap-3">
+                  <Button variant="outline" className="flex-1 h-12" onClick={() => setStep(1)}>이전</Button>
+                  <Button className="flex-[2] h-12 text-base" onClick={() => { setStep(3); setStep3('choose'); }}
+                    disabled={aiTab || !unitPrice}>
+                    다음 <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
                 </div>
-                {priceIsEvent && (
-                  <div className="flex justify-between text-pink-600 text-xs">
-                    <span className="flex items-center gap-1"><Tag className="h-3 w-3" />이벤트 할인 적용</span>
-                    <span>정가 {fmt(REG[info.months]?.[info.planId] * info.qty ?? 0)} → {fmt(supply)}</span>
+              </div>
+            )}
+
+            {/* Step 3: 결제 방법 선택 */}
+            {step === 3 && step3 === 'choose' && (
+              <div className="space-y-4">
+                <div className="bg-muted/40 rounded-2xl p-5 text-sm space-y-2">
+                  <h3 className="font-semibold text-base mb-3">주문 요약</h3>
+                  <div className="flex justify-between"><span className="text-muted-foreground">기관</span><span className="font-medium">{info.orgName}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">담당자</span><span>{info.contactName} · {info.phone}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">플랜</span><span>{activePlan.label} · {info.months}개월{info.qty > 1 ? ` × ${info.qty}장` : ''}</span></div>
+                  <div className="flex justify-between font-bold text-base border-t pt-2 mt-1">
+                    <span>결제금액</span><span className="text-primary">{fmt(total)}</span>
                   </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">공급가액</span>
-                  <span>{fmt(supply)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">부가세 (10%)</span>
-                  <span>{fmt(tax)}</span>
+
+                <p className="text-center text-sm font-medium text-muted-foreground">어떻게 진행하시겠어요?</p>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <button type="button" onClick={() => setStep3('quote-preview')}
+                    className="group bg-white rounded-2xl border-2 border-border hover:border-blue-400 shadow-sm p-5 text-left transition-all hover:shadow-md">
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center mb-3 group-hover:bg-blue-100 transition-colors">
+                      <FileText className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <h3 className="font-bold text-sm mb-1">견적서 확인 후 결제</h3>
+                    <p className="text-xs text-muted-foreground">견적서를 출력하거나 저장한 뒤<br />나중에 견적서 번호로 돌아와 결제할 수 있습니다.</p>
+                  </button>
+
+                  <button type="button" onClick={() => setStep3('pay')}
+                    className="group bg-white rounded-2xl border-2 border-border hover:border-primary shadow-sm p-5 text-left transition-all hover:shadow-md">
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/15 transition-colors">
+                      <CreditCard className="h-5 w-5 text-primary" />
+                    </div>
+                    <h3 className="font-bold text-sm mb-1">즉시 결제</h3>
+                    <p className="text-xs text-muted-foreground">지금 바로 결제하고<br />이용권을 즉시 발급받습니다.</p>
+                  </button>
                 </div>
-                <div className="flex justify-between font-bold text-base border-t pt-2 mt-1">
-                  <span>최종 결제금액</span>
-                  <span className="text-primary">{fmt(total)}</span>
-                </div>
+
+                <Button variant="outline" className="w-full h-12" onClick={() => setStep(2)}>이전</Button>
               </div>
-            </div>
+            )}
 
-            </>)} {/* end !aiTab */}
-
-            <div className="flex gap-3">
-              <Button variant="outline" className="flex-1 h-12" onClick={() => setStep(1)}>이전</Button>
-              <Button className="flex-[2] h-12 text-base" onClick={() => setStep(3)} disabled={aiTab || !unitPrice}>
-                결제하기 <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Step 3: 결제 ───────────────────────────── */}
-        {step === 3 && (
-          <div className="space-y-4">
-            <div className="bg-white rounded-2xl border shadow-sm p-5">
-              <h2 className="font-semibold text-base mb-3">주문 요약</h2>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">기관</span>
-                  <span className="font-medium">{info.orgName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">담당자</span>
-                  <span>{info.contactName} · {info.phone}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">플랜</span>
-                  <span>{activePlan.label} {info.months}개월{info.qty > 1 ? ` × ${info.qty}장` : ''}</span>
-                </div>
-                {priceIsEvent && (
-                  <div className="flex justify-between text-pink-600 text-xs">
-                    <span>이벤트 할인</span>
-                    <span>적용됨</span>
+            {/* Step 3-A: 견적서 확인 */}
+            {step === 3 && step3 === 'quote-preview' && (
+              <div className="space-y-4">
+                <div className="bg-white rounded-2xl border shadow-sm p-6 space-y-5 print:shadow-none print:border-0">
+                  <div className="flex items-center justify-between border-b pb-4">
+                    <div>
+                      <h2 className="font-bold text-lg">견 적 서</h2>
+                      <p className="text-xs text-muted-foreground mt-0.5">mDiary for Schools</p>
+                    </div>
+                    <div className="text-right text-xs text-muted-foreground">
+                      <p>씸스페이스(주)</p>
+                      <p>042-864-5566</p>
+                      <p>{new Date().toLocaleDateString('ko-KR')}</p>
+                    </div>
                   </div>
-                )}
-                <div className="flex justify-between font-bold text-base border-t pt-2 mt-1">
-                  <span>결제금액</span>
-                  <span className="text-primary">{fmt(total)}</span>
+
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex gap-4">
+                      <span className="text-muted-foreground w-16 shrink-0">기관명</span>
+                      <span className="font-medium">{info.orgName}</span>
+                    </div>
+                    <div className="flex gap-4">
+                      <span className="text-muted-foreground w-16 shrink-0">담당자</span>
+                      <span>{info.contactName}</span>
+                    </div>
+                    <div className="flex gap-4">
+                      <span className="text-muted-foreground w-16 shrink-0">연락처</span>
+                      <span>{info.phone}</span>
+                    </div>
+                  </div>
+
+                  <table className="w-full text-sm border-collapse border border-border rounded-lg overflow-hidden">
+                    <thead>
+                      <tr className="bg-muted/50">
+                        <th className="border border-border px-3 py-2 text-left font-medium">품목</th>
+                        <th className="border border-border px-3 py-2 text-right font-medium">수량</th>
+                        <th className="border border-border px-3 py-2 text-right font-medium">단가</th>
+                        <th className="border border-border px-3 py-2 text-right font-medium">금액</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="border border-border px-3 py-2">{activePlan.label} · {info.months}개월</td>
+                        <td className="border border-border px-3 py-2 text-right">{info.qty}장</td>
+                        <td className="border border-border px-3 py-2 text-right">{fmt(unitPrice)}</td>
+                        <td className="border border-border px-3 py-2 text-right font-medium">{fmt(supply)}</td>
+                      </tr>
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-muted/30">
+                        <td colSpan={3} className="border border-border px-3 py-2 text-right text-muted-foreground">부가세 (10%)</td>
+                        <td className="border border-border px-3 py-2 text-right">{fmt(tax)}</td>
+                      </tr>
+                      <tr className="bg-primary/5">
+                        <td colSpan={3} className="border border-border px-3 py-2 text-right font-bold">합계</td>
+                        <td className="border border-border px-3 py-2 text-right font-bold text-primary">{fmt(total)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+
+                  {priceIsEvent && (
+                    <div className="flex items-center gap-2 text-xs text-pink-600 bg-pink-50 rounded-lg px-3 py-2">
+                      <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                      신학기 이벤트 가격 적용 (2026. 3. 31. 까지)
+                    </div>
+                  )}
+
+                  <div className="text-xs text-muted-foreground space-y-1 border-t pt-3">
+                    <p>• 결제 완료 즉시 이용권이 발급되어 담당자 휴대폰으로 발송됩니다.</p>
+                    <p>• 세금계산서 발행이 필요하신 경우 결제 후 별도 신청해 주세요.</p>
+                    <p>• 견적 유효기간: 발급일로부터 30일</p>
+                  </div>
+                </div>
+
+                <div className="bg-blue-50 rounded-2xl border border-blue-200 p-4 text-sm">
+                  <p className="font-medium text-blue-800 mb-1">견적서 번호 안내</p>
+                  <p className="text-blue-700 text-xs">
+                    견적서를 저장하시면, 결제 시 견적서 번호로 바로 결제하실 수 있습니다.<br />
+                    견적서 번호는 담당자 확인 후 별도 안내드립니다. (042-864-5566)
+                  </p>
+                </div>
+
+                <div className="flex gap-3">
+                  <Button variant="outline" className="flex-1 h-12" onClick={() => setStep3('choose')}>이전</Button>
+                  <Button variant="outline" className="flex-1 h-12" onClick={() => window.print()}>
+                    <Printer className="h-4 w-4 mr-2" />인쇄 / 저장
+                  </Button>
+                  <Button className="flex-[2] h-12" onClick={() => setStep3('pay')}>
+                    <CreditCard className="h-4 w-4 mr-2" />바로 결제
+                  </Button>
                 </div>
               </div>
-            </div>
+            )}
 
-            <div className="bg-white rounded-2xl border shadow-sm p-5">
-              {widgetLoading && (
-                <div className="flex items-center justify-center py-16 gap-3 text-muted-foreground">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  <span className="text-sm">결제 모듈 로딩 중...</span>
+            {/* Step 3-B: 즉시 결제 (Toss) */}
+            {step === 3 && step3 === 'pay' && (
+              <div className="space-y-4">
+                <div className="bg-muted/40 rounded-2xl p-4 text-sm space-y-1.5">
+                  <div className="flex justify-between"><span className="text-muted-foreground">기관</span><span className="font-medium">{info.orgName}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">플랜</span><span>{activePlan.label} · {info.months}개월{info.qty > 1 ? ` × ${info.qty}장` : ''}</span></div>
+                  {priceIsEvent && <div className="flex justify-between text-pink-600 text-xs"><span>이벤트 할인</span><span>적용됨</span></div>}
+                  <div className="flex justify-between font-bold text-base border-t pt-2 mt-1">
+                    <span>결제금액</span><span className="text-primary">{fmt(total)}</span>
+                  </div>
                 </div>
-              )}
-              <div id="toss-payment-widget" ref={paymentMethodRef} />
-              <div id="toss-agreement-widget" ref={agreementDivRef} className="mt-4" />
-            </div>
-
-            <div className="flex gap-3">
-              <Button variant="outline" className="flex-1 h-12" onClick={() => setStep(2)}>이전</Button>
-              <Button className="flex-[2] h-12 text-base font-semibold" onClick={handlePay}
-                disabled={widgetLoading || !payWidget}>
-                {fmt(total)} 결제하기
-              </Button>
-            </div>
-
-            <p className="text-center text-xs text-muted-foreground px-4">
-              결제 완료 즉시 이용권이 발급되어 입력하신 휴대폰 번호로 발송됩니다.<br />
-              세금계산서가 필요하신 경우 결제 후 별도 신청이 가능합니다.
-            </p>
-          </div>
+                <TossPaySection
+                  amount={total}
+                  orderName={`${info.orgName} · ${activePlan.label} ${info.months}개월${info.qty > 1 ? ` × ${info.qty}` : ''}`}
+                  customerName={info.contactName}
+                  customerPhone={info.phone}
+                  customerEmail={info.email}
+                  onBack={() => setStep3('choose')}
+                />
+              </div>
+            )}
+          </>
         )}
       </main>
 
-      <footer className="border-t mt-16 py-8">
+      <footer className="border-t mt-16 py-8 print:hidden">
         <div className="max-w-2xl mx-auto px-4 text-center text-xs text-muted-foreground space-y-1">
           <p>씸스페이스(주) · 042-864-5566 · tebahsoft@tebahsoft.com</p>
           <div className="flex items-center justify-center gap-4 mt-2">
