@@ -1639,7 +1639,7 @@ export default function Deals() {
   const [sheetOpen, setSheetOpen]       = useState(false);
   const [dialogOpen, setDialogOpen]     = useState(false);
   const [editMode, setEditMode]         = useState<'add' | 'edit'>('add');
-  const [sortField, setSortField]       = useState('Contract_Date');
+  const [sortField, setSortField]       = useState('Quote_Date');
   const [sortDir, setSortDir]           = useState<'asc' | 'desc'>('desc');
   const [uploading, setUploading]       = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1665,14 +1665,14 @@ export default function Deals() {
   const [editingQuote, setEditingQuote]     = useState<DealQuote | null>(null);
   const [periodFilter, setPeriodFilter]     = useState(String(new Date().getFullYear()));
   const { widths: colW, startResize } = useResizableColumns('deals_col_widths', {
-    견적번호: 120, 담당자: 130, '학교/기관': 140, 유형: 72, 스테이지: 80, 실결제금액: 100, 계약일: 90, 입금일: 90, 구매처: 90, '📎': 36,
+    견적일: 90, 견적번호: 120, 담당자: 130, '학교/기관': 140, 유형: 72, 스테이지: 80, 실결제금액: 100, 계약일: 90, 입금일: 90, 구매처: 90, '📎': 36,
   });
   // 고정 열 sticky left 오프셋 (체크박스 32px + 각 열 너비 누적)
   const CHECKBOX_W = 32;
   const stickyLeft = {
-    견적번호: canEdit ? CHECKBOX_W : 0,
-    담당자:   canEdit ? CHECKBOX_W + (colW['견적번호'] ?? 120) : (colW['견적번호'] ?? 120),
-    '학교/기관': canEdit ? CHECKBOX_W + (colW['견적번호'] ?? 120) + (colW['담당자'] ?? 130) : (colW['견적번호'] ?? 120) + (colW['담당자'] ?? 130),
+    견적번호: canEdit ? CHECKBOX_W + (colW['견적일'] ?? 90) : (colW['견적일'] ?? 90),
+    담당자:   canEdit ? CHECKBOX_W + (colW['견적일'] ?? 90) + (colW['견적번호'] ?? 120) : (colW['견적일'] ?? 90) + (colW['견적번호'] ?? 120),
+    '학교/기관': canEdit ? CHECKBOX_W + (colW['견적일'] ?? 90) + (colW['견적번호'] ?? 120) + (colW['담당자'] ?? 130) : (colW['견적일'] ?? 90) + (colW['견적번호'] ?? 120) + (colW['담당자'] ?? 130),
   };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1776,6 +1776,7 @@ export default function Deals() {
     Contact_Name:         d => d.fields.Contact_Name ?? '',
     Org_Name:             d => d.fields.Org_Name ?? '',
     Final_Contract_Value: d => String(d.fields.Final_Contract_Value ?? 0).padStart(12, '0'),
+    Quote_Date:           d => d.fields.Quote_Date ?? '',
     Contract_Date:        d => d.fields.Contract_Date ?? d.fields.Order_Date ?? '',
     Payment_Date:         d => d.fields.Payment_Date ?? '',
     Renewal_Date:         d => d.fields.Renewal_Date ?? '',
@@ -2430,6 +2431,7 @@ export default function Deals() {
                   </th>
                 )}
                 {([
+                  { label: '견적일',     field: 'Quote_Date'           },
                   { label: '견적번호',   field: 'Quote_Number'         },
                   { label: '담당자',     field: 'Contact_Name'         },
                   { label: '학교/기관',  field: 'Org_Name'             },
@@ -2465,7 +2467,7 @@ export default function Deals() {
             </thead>
             <tbody>
               {sorted.length === 0 ? (
-                <tr><td colSpan={canEdit ? 11 : 10} className="px-4 py-10 text-center text-muted-foreground">딜이 없습니다.</td></tr>
+                <tr><td colSpan={canEdit ? 12 : 11} className="px-4 py-10 text-center text-muted-foreground">딜이 없습니다.</td></tr>
               ) : sorted.map(d => {
                 const fileCount = d.fields.Notes ? parseFileLinks(d.fields.Notes).length : 0;
                 const isChecked = checkedIds.has(d.id);
@@ -2490,6 +2492,9 @@ export default function Deals() {
                         />
                       </td>
                     )}
+                    <td className="px-4 py-2.5 text-xs tabular-nums text-muted-foreground whitespace-nowrap">
+                      {d.fields.Quote_Date || '-'}
+                    </td>
                     <td className={`px-4 py-2.5 text-xs font-mono text-muted-foreground whitespace-nowrap ${isChecked ? 'bg-primary/5' : 'bg-background'}`}
                       style={{ position: 'sticky', left: stickyLeft['견적번호'], zIndex: 1 }}>
                       {d.fields.Quote_Number || '-'}
