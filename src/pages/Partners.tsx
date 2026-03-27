@@ -1,7 +1,5 @@
 import { useState, useRef, useEffect, useCallback, Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
-// @ts-ignore — Vite ?url import: resolves to the hashed asset URL in production
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -147,8 +145,9 @@ async function uploadPartnerFile(partnerId: string, fileType: FileType, file: Fi
 // PDF 첫 페이지 → JPEG Blob 변환 (브라우저 Canvas 사용)
 async function pdfToJpeg(file: File): Promise<Blob> {
   const pdfjsLib = await import('pdfjs-dist');
-  // 워커 비활성화 — 메인 스레드에서 실행 (Vite 프로덕션 빌드에서 워커 URL 해석 문제 회피)
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+  // CDN 워커 URL — Rollup ?url import 호환성 문제 회피
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
   const arrayBuffer = await file.arrayBuffer();
   const pdf      = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const page     = await pdf.getPage(1);
