@@ -204,17 +204,27 @@ function TossPaySection({
 }) {
   const [payWidget, setPayWidget] = useState<PaymentWidgetInstance | null>(null);
   const [loading, setLoading] = useState(true);
+  const [widgetError, setWidgetError] = useState('');
   const [agreementRef, setAgreementRef] = useState<ReturnType<PaymentWidgetInstance['renderAgreement']> | null>(null);
   const orderIdRef = useRef(nanoid());
 
-  useEffect(() => {
+  const initWidget = () => {
     setLoading(true);
+    setWidgetError('');
+    setPayWidget(null);
     const customerKey = `cus_${nanoid(12)}`;
 
     const loadWidget = () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const PaymentWidget = (window as any).PaymentWidget;
-      if (!PaymentWidget) { console.error('Toss PaymentWidget not loaded'); setLoading(false); return; }
+      if (!PaymentWidget) { setWidgetError('결제 모듈을 불러올 수 없습니다.'); setLoading(false); return; }
+
+      // 20초 타임아웃
+      const timer = setTimeout(() => {
+        setWidgetError('결제 모듈 로딩 시간이 초과되었습니다. 다시 시도해 주세요.');
+        setLoading(false);
+      }, 20000);
+
       PaymentWidget(TOSS_CLIENT_KEY, customerKey)
         .then(async (w: PaymentWidgetInstance) => {
           await w.renderPaymentMethods('#toss-pay-widget', { value: amount });
@@ -222,8 +232,11 @@ function TossPaySection({
           setAgreementRef(ag);
           setPayWidget(w);
         })
-        .catch((e: unknown) => console.error('위젯 로드 실패', e))
-        .finally(() => setLoading(false));
+        .catch((e: unknown) => {
+          console.error('위젯 로드 실패', e);
+          setWidgetError('결제 모듈 초기화에 실패했습니다. 다시 시도해 주세요.');
+        })
+        .finally(() => { clearTimeout(timer); setLoading(false); });
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -233,10 +246,12 @@ function TossPaySection({
       const script = document.createElement('script');
       script.src = 'https://js.tosspayments.com/v1/payment-widget';
       script.onload = loadWidget;
-      script.onerror = () => { console.error('Toss script load failed'); setLoading(false); };
+      script.onerror = () => { setWidgetError('결제 스크립트 로드 실패. 네트워크를 확인해 주세요.'); setLoading(false); };
       document.head.appendChild(script);
     }
-  }, []);
+  };
+
+  useEffect(() => { initWidget(); }, []);
 
   useEffect(() => { payWidget?.updateAmount(amount); }, [amount, payWidget]);
 
@@ -266,6 +281,12 @@ function TossPaySection({
           <div className="flex items-center justify-center py-16 gap-3 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" />
             <span className="text-sm">결제 모듈 로딩 중...</span>
+          </div>
+        )}
+        {widgetError && (
+          <div className="py-10 text-center space-y-3">
+            <p className="text-sm text-destructive">{widgetError}</p>
+            <Button variant="outline" size="sm" onClick={initWidget}>다시 시도</Button>
           </div>
         )}
         <div id="toss-pay-widget" />
