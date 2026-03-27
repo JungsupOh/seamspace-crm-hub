@@ -16,6 +16,8 @@ const nanoid = (n = 21) => crypto.getRandomValues(new Uint8Array(n)).reduce((s, 
 const TOSS_CLIENT_KEY = import.meta.env.VITE_TOSS_CLIENT_KEY ?? 'test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const AIRTABLE_BASE = import.meta.env.VITE_AIRTABLE_BASE_ID || 'appsnsExBG8ZeEZEk';
+const AIRTABLE_TOKEN = import.meta.env.VITE_AIRTABLE_TOKEN || '';
 
 // ── 플랜 정의 ──────────────────────────────────────
 type PlanKey = '학급' | '학년' | '학교(소)' | '학교(중)' | '학교(대)';
@@ -340,23 +342,54 @@ export default function Order() {
 
   const step1Valid = info.orgName.trim() && info.contactName.trim() && info.phone.trim();
 
-  // 견적서 조회
+  // 견적서 조회 (Supabase deal_quotes → Airtable 03_Deals fallback)
   const handleQuoteLookup = async () => {
     if (!quoteNum.trim()) return;
     setQuoteLoading(true);
     setQuoteError('');
     setQuoteRecord(null);
     try {
+      const num = quoteNum.trim();
+
+      // 1차: Supabase deal_quotes 조회
       const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=eq.${encodeURIComponent(quoteNum.trim())}&select=*`,
+        `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=eq.${encodeURIComponent(num)}&select=*`,
         { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
       );
       const data: QuoteRecord[] = await res.json();
-      if (!Array.isArray(data) || data.length === 0) {
-        setQuoteError('견적서를 찾을 수 없습니다. 번호를 다시 확인해 주세요.');
-      } else {
+      if (Array.isArray(data) && data.length > 0) {
         setQuoteRecord(data[0]);
+        return;
       }
+
+      // 2차: Airtable 03_Deals에서 Quote_Number 매칭
+      const atRes = await fetch(
+        `https://api.airtable.com/v0/${AIRTABLE_BASE}/03_Deals?filterByFormula=${encodeURIComponent(`{Quote_Number}="${num}"`)}&maxRecords=1`,
+        { headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` } }
+      );
+      const atData = await atRes.json();
+      const record = atData?.records?.[0];
+      if (!record) {
+        setQuoteError('견적서를 찾을 수 없습니다. 번호를 다시 확인해 주세요.');
+        return;
+      }
+      const f = record.fields;
+      // Airtable 딜 → QuoteRecord 매핑
+      const mapped: QuoteRecord = {
+        id: record.id,
+        deal_id: record.id,
+        quote_number: num,
+        plan: f.Quote_Plan,
+        qty: f.Quote_Qty,
+        duration: f.License_Duration,
+        unit_price: f.Unit_Price,
+        supply_price: f.Supply_Price,
+        tax_amount: f.Tax_Amount,
+        final_value: f.Final_Contract_Value,
+        quote_date: f.Quote_Date,
+        notes: f.Notes,
+      };
+      setQuoteRecord(mapped);
     } catch {
       setQuoteError('조회 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
