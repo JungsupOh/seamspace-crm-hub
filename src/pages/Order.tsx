@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-// Toss Payments widget loaded via CDN (avoids Rollup/Vercel bundling issues)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PaymentWidgetInstance = any;
+// Toss Payments 결제창 SDK loaded via CDN (https://js.tosspayments.com/v1)
 import { searchSchools, SchoolInfo } from '@/lib/neis';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -195,7 +193,7 @@ interface QuoteRecord {
 
 const DEFAULT_MONTHS = IS_EVENT ? 6 : 12;
 
-// ── Toss 결제 공통 섹션 ───────────────────────────
+// ── Toss 결제창 섹션 (결제창 SDK / test_ck_ 키) ───
 function TossPaySection({
   amount, orderName, customerName, customerPhone, customerEmail,
   orgName, plan, qty, duration, quoteNumber, onBack,
@@ -205,74 +203,33 @@ function TossPaySection({
   orgName?: string; plan?: string; qty?: number; duration?: number;
   quoteNumber?: string; onBack: () => void;
 }) {
-  const [payWidget, setPayWidget] = useState<PaymentWidgetInstance | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [widgetError, setWidgetError] = useState('');
-  const [agreementRef, setAgreementRef] = useState<ReturnType<PaymentWidgetInstance['renderAgreement']> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const orderIdRef = useRef(nanoid());
 
-  const initWidget = () => {
-    setLoading(true);
-    setWidgetError('');
-    setPayWidget(null);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const PW = (window as any).PaymentWidget;
-    const customerKey = PW?.ANONYMOUS ?? `cus_${nanoid(12)}`;
-
-    const loadWidget = async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const PaymentWidget = (window as any).PaymentWidget;
-      if (!PaymentWidget) {
-        setWidgetError('결제 모듈을 불러올 수 없습니다.');
-        setLoading(false);
-        return;
-      }
-
-      const timer = setTimeout(() => {
-        setWidgetError('결제 모듈 로딩 시간이 초과되었습니다. 다시 시도해 주세요.');
-        setLoading(false);
-      }, 15000);
-
-      try {
-        // CDN v1은 Promise를 반환할 수도, 인스턴스를 직접 반환할 수도 있음
-        const result: PaymentWidgetInstance = await Promise.resolve(
-          PaymentWidget(TOSS_CLIENT_KEY, customerKey)
-        );
-        await result.renderPaymentMethods('#toss-pay-widget', { value: amount });
-        const ag = await result.renderAgreement('#toss-agree-widget');
-        setAgreementRef(ag);
-        setPayWidget(result);
-      } catch (e: unknown) {
-        console.error('[TossPay] 위젯 초기화 실패:', e);
-        setWidgetError(`결제 모듈 초기화에 실패했습니다. (${String(e).slice(0, 80)})`);
-      } finally {
-        clearTimeout(timer);
-        setLoading(false);
-      }
-    };
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if ((window as any).PaymentWidget) {
-      loadWidget();
-    } else {
-      const script = document.createElement('script');
-      script.src = 'https://js.tosspayments.com/v1/payment-widget';
-      script.onload = () => loadWidget();
-      script.onerror = () => { setWidgetError('결제 스크립트 로드 실패. 네트워크를 확인해 주세요.'); setLoading(false); };
-      document.head.appendChild(script);
-    }
-  };
-
-  useEffect(() => { initWidget(); }, []);
-
-  useEffect(() => { payWidget?.updateAmount(amount); }, [amount, payWidget]);
-
   const handlePay = async () => {
-    if (!payWidget) return;
+    setLoading(true);
+    setError('');
+
+    // 결제창 SDK 로드 (https://js.tosspayments.com/v1)
+    if (!(window as any).TossPayments) {
+      await new Promise<void>((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://js.tosspayments.com/v1';
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error('결제 스크립트 로드 실패'));
+        document.head.appendChild(script);
+      }).catch((e: unknown) => {
+        setError(String(e));
+        setLoading(false);
+        throw e;
+      });
+    }
+
     try {
-      const agreed = await agreementRef?.isAgreed?.();
-      if (agreed === false) { alert('이용약관에 동의해 주세요.'); return; }
-      // 결제 완료 페이지에서 Edge Function 호출에 필요한 정보를 미리 저장
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tossPayments = (window as any).TossPayments(TOSS_CLIENT_KEY);
+
       sessionStorage.setItem('toss_order_session', JSON.stringify({
         customerName,
         customerPhone: customerPhone.replace(/\D/g, ''),
@@ -283,42 +240,40 @@ function TossPaySection({
         duration: duration ?? 12,
         quoteNumber: quoteNumber || null,
       }));
-      await payWidget.requestPayment({
+
+      await tossPayments.requestPayment('카드', {
+        amount,
         orderId: orderIdRef.current,
         orderName,
         customerName,
         customerEmail: customerEmail || undefined,
         customerMobilePhone: customerPhone.replace(/\D/g, ''),
         successUrl: `${window.location.origin}/order/complete`,
-        failUrl: `${window.location.origin}/order/fail`,
+        failUrl:    `${window.location.origin}/order/fail`,
       });
     } catch (e: unknown) {
-      if ((e as { code?: string })?.code !== 'USER_CANCEL') alert('결제 중 오류가 발생했습니다. 다시 시도해 주세요.');
+      const code = (e as { code?: string })?.code;
+      if (code !== 'USER_CANCEL') {
+        const msg = (e as { message?: string })?.message ?? String(e);
+        setError(msg);
+      }
+      setLoading(false);
     }
   };
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-2xl border shadow-sm p-5">
-        {loading && (
-          <div className="flex items-center justify-center py-16 gap-3 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            <span className="text-sm">결제 모듈 로딩 중...</span>
-          </div>
-        )}
-        {widgetError && (
-          <div className="py-10 text-center space-y-3">
-            <p className="text-sm text-destructive">{widgetError}</p>
-            <Button variant="outline" size="sm" onClick={initWidget}>다시 시도</Button>
-          </div>
-        )}
-        <div id="toss-pay-widget" />
-        <div id="toss-agree-widget" className="mt-4" />
+      <div className="bg-blue-50 rounded-xl border border-blue-100 p-4 text-sm text-blue-800 flex items-start gap-2.5">
+        <CreditCard className="h-4 w-4 mt-0.5 shrink-0 text-blue-500" />
+        <p>결제하기 버튼을 누르면 토스페이먼츠 결제 페이지로 이동합니다.<br />카드, 계좌이체, 무통장입금 등 다양한 결제 수단을 사용할 수 있습니다.</p>
       </div>
+      {error && (
+        <p className="text-sm text-destructive text-center bg-red-50 rounded-lg px-3 py-2">{error}</p>
+      )}
       <div className="flex gap-3">
-        <Button variant="outline" className="flex-1 h-12" onClick={onBack}>이전</Button>
-        <Button className="flex-[2] h-12 text-base font-semibold" onClick={handlePay}
-          disabled={loading || !payWidget}>
+        <Button variant="outline" className="flex-1 h-12" onClick={onBack} disabled={loading}>이전</Button>
+        <Button className="flex-[2] h-12 text-base font-semibold" onClick={handlePay} disabled={loading}>
+          {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CreditCard className="h-4 w-4 mr-2" />}
           {fmt(amount)} 결제하기
         </Button>
       </div>
