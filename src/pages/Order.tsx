@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 const nanoid = (n = 21) => crypto.getRandomValues(new Uint8Array(n)).reduce((s, b) => s + (b & 63).toString(36), '');
 
-const TOSS_CLIENT_KEY = import.meta.env.VITE_TOSS_CLIENT_KEY ?? 'test_ck_D5GePWvyJnrK0W0k6q8gLzN97Eoq';
+const TOSS_CLIENT_KEY = import.meta.env.VITE_TOSS_CLIENT_KEY ?? 'test_ck_D4yKeq5bgrpXmmoXXnJrGX0lzW6Y';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const AIRTABLE_BASE = import.meta.env.VITE_AIRTABLE_BASE_ID || 'appsnsExBG8ZeEZEk';
