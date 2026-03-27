@@ -319,9 +319,10 @@ export default function Order() {
   // 계산값
   const activePlan = PLANS.find(p => p.id === info.planId) ?? PLANS[1];
   const { price: unitPrice, isEvent: priceIsEvent } = getUnitPrice(info.months, info.planId);
-  const supply = unitPrice * info.qty;
-  const tax = Math.round(supply * 0.1);
-  const total = supply + tax;
+  // 가격표의 금액은 VAT 포함가 → 역산으로 공급가액/부가세 분리
+  const total = unitPrice * info.qty;
+  const supply = Math.round(total / 1.1);
+  const tax = total - supply;
 
   const aiStudentsNum = parseInt(aiStudents, 10);
   const aiMonthsNum   = parseInt(aiMonths, 10);
@@ -868,7 +869,7 @@ export default function Order() {
                                     </div>
                                     <div className="text-right shrink-0 ml-3">
                                       <p className={`font-bold text-sm ${s.recommended ? 'text-purple-700' : ''}`}>{fmt(s.total)}</p>
-                                      <p className="text-[10px] text-muted-foreground">VAT 포함 {fmt(Math.round(s.total * 1.1))}</p>
+                                      <p className="text-[10px] text-muted-foreground">VAT 포함가</p>
                                     </div>
                                   </div>
                                 </button>
@@ -1010,7 +1011,7 @@ export default function Order() {
                       {priceIsEvent && (
                         <div className="flex justify-between text-pink-600 text-xs">
                           <span className="flex items-center gap-1"><Tag className="h-3 w-3" />이벤트 할인 적용</span>
-                          <span>정가 {fmt(REG[info.months]?.[info.planId] * info.qty ?? 0)} → {fmt(supply)}</span>
+                          <span>정가 {fmt((REG[info.months]?.[info.planId] ?? 0) * info.qty)} → {fmt(total)}</span>
                         </div>
                       )}
                       <div className="flex justify-between"><span className="text-muted-foreground">공급가액</span><span>{fmt(supply)}</span></div>
