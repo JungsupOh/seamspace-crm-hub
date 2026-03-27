@@ -390,6 +390,14 @@ export default function Order() {
         notes: f.Notes,
       };
       setQuoteRecord(mapped);
+      // 담당자 정보 자동 채우기
+      if (f.Contact_Name || f.Contact_Phone || f.Contact_Email) {
+        setQuoteContact({
+          name:  f.Contact_Name  ?? '',
+          phone: f.Contact_Phone ?? '',
+          email: f.Contact_Email ?? '',
+        });
+      }
     } catch {
       setQuoteError('조회 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
