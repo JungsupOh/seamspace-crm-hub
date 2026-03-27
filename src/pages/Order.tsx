@@ -197,10 +197,13 @@ const DEFAULT_MONTHS = IS_EVENT ? 6 : 12;
 
 // ── Toss 결제 공통 섹션 ───────────────────────────
 function TossPaySection({
-  amount, orderName, customerName, customerPhone, customerEmail, onBack,
+  amount, orderName, customerName, customerPhone, customerEmail,
+  orgName, plan, qty, duration, quoteNumber, onBack,
 }: {
   amount: number; orderName: string; customerName: string;
-  customerPhone: string; customerEmail?: string; onBack: () => void;
+  customerPhone: string; customerEmail?: string;
+  orgName?: string; plan?: string; qty?: number; duration?: number;
+  quoteNumber?: string; onBack: () => void;
 }) {
   const [payWidget, setPayWidget] = useState<PaymentWidgetInstance | null>(null);
   const [loading, setLoading] = useState(true);
@@ -212,31 +215,40 @@ function TossPaySection({
     setLoading(true);
     setWidgetError('');
     setPayWidget(null);
-    const customerKey = `cus_${nanoid(12)}`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const PW = (window as any).PaymentWidget;
+    const customerKey = PW?.ANONYMOUS ?? `cus_${nanoid(12)}`;
 
-    const loadWidget = () => {
+    const loadWidget = async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const PaymentWidget = (window as any).PaymentWidget;
-      if (!PaymentWidget) { setWidgetError('결제 모듈을 불러올 수 없습니다.'); setLoading(false); return; }
+      if (!PaymentWidget) {
+        setWidgetError('결제 모듈을 불러올 수 없습니다.');
+        setLoading(false);
+        return;
+      }
 
-      // 20초 타임아웃
       const timer = setTimeout(() => {
         setWidgetError('결제 모듈 로딩 시간이 초과되었습니다. 다시 시도해 주세요.');
         setLoading(false);
-      }, 20000);
+      }, 15000);
 
-      PaymentWidget(TOSS_CLIENT_KEY, customerKey)
-        .then(async (w: PaymentWidgetInstance) => {
-          await w.renderPaymentMethods('#toss-pay-widget', { value: amount });
-          const ag = await w.renderAgreement('#toss-agree-widget');
-          setAgreementRef(ag);
-          setPayWidget(w);
-        })
-        .catch((e: unknown) => {
-          console.error('위젯 로드 실패', e);
-          setWidgetError('결제 모듈 초기화에 실패했습니다. 다시 시도해 주세요.');
-        })
-        .finally(() => { clearTimeout(timer); setLoading(false); });
+      try {
+        // CDN v1은 Promise를 반환할 수도, 인스턴스를 직접 반환할 수도 있음
+        const result: PaymentWidgetInstance = await Promise.resolve(
+          PaymentWidget(TOSS_CLIENT_KEY, customerKey)
+        );
+        await result.renderPaymentMethods('#toss-pay-widget', { value: amount });
+        const ag = await result.renderAgreement('#toss-agree-widget');
+        setAgreementRef(ag);
+        setPayWidget(result);
+      } catch (e: unknown) {
+        console.error('[TossPay] 위젯 초기화 실패:', e);
+        setWidgetError(`결제 모듈 초기화에 실패했습니다. (${String(e).slice(0, 80)})`);
+      } finally {
+        clearTimeout(timer);
+        setLoading(false);
+      }
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -245,7 +257,7 @@ function TossPaySection({
     } else {
       const script = document.createElement('script');
       script.src = 'https://js.tosspayments.com/v1/payment-widget';
-      script.onload = loadWidget;
+      script.onload = () => loadWidget();
       script.onerror = () => { setWidgetError('결제 스크립트 로드 실패. 네트워크를 확인해 주세요.'); setLoading(false); };
       document.head.appendChild(script);
     }
@@ -260,6 +272,17 @@ function TossPaySection({
     try {
       const agreed = await agreementRef?.isAgreed?.();
       if (agreed === false) { alert('이용약관에 동의해 주세요.'); return; }
+      // 결제 완료 페이지에서 Edge Function 호출에 필요한 정보를 미리 저장
+      sessionStorage.setItem('toss_order_session', JSON.stringify({
+        customerName,
+        customerPhone: customerPhone.replace(/\D/g, ''),
+        customerEmail: customerEmail || null,
+        orgName: orgName || null,
+        plan: plan || null,
+        qty: qty ?? 1,
+        duration: duration ?? 12,
+        quoteNumber: quoteNumber || null,
+      }));
       await payWidget.requestPayment({
         orderId: orderIdRef.current,
         orderName,
@@ -760,6 +783,10 @@ export default function Order() {
                   customerName={quoteContact.name}
                   customerPhone={quoteContact.phone}
                   customerEmail={quoteContact.email}
+                  plan={quoteRecord.plan}
+                  qty={quoteRecord.qty ?? 1}
+                  duration={quoteRecord.duration ?? 12}
+                  quoteNumber={quoteRecord.quote_number}
                   onBack={() => setQuoteReadyToPay(false)}
                 />
               </div>
@@ -1269,6 +1296,11 @@ export default function Order() {
                   customerName={info.contactName}
                   customerPhone={info.phone}
                   customerEmail={info.email}
+                  orgName={info.orgName}
+                  plan={info.planId}
+                  qty={info.qty}
+                  duration={info.months}
+                  quoteNumber={savedQuoteNum ?? undefined}
                   onBack={() => setStep3('choose')}
                 />
               </div>
