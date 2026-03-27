@@ -1783,8 +1783,10 @@ export default function Deals() {
   };
   const sorted = [...filtered].sort((a, b) => {
     const fn = fieldKey[sortField];
-    if (!fn) return 0;
-    return sortDir === 'asc' ? fn(a).localeCompare(fn(b)) : fn(b).localeCompare(fn(a));
+    const primary = fn ? (sortDir === 'asc' ? fn(a).localeCompare(fn(b)) : fn(b).localeCompare(fn(a))) : 0;
+    if (primary !== 0) return primary;
+    // 2차 정렬: 견적번호 내림차순
+    return (b.fields.Quote_Number ?? '').localeCompare(a.fields.Quote_Number ?? '');
   });
 
   const pipelineTotals = {

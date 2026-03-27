@@ -1,4 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, Component } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
+// @ts-ignore — Vite ?url import: resolves to the hashed asset URL in production
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -87,7 +90,7 @@ async function updatePartner(id: string, fields: Partial<PartnerFields>): Promis
   const res = await fetch(`${PARTNER_URL}?id=eq.${id}`, {
     method: 'PATCH',
     headers: DB_HEADERS,
-    body: JSON.stringify({ ...fields, updated_at: new Date().toISOString() }),
+    body: JSON.stringify(fields),
   });
   if (!res.ok) throw new Error(`파트너 수정 실패: ${res.status}`);
 }
@@ -141,17 +144,45 @@ async function uploadPartnerFile(partnerId: string, fileType: FileType, file: Fi
   return row;
 }
 
+// PDF 첫 페이지 → JPEG Blob 변환 (브라우저 Canvas 사용)
+async function pdfToJpeg(file: File): Promise<Blob> {
+  const pdfjsLib = await import('pdfjs-dist');
+  // 워커 비활성화 — 메인 스레드에서 실행 (Vite 프로덕션 빌드에서 워커 URL 해석 문제 회피)
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf      = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const page     = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 2.0 });
+  const canvas   = document.createElement('canvas');
+  canvas.width   = viewport.width;
+  canvas.height  = viewport.height;
+  await page.render({ canvasContext: canvas.getContext('2d')!, viewport }).promise;
+  return new Promise((resolve, reject) =>
+    canvas.toBlob(b => b ? resolve(b) : reject(new Error('canvas toBlob 실패')), 'image/jpeg', 0.92)
+  );
+}
+
 async function runOcr(file: File, docType: 'business_reg' | 'bank_account'): Promise<Record<string, string | null>> {
-  const buf   = await file.arrayBuffer();
+  // PDF → JPEG 변환 후 OCR
+  const ocrFile = file.type === 'application/pdf'
+    ? new File([await pdfToJpeg(file)], file.name.replace(/\.pdf$/i, '.jpg'), { type: 'image/jpeg' })
+    : file;
+
+  const buf   = await ocrFile.arrayBuffer();
   const uint8 = new Uint8Array(buf);
   let binary  = '';
   const chunk = 8192;
   for (let i = 0; i < uint8.length; i += chunk) {
     binary += String.fromCharCode(...uint8.subarray(i, i + chunk));
   }
-  const base64 = btoa(binary);
-  const mediaType = (file.type?.startsWith('image/') ? file.type : 'image/jpeg') as
-    'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+  const base64   = btoa(binary);
+  const VALID_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
+  type ValidType = typeof VALID_TYPES[number];
+  const rawType = ocrFile.type ?? '';
+  const normalized = rawType === 'image/jpg' ? 'image/jpeg' : rawType;
+  const mediaType: ValidType = (VALID_TYPES as readonly string[]).includes(normalized)
+    ? normalized as ValidType
+    : 'image/jpeg';
 
   const res = await fetch(`${SUPABASE_URL}/functions/v1/ocr-partner-doc`, {
     method: 'POST',
@@ -198,6 +229,34 @@ function MonthlySummary({ deals }: { deals: AirtableRecord<DealFields>[] }) {
   );
 }
 
+// ── 에러 바운더리 ─────────────────────────────────
+interface EBState { hasError: boolean; message: string }
+class PartnerSheetErrorBoundary extends Component<{ children: ReactNode }, EBState> {
+  state: EBState = { hasError: false, message: '' };
+  static getDerivedStateFromError(e: Error): EBState {
+    return { hasError: true, message: e.message };
+  }
+  componentDidCatch(e: Error, info: ErrorInfo) {
+    console.error('[PartnerSheet] render error:', e, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="fixed inset-y-0 right-0 z-50 w-full sm:max-w-xl bg-background border-l shadow-lg flex items-center justify-center">
+          <div className="text-center p-8 space-y-3">
+            <p className="text-destructive font-medium">오류가 발생했습니다</p>
+            <p className="text-xs text-muted-foreground">{this.state.message}</p>
+            <button className="text-xs underline" onClick={() => this.setState({ hasError: false, message: '' })}>
+              다시 시도
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ── 파트너 Sheet ─────────────────────────────────
 const EMPTY: Partial<PartnerFields> = {
   name: '', business_number: null, representative: null,
@@ -215,6 +274,7 @@ interface PartnerSheetProps {
 
 function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
   const qc = useQueryClient();
+  const { canEdit } = useAuth();
   const [f, setF]         = useState<Partial<PartnerFields>>(EMPTY);
   const [files, setFiles] = useState<PartnerFile[]>([]);
   const { data: allDeals } = useDeals();
@@ -257,8 +317,9 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
       setFiles(prev => [...prev.filter(x => x.file_type !== fileType), record]);
 
       if (fileType === 'business_reg' || fileType === 'bank_account') {
-        if (!file.type?.startsWith('image/')) {
-          toast.success('파일 업로드 완료 (이미지 파일만 OCR 가능)');
+        const isOcrSupported = file.type?.startsWith('image/') || file.type === 'application/pdf';
+        if (!isOcrSupported) {
+          toast.success('파일 업로드 완료');
           return;
         }
         const data = await runOcr(file, fileType);
@@ -479,7 +540,7 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
               const existing = files.find(x => x.file_type === ft);
               const loading  = ocrLoading[ft];
               const isDragging = dragOver === ft;
-              const accept = ft === 'contract' ? 'image/*,application/pdf' : 'image/*';
+              const accept = 'image/*,application/pdf';
 
               return (
                 <div key={ft}
@@ -581,6 +642,9 @@ export default function Partners() {
   const [selected, setSelected] = useState<Partner | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [periodFilter, setPeriodFilter] = useState('this_month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo]   = useState('');
 
   const handleAdd  = () => { setSelected(null); setSheetOpen(true); };
   const handleEdit = (p: Partner) => { setSelected(p); setSheetOpen(true); };
@@ -593,7 +657,41 @@ export default function Partners() {
     </div>
   );
 
-  const thisMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+  const now   = new Date();
+  const yyyy  = now.getFullYear();
+  const mm    = now.getMonth(); // 0-indexed
+
+  // ── 기간 필터 범위 계산 ─────────────────────────
+  const getPeriodRange = (): { from: string; to: string; label: string } => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    switch (periodFilter) {
+      case 'this_month': {
+        const ym = `${yyyy}-${pad(mm + 1)}`;
+        return { from: `${ym}-01`, to: `${ym}-31`, label: `${ym} 매출` };
+      }
+      case 'last_month': {
+        const d = new Date(yyyy, mm - 1, 1);
+        const ym = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+        return { from: `${ym}-01`, to: `${ym}-31`, label: `${ym} 매출` };
+      }
+      case 'this_year':
+        return { from: `${yyyy}-01-01`, to: `${yyyy}-12-31`, label: `${yyyy}년 매출` };
+      case 'last_year':
+        return { from: `${yyyy - 1}-01-01`, to: `${yyyy - 1}-12-31`, label: `${yyyy - 1}년 매출` };
+      case 'custom':
+        return { from: customFrom || '2000-01-01', to: customTo || '2099-12-31', label: customFrom && customTo ? `${customFrom} ~ ${customTo}` : '커스텀 기간' };
+      default: // all
+        return { from: '2000-01-01', to: '2099-12-31', label: '전체 매출' };
+    }
+  };
+
+  const { from: periodFrom, to: periodTo, label: periodLabel } = getPeriodRange();
+
+  const matchesPeriod = (date: string) => {
+    if (periodFilter === 'all') return true;
+    return date >= periodFrom && date <= periodTo;
+  };
+
   const list = partners ?? [];
   const q = search.toLowerCase();
   const filtered = list.filter(p =>
@@ -601,14 +699,14 @@ export default function Partners() {
       .some(v => v?.toLowerCase().includes(q))
   );
 
-  // 파트너별 이달 매출 계산
+  // 파트너별 기간 매출 계산
   const monthlyByPartner: Record<string, number> = {};
   let totalThisMonth = 0;
   let totalThisMonthDeals = 0;
   for (const d of allDeals ?? []) {
     const src = d.fields.Lead_Source?.trim();
     const date = d.fields.Contract_Date || d.fields.Payment_Date;
-    if (!src || !date || date.slice(0, 7) !== thisMonth) continue;
+    if (!src || !date || !matchesPeriod(date)) continue;
     const amount = d.fields.Final_Contract_Value ?? 0;
     monthlyByPartner[src] = (monthlyByPartner[src] ?? 0) + amount;
     totalThisMonth += amount;
@@ -632,9 +730,36 @@ export default function Partners() {
         )}
       </div>
 
-      {/* 이달 매출 요약 */}
+      {/* 기간 필터 */}
+      <div className="surface-card ring-container p-3">
+        <div className="flex items-center flex-wrap gap-1.5">
+          {([
+            { id: 'this_month', label: '이번달' },
+            { id: 'last_month', label: '지난달' },
+            { id: 'this_year',  label: '올해' },
+            { id: 'last_year',  label: '작년' },
+            { id: 'all',        label: '전체' },
+            { id: 'custom',     label: '커스텀' },
+          ] as const).map(({ id, label }) => (
+            <button key={id} onClick={() => setPeriodFilter(id)}
+              className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors
+                ${periodFilter === id ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
+              {label}
+            </button>
+          ))}
+          {periodFilter === 'custom' && (
+            <div className="flex items-center gap-1.5 ml-1">
+              <Input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="h-6 text-xs w-32 px-2" />
+              <span className="text-xs text-muted-foreground">~</span>
+              <Input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="h-6 text-xs w-32 px-2" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 기간 매출 요약 */}
       <div className="surface-card ring-container p-4">
-        <p className="text-xs text-muted-foreground font-medium mb-3">{thisMonth} 매출 현황</p>
+        <p className="text-xs text-muted-foreground font-medium mb-3">{periodLabel} 현황</p>
         <div className="flex items-end gap-6 flex-wrap">
           <div>
             <p className="text-2xl font-bold tabular-nums">{totalThisMonth.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">원</span></p>
@@ -668,7 +793,7 @@ export default function Partners() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/60">
-                {['파트너명', '사업자번호', '대표자', '정산 계좌', '담당자', '이달 매출', '서류', '상태'].map(h => (
+                {['파트너명', '사업자번호', '대표자', '정산 계좌', '담당자', periodLabel, '서류', '상태'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -725,12 +850,16 @@ export default function Partners() {
         </div>
       </div>
 
-      <PartnerSheet
-        open={sheetOpen}
-        onClose={handleClose}
-        initial={selected}
-        onSaved={() => qc.invalidateQueries({ queryKey: ['partners'] })}
-      />
+      {sheetOpen && (
+        <PartnerSheetErrorBoundary>
+          <PartnerSheet
+            open={sheetOpen}
+            onClose={handleClose}
+            initial={selected}
+            onSaved={() => qc.invalidateQueries({ queryKey: ['partners'] })}
+          />
+        </PartnerSheetErrorBoundary>
+      )}
     </div>
   );
 }
