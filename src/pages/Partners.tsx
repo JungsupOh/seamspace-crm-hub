@@ -143,11 +143,16 @@ async function uploadPartnerFile(partnerId: string, fileType: FileType, file: Fi
 }
 
 // PDF 첫 페이지 → JPEG Blob 변환 (브라우저 Canvas 사용)
+// pdfjs-dist는 ESM-only라 Rollup이 번들링 불가 → CDN에서 동적 로드
+const PDFJS_CDN = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
+const PDFJS_WORKER = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
+
 async function pdfToJpeg(file: File): Promise<Blob> {
-  const pdfjsLib = await import('pdfjs-dist');
-  // CDN 워커 URL — Rollup ?url import 호환성 문제 회피
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  // eslint-disable-next-line prefer-const
+  const pdfjsLib = await import(/* @vite-ignore */ PDFJS_CDN);
+  pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
   const arrayBuffer = await file.arrayBuffer();
   const pdf      = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const page     = await pdf.getPage(1);
