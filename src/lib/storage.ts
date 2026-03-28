@@ -202,12 +202,14 @@ export interface DealQuote {
   quote_date?: string;
   plan?: string;
   qty?: number;
+  license_qty?: number;
   duration?: number;
   unit_price?: number;
   supply_price?: number;
   tax_amount?: number;
   final_value?: number;
   notes?: string;
+  contact_phone?: string;
   is_selected: boolean;
   created_at: string;
 }

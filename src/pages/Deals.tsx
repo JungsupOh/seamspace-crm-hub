@@ -1499,6 +1499,7 @@ function QuoteDialog({
           quote_date: form.quote_date,
           plan: form.plan,
           qty: form.qty,
+          license_qty: form.license_qty,
           duration: form.duration,
           unit_price: form.unit_price,
           supply_price: form.supply_price,
@@ -1514,6 +1515,7 @@ function QuoteDialog({
           quote_date: form.quote_date,
           plan: form.plan,
           qty: form.qty,
+          license_qty: form.license_qty,
           duration: form.duration,
           unit_price: form.unit_price,
           supply_price: form.supply_price,
@@ -1582,6 +1584,10 @@ function QuoteDialog({
             <div className="space-y-1">
               <Label className="text-xs">총인원 (명)</Label>
               <NumericInput value={num('qty')} onChange={v => up('qty', v)} className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">이용권 수량 (장)</Label>
+              <NumericInput value={num('license_qty')} onChange={v => up('license_qty', v)} className="h-8 text-sm" />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">이용기간 (개월)</Label>
