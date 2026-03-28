@@ -30,7 +30,7 @@ interface PlanDef {
 }
 
 const PLANS: PlanDef[] = [
-  { id: '학급',     label: '학급 플랜',      shortLabel: '학급',      capacity: '최대 40명',      multiLicense: false },
+  { id: '학급',     label: '학급 플랜',      shortLabel: '학급',      capacity: '최대 40명',      multiLicense: true },
   { id: '학년',     label: '학년 플랜',      shortLabel: '학년',      capacity: '최대 200명',     badge: '인기', multiLicense: true },
   { id: '학교(소)', label: '학교 플랜 (소)', shortLabel: '학교(소)', capacity: '최대 500명',    multiLicense: true },
   { id: '학교(중)', label: '학교 플랜 (중)', shortLabel: '학교(중)', capacity: '최대 1,000명', multiLicense: true },
@@ -190,7 +190,7 @@ const PRODUCTS: ProductDef[] = [
 interface OrderInfo {
   school: SchoolInfo | null;
   orgName: string; contactName: string; phone: string; email: string;
-  planId: PlanKey; months: number; qty: number;
+  planId: PlanKey; months: number; qty: number; students: string;
 }
 interface QuoteRecord {
   id: string; deal_id: string; quote_number: string;
@@ -303,7 +303,7 @@ export default function Order() {
   const [step, setStep] = useState(1);
   const [info, setInfo] = useState<OrderInfo>({
     school: null, orgName: '', contactName: '', phone: '', email: '',
-    planId: '학년', months: DEFAULT_MONTHS, qty: 1,
+    planId: '학년', months: DEFAULT_MONTHS, qty: 1, students: '',
   });
   const [aiTab, setAiTab] = useState(false);
   const [aiStudents, setAiStudents] = useState('');
@@ -485,7 +485,7 @@ export default function Order() {
           final_value: selectedProduct.code === '01' ? total : undefined,
           contact_phone: info.phone.replace(/\D/g, ''),
           quote_date: today,
-          notes: `[웹주문] 상품: 심스페이스-${selectedProduct.name} / 기관: ${info.orgName} / 담당자: ${info.contactName} / 연락처: ${info.phone}${info.email ? ` / 이메일: ${info.email}` : ''}`,
+          notes: `[웹주문] 상품: 심스페이스-${selectedProduct.name} / 기관: ${info.orgName} / 담당자: ${info.contactName} / 연락처: ${info.phone}${info.email ? ` / 이메일: ${info.email}` : ''}${info.students ? ` / 학생수: ${info.students}명` : ''}`,
         }),
       });
       if (saveRes.ok || saveRes.status === 201) {
@@ -1078,24 +1078,70 @@ export default function Order() {
                           </div>
                         )}
                       </div>
-                      {activePlan.multiLicense && (
-                        <div>
-                          <Label className="text-sm font-medium mb-1 block">
-                            이용권 수량
-                            <span className="text-xs text-muted-foreground font-normal ml-1.5">(이용권 1장 = 그룹 1개 관리)</span>
-                          </Label>
-                          <div className="flex items-center gap-3 mt-2">
-                            <button type="button"
-                              onClick={() => setInfo(p => ({ ...p, qty: Math.max(1, p.qty - 1) }))}
-                              className="w-10 h-10 rounded-lg border flex items-center justify-center text-lg font-bold hover:bg-muted transition-colors">−</button>
-                            <span className="w-12 text-center font-bold text-xl">{info.qty}</span>
-                            <button type="button"
-                              onClick={() => setInfo(p => ({ ...p, qty: Math.min(30, p.qty + 1) }))}
-                              className="w-10 h-10 rounded-lg border flex items-center justify-center text-lg font-bold hover:bg-muted transition-colors">+</button>
-                            <span className="text-sm text-muted-foreground">장</span>
+                      {/* 학생 수 + 이용권 수량 */}
+                      {(() => {
+                        const studentsNum = parseInt(info.students, 10);
+                        const isGradeClass = info.planId === '학급';
+                        const minQty = (isGradeClass && studentsNum > 0)
+                          ? Math.max(1, Math.ceil(studentsNum / 40)) : 1;
+                        const capacity = isGradeClass
+                          ? info.qty * 40
+                          : PLAN_CAPACITY[info.planId];
+                        const capacityLabel = info.planId === '학교(대)'
+                          ? '무제한'
+                          : `최대 ${capacity.toLocaleString('ko-KR')}명`;
+                        const overCapacity = studentsNum > 0 && capacity < studentsNum;
+                        return (
+                          <div className="space-y-3">
+                            {/* 학생 수 입력 */}
+                            <div>
+                              <Label className="text-sm font-medium mb-1.5 block">학생 수 (인원)</Label>
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="number" min={1}
+                                  value={info.students}
+                                  onChange={e => {
+                                    const v = e.target.value;
+                                    setInfo(p => {
+                                      const n = parseInt(v, 10);
+                                      const newMin = (p.planId === '학급' && n > 0) ? Math.max(1, Math.ceil(n / 40)) : p.qty;
+                                      return { ...p, students: v, qty: Math.max(p.qty, newMin) };
+                                    });
+                                  }}
+                                  placeholder="예: 120"
+                                  className="h-10 w-32"
+                                />
+                                <span className="text-sm text-muted-foreground">명</span>
+                              </div>
+                            </div>
+                            {/* 이용권 수량 */}
+                            <div>
+                              <Label className="text-sm font-medium mb-1 block">
+                                이용권 수량
+                                <span className="text-xs text-muted-foreground font-normal ml-1.5">
+                                  {isGradeClass ? '(학급 1장 = 40명 그룹 1개)' : '(분할 발송 수)'}
+                                </span>
+                              </Label>
+                              <div className="flex items-center gap-3 mt-1.5">
+                                <button type="button"
+                                  onClick={() => setInfo(p => ({ ...p, qty: Math.max(minQty, p.qty - 1) }))}
+                                  className="w-10 h-10 rounded-lg border flex items-center justify-center text-lg font-bold hover:bg-muted transition-colors">−</button>
+                                <span className="w-12 text-center font-bold text-xl">{info.qty}</span>
+                                <button type="button"
+                                  onClick={() => setInfo(p => ({ ...p, qty: Math.min(30, p.qty + 1) }))}
+                                  className="w-10 h-10 rounded-lg border flex items-center justify-center text-lg font-bold hover:bg-muted transition-colors">+</button>
+                                <span className="text-sm text-muted-foreground">장</span>
+                              </div>
+                            </div>
+                            {/* 커버리지 표시 */}
+                            <div className={`rounded-lg px-3 py-2 text-xs flex items-center gap-1.5 ${overCapacity ? 'bg-red-50 text-red-700' : 'bg-teal-50 text-teal-700'}`}>
+                              {overCapacity
+                                ? `⚠ 이용권 수량 부족 — 현재 ${capacityLabel} 커버 (학생 ${studentsNum}명)`
+                                : `✓ ${capacityLabel} 이용 가능${isGradeClass && info.qty > 1 ? ` (학급 ${info.qty}개)` : ''}`}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -1105,9 +1151,15 @@ export default function Order() {
                   <div className="bg-white rounded-2xl border shadow-sm p-5 space-y-3">
                     <h3 className="font-semibold text-sm text-muted-foreground">결제 금액 미리보기</h3>
                     <div className="space-y-2 text-sm">
+                      {info.students && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">학생 수</span>
+                          <span>{parseInt(info.students, 10).toLocaleString('ko-KR')}명</span>
+                        </div>
+                      )}
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">플랜</span>
-                        <span>{activePlan.label} · {info.months}개월{info.qty > 1 ? ` × ${info.qty}장` : ''}</span>
+                        <span>{activePlan.label} · {info.months}개월 · 이용권 {info.qty}장</span>
                       </div>
                       {priceIsEvent && (
                         <div className="flex justify-between text-pink-600 text-xs">
@@ -1152,7 +1204,8 @@ export default function Order() {
                   )}
                   <div className="flex justify-between"><span className="text-muted-foreground">기관</span><span className="font-medium">{info.orgName}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">담당자</span><span>{info.contactName} · {info.phone}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">플랜</span><span>{activePlan.label} · {info.months}개월{info.qty > 1 ? ` × ${info.qty}장` : ''}</span></div>
+                  {info.students && <div className="flex justify-between"><span className="text-muted-foreground">학생 수</span><span>{parseInt(info.students,10).toLocaleString('ko-KR')}명</span></div>}
+                  <div className="flex justify-between"><span className="text-muted-foreground">플랜</span><span>{activePlan.label} · {info.months}개월 · 이용권 {info.qty}장</span></div>
                   <div className="flex justify-between font-bold text-base border-t pt-2 mt-1">
                     <span>결제금액</span><span className="text-primary">{fmt(total)}</span>
                   </div>
@@ -1296,7 +1349,8 @@ export default function Order() {
               <div className="space-y-4">
                 <div className="bg-muted/40 rounded-2xl p-4 text-sm space-y-1.5">
                   <div className="flex justify-between"><span className="text-muted-foreground">기관</span><span className="font-medium">{info.orgName}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">플랜</span><span>{activePlan.label} · {info.months}개월{info.qty > 1 ? ` × ${info.qty}장` : ''}</span></div>
+                  {info.students && <div className="flex justify-between"><span className="text-muted-foreground">학생 수</span><span>{parseInt(info.students,10).toLocaleString('ko-KR')}명</span></div>}
+                  <div className="flex justify-between"><span className="text-muted-foreground">플랜</span><span>{activePlan.label} · {info.months}개월 · 이용권 {info.qty}장</span></div>
                   {priceIsEvent && <div className="flex justify-between text-pink-600 text-xs"><span>이벤트 할인</span><span>적용됨</span></div>}
                   <div className="flex justify-between font-bold text-base border-t pt-2 mt-1">
                     <span>결제금액</span><span className="text-primary">{fmt(total)}</span>
@@ -1304,7 +1358,7 @@ export default function Order() {
                 </div>
                 <TossPaySection
                   amount={total}
-                  orderName={`${info.orgName} · ${activePlan.label} ${info.months}개월${info.qty > 1 ? ` × ${info.qty}` : ''}`}
+                  orderName={`심스페이스(${activePlan.shortLabel}) ${info.months}개월${info.qty > 1 ? ` × ${info.qty}장` : ''}`}
                   customerName={info.contactName}
                   customerPhone={info.phone}
                   customerEmail={info.email}
