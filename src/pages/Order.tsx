@@ -116,6 +116,14 @@ function getSuggestions(targetMonths: number, plan: PlanKey): Suggestion[] {
 
 function fmt(n: number) { return n.toLocaleString('ko-KR') + '원'; }
 
+// ── 전화번호 자동 하이픈 포맷 (010-1234-5678) ─────
+function formatPhone(value: string): string {
+  const d = value.replace(/\D/g, '').slice(0, 11);
+  if (d.length <= 3) return d;
+  if (d.length <= 7) return `${d.slice(0, 3)}-${d.slice(3)}`;
+  return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
+}
+
 // ── 학교 검색 ──────────────────────────────────────
 function SchoolSearch({ onSelect }: { onSelect: (s: SchoolInfo) => void }) {
   const [q, setQ] = useState('');
@@ -638,7 +646,7 @@ export default function Order() {
                       <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                       <Input
                         value={quotePhone}
-                        onChange={e => { setQuotePhone(e.target.value); setQuoteError(''); }}
+                        onChange={e => { setQuotePhone(formatPhone(e.target.value)); setQuoteError(''); }}
                         onKeyDown={e => { if (e.key === 'Enter') handleQuoteLookup(); }}
                         placeholder="010-1234-5678"
                         className="h-11 pl-9"
@@ -734,7 +742,7 @@ export default function Order() {
                       <div className="relative">
                         <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                         <Input value={quoteContact.phone}
-                          onChange={e => setQuoteContact(p => ({ ...p, phone: e.target.value }))}
+                          onChange={e => setQuoteContact(p => ({ ...p, phone: formatPhone(e.target.value) }))}
                           placeholder="010-1234-5678" className="pl-9 h-11" type="tel" />
                       </div>
                     </div>
@@ -857,7 +865,7 @@ export default function Order() {
                     <Label className="text-sm font-medium">휴대폰 번호 *</Label>
                     <div className="relative">
                       <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input value={info.phone} onChange={e => setInfo(p => ({ ...p, phone: e.target.value }))}
+                      <Input value={info.phone} onChange={e => setInfo(p => ({ ...p, phone: formatPhone(e.target.value) }))}
                         placeholder="010-1234-5678" className="pl-9 h-11" type="tel" />
                     </div>
                   </div>
