@@ -188,7 +188,7 @@ interface QuoteRecord {
   id: string; deal_id: string; quote_number: string;
   plan?: string; qty?: number; duration?: number;
   unit_price?: number; supply_price?: number; tax_amount?: number; final_value?: number;
-  quote_date?: string; notes?: string;
+  quote_date?: string; notes?: string; contact_phone?: string;
 }
 
 const DEFAULT_MONTHS = IS_EVENT ? 6 : 12;
@@ -307,6 +307,7 @@ export default function Order() {
 
   // 견적서번호 조회 경로 상태
   const [quoteNum, setQuoteNum] = useState('');
+  const [quotePhone, setQuotePhone] = useState('');
   const [quoteRecord, setQuoteRecord] = useState<QuoteRecord | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState('');
@@ -341,6 +342,9 @@ export default function Order() {
 
   const step1Valid = info.orgName.trim() && info.contactName.trim() && info.phone.trim();
 
+  // 전화번호 숫자만 추출해서 비교
+  const normalizePhone = (p: string) => p.replace(/\D/g, '');
+
   // 견적서 조회 (Supabase deal_quotes → Airtable 03_Deals fallback)
   const handleQuoteLookup = async () => {
     if (!quoteNum.trim()) return;
@@ -349,6 +353,13 @@ export default function Order() {
     setQuoteRecord(null);
     try {
       const num = quoteNum.trim();
+      const enteredPhone = normalizePhone(quotePhone);
+
+      if (!enteredPhone) {
+        setQuoteError('휴대폰 번호를 입력해 주세요.');
+        setQuoteLoading(false);
+        return;
+      }
 
       // 1차: Supabase deal_quotes 조회
       const res = await fetch(
@@ -357,7 +368,16 @@ export default function Order() {
       );
       const data: QuoteRecord[] = await res.json();
       if (Array.isArray(data) && data.length > 0) {
-        setQuoteRecord(data[0]);
+        const record = data[0];
+        // 전화번호 검증 (contact_phone 컬럼이 있는 경우)
+        if (record.contact_phone && normalizePhone(record.contact_phone) !== enteredPhone) {
+          setQuoteError('휴대폰 번호가 일치하지 않습니다. 견적서에 등록된 번호를 입력해 주세요.');
+          return;
+        }
+        setQuoteRecord(record);
+        if (record.contact_phone) {
+          setQuoteContact(p => ({ ...p, phone: record.contact_phone! }));
+        }
         return;
       }
 
@@ -373,6 +393,14 @@ export default function Order() {
         return;
       }
       const f = record.fields;
+
+      // 전화번호 검증
+      const storedPhone = normalizePhone(f.Contact_Phone ?? '');
+      if (storedPhone && storedPhone !== enteredPhone) {
+        setQuoteError('휴대폰 번호가 일치하지 않습니다. 견적서에 등록된 번호를 입력해 주세요.');
+        return;
+      }
+
       // Airtable 딜 → QuoteRecord 매핑
       const mapped: QuoteRecord = {
         id: record.id,
@@ -387,6 +415,7 @@ export default function Order() {
         final_value: f.Final_Contract_Value,
         quote_date: f.Quote_Date,
         notes: f.Notes,
+        contact_phone: f.Contact_Phone,
       };
       setQuoteRecord(mapped);
       // 담당자 정보 자동 채우기
@@ -446,6 +475,7 @@ export default function Order() {
           supply_price: selectedProduct.code === '01' ? supply : undefined,
           tax_amount: selectedProduct.code === '01' ? tax : undefined,
           final_value: selectedProduct.code === '01' ? total : undefined,
+          contact_phone: info.phone.replace(/\D/g, ''),
           quote_date: today,
           notes: `[웹주문] 상품: 심스페이스-${selectedProduct.name} / 기관: ${info.orgName} / 담당자: ${info.contactName} / 연락처: ${info.phone}${info.email ? ` / 이메일: ${info.email}` : ''}`,
         }),
@@ -464,7 +494,7 @@ export default function Order() {
 
   const goEntry = () => {
     setMode('entry'); setStep(1); setStep3('choose');
-    setQuoteRecord(null); setQuoteNum(''); setQuoteError('');
+    setQuoteRecord(null); setQuoteNum(''); setQuotePhone(''); setQuoteError('');
     setQuoteReadyToPay(false); setQuoteContact({ name: '', phone: '', email: '' });
     setSavedQuoteNum(null); setSelectedProduct(PRODUCTS[0]);
   };
@@ -591,9 +621,9 @@ export default function Order() {
             {/* 번호 입력 */}
             {!quoteRecord && (
               <div className="bg-white rounded-2xl border shadow-sm p-6 space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">견적서 번호</Label>
-                  <div className="flex gap-2">
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">견적서 번호</Label>
                     <Input
                       value={quoteNum}
                       onChange={e => { setQuoteNum(e.target.value); setQuoteError(''); }}
@@ -601,13 +631,32 @@ export default function Order() {
                       placeholder="예: 2026-01-001"
                       className="h-11 font-mono"
                     />
-                    <Button onClick={handleQuoteLookup} disabled={quoteLoading || !quoteNum.trim()} className="h-11 px-5 shrink-0">
-                      {quoteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : '조회'}
-                    </Button>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">담당자 휴대폰 번호 <span className="text-muted-foreground font-normal">(본인 확인용)</span></Label>
+                    <div className="relative">
+                      <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        value={quotePhone}
+                        onChange={e => { setQuotePhone(e.target.value); setQuoteError(''); }}
+                        onKeyDown={e => { if (e.key === 'Enter') handleQuoteLookup(); }}
+                        placeholder="010-1234-5678"
+                        className="h-11 pl-9"
+                        type="tel"
+                      />
+                    </div>
                   </div>
                   {quoteError && (
                     <p className="text-sm text-destructive">{quoteError}</p>
                   )}
+                  <Button
+                    onClick={handleQuoteLookup}
+                    disabled={quoteLoading || !quoteNum.trim() || !quotePhone.trim()}
+                    className="w-full h-11"
+                  >
+                    {quoteLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                    견적서 조회
+                  </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   견적서 번호는 담당자로부터 받은 문서에서 확인하실 수 있습니다.<br />
@@ -703,7 +752,7 @@ export default function Order() {
 
                 <div className="flex gap-3">
                   <Button variant="outline" className="flex-1 h-12"
-                    onClick={() => { setQuoteRecord(null); setQuoteNum(''); }}>다른 번호 조회</Button>
+                    onClick={() => { setQuoteRecord(null); setQuoteNum(''); setQuotePhone(''); setQuoteError(''); }}>다른 번호 조회</Button>
                   <Button className="flex-[2] h-12 text-base"
                     disabled={!quoteContact.name.trim() || !quoteContact.phone.trim()}
                     onClick={() => setQuoteReadyToPay(true)}>
