@@ -6,8 +6,7 @@ export function useContacts() {
   return useQuery({
     queryKey: ['contacts'],
     queryFn: () => airtable.fetchAll<ContactFields>('01_Contacts'),
-    staleTime: 0,
-    refetchOnMount: true,
+    staleTime: 1000 * 60 * 3,
   });
 }
 
@@ -15,8 +14,7 @@ export function useDeals() {
   return useQuery({
     queryKey: ['deals'],
     queryFn: () => airtable.fetchAll<DealFields>('03_Deals'),
-    staleTime: 0,
-    refetchOnMount: true,
+    staleTime: 1000 * 60 * 3,
   });
 }
 

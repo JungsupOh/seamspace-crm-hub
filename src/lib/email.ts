@@ -6,7 +6,15 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const APP_URL = window.location.origin;
 
-async function sendEmail(to: string, subject: string, html: string): Promise<void> {
+async function sendEmail(
+  to: string,
+  subject: string,
+  html: string,
+  options?: {
+    reply_to?: string;
+    attachments?: Array<{ filename: string; content: string }>;
+  }
+): Promise<void> {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
     method: 'POST',
     headers: {
@@ -14,7 +22,7 @@ async function sendEmail(to: string, subject: string, html: string): Promise<voi
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
     },
-    body: JSON.stringify({ to, subject, html }),
+    body: JSON.stringify({ to, subject, html, ...options }),
   });
 
   if (!res.ok) {
@@ -65,7 +73,7 @@ function layout(content: string): string {
           <td style="padding:20px 40px;border-top:1px solid #e4e4e7;background:#fafafa;">
             <p style="margin:0;font-size:11px;color:#a1a1aa;line-height:1.6;">
               이 이메일은 Seamspace CRM 시스템에서 자동 발송되었습니다.<br/>
-              문의: <a href="mailto:admin@seamspace.co.kr" style="color:#6366f1;text-decoration:none;">admin@seamspace.co.kr</a>
+              문의: <a href="mailto:sales@tebahsoft.com" style="color:#6366f1;text-decoration:none;">sales@tebahsoft.com</a>
             </p>
           </td>
         </tr>
@@ -166,4 +174,57 @@ export async function sendPasswordResetEmail(params: {
   `);
 
   await sendEmail(params.to, '[Seamspace CRM] 임시 비밀번호 안내', html);
+}
+
+// ── 견적서 발송 이메일 ──────────────────────────────
+export async function sendQuoteEmail(params: {
+  to: string;
+  orgName: string;
+  contactName: string;
+  quoteNumber: string;
+  attachmentBase64: string;
+  attachmentFileName: string;
+}): Promise<void> {
+  const html = layout(`
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
+      안녕하세요. ${params.contactName} 선생님,<br/>
+      심스페이스에 관심을 가져 주셔서 감사드립니다.
+    </p>
+
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
+      요청하신 견적서를 첨부와 같이 보내 드리오니, 긍정적으로 검토 부탁드립니다.<br/>
+      사용 기간과 인원수(또는 학급수)에 따라 견적금액이 변동되오니, 문의사항이 있으시면 언제든 문의 부탁드립니다.
+    </p>
+
+    <p style="margin:0 0 8px;font-size:14px;color:#18181b;line-height:1.8;">
+      아울러, 저희 심스페이스(AI 마음일기)에 대한 정보를 모아둔 매뉴얼 사이트를 공유해 드리오니 참고 부탁드립니다.
+    </p>
+
+    <p style="margin:0 0 24px;text-align:center;">
+      <a href="https://m.site.naver.com/1EfiC" style="display:inline-block;background:#03C75A;color:#ffffff;text-decoration:none;padding:10px 24px;border-radius:8px;font-size:13px;font-weight:600;">매뉴얼 사이트</a>
+      &nbsp;&nbsp;
+      <a href="${APP_URL}/order" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:10px 24px;border-radius:8px;font-size:13px;font-weight:600;">결제하러 가기</a>
+      &nbsp;&nbsp;
+      <a href="http://pf.kakao.com/_FvrSG" style="display:inline-block;background:#FEE500;color:#3C1E1E;text-decoration:none;padding:10px 24px;border-radius:8px;font-size:13px;font-weight:600;">카카오채널 문의</a>
+    </p>
+
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
+      기타 궁금하신 사항은 언제든지 연락주시면, 상세히 안내해 드리겠습니다.
+    </p>
+
+    <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
+      감사합니다.<br/>
+      테바소프트 담당자 드림.
+    </p>
+  `);
+
+  await sendEmail(
+    params.to,
+    `(테바소프트) 심스페이스(seamspace)_견적서 송부드립니다._ ${params.orgName}`,
+    html,
+    {
+      reply_to: 'sales@tebahsoft.com',
+      attachments: [{ filename: params.attachmentFileName, content: params.attachmentBase64 }],
+    }
+  );
 }

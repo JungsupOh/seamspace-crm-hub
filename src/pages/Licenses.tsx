@@ -111,6 +111,9 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
   const [selectedEventId, setSelectedEventId] = useState('');
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [running, setRunning] = useState(false);
+  const [dealSearch, setDealSearch] = useState('');
+  const [dealDropOpen, setDealDropOpen] = useState(false);
+  const [eventSearch, setEventSearch] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 체험권 중복 체크: 고객 DB + 이력 (Airtable + deal_licenses + event_licenses)
@@ -213,10 +216,10 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
   const { data: events } = useQuery({
     queryKey: ['events'],
     queryFn: async () => {
-      const r = await fetch(`${SUPABASE_URL}/rest/v1/events?order=created_at.desc`, {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/events?select=id,name,status,start_date,end_date,description&order=start_date.desc.nullslast`, {
         headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY },
       });
-      return r.json() as Promise<{ id: string; name: string; status: string }[]>;
+      return r.json() as Promise<{ id: string; name: string; status: string; start_date?: string; end_date?: string; description?: string }[]>;
     },
     enabled: open,
   });
@@ -390,16 +393,23 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
   const reset = () => {
     setStep(1); setSendType('buyer'); setSelectedDealId('');
     setSelectedEventId(''); setRecipients([]); setRunning(false);
+    setDealSearch(''); setDealDropOpen(false);
+  };
+
+  const handleClose = () => {
+    if (running) return;
+    if (recipients.length > 0 && !window.confirm('수신자 목록이 있습니다. 창을 닫으시겠습니까?')) return;
+    reset(); onClose();
   };
 
   return (
-    <Dialog open={open} onOpenChange={v => { if (!v) { reset(); onClose(); } }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+    <Dialog open={open} onOpenChange={v => { if (!v) handleClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle>이용권 생성 · 발송</DialogTitle>
         </DialogHeader>
 
-        {/* Step 1: 유형 선택 */}
+        {/* Step 1: overflow-visible로 드롭다운이 다이얼로그 밖으로 나올 수 있게 */}
         {step === 1 && (
           <div className="space-y-6 py-2">
             <div className="space-y-2">
@@ -421,36 +431,134 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
             {sendType === 'buyer' ? (
               <div className="space-y-2">
                 <Label className="text-xs">딜 선택</Label>
-                <Select value={selectedDealId} onValueChange={async v => {
-                  setSelectedDealId(v);
-                  await loadRecipientsFromDeal(v);
-                }}>
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="딜을 선택하세요..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(deals ?? []).map(d => (
-                      <SelectItem key={d.id} value={d.id}>
-                        {d.fields.Org_Name || d.fields.Deal_Name || d.id.slice(-8)}
-                        {d.fields.Contract_Date && ` · ${d.fields.Contract_Date.slice(0, 10)}`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="relative">
+                  <Input
+                    value={dealSearch || (selectedDealId && !dealDropOpen
+                      ? (() => { const d = deals?.find(x => x.id === selectedDealId); return d ? (d.fields.Org_Name || d.fields.Deal_Name || '') : ''; })()
+                      : dealSearch)}
+                    onChange={e => { setDealSearch(e.target.value); setDealDropOpen(true); if (!e.target.value) setSelectedDealId(''); }}
+                    onFocus={() => setDealDropOpen(true)}
+                    onBlur={() => setTimeout(() => setDealDropOpen(false), 200)}
+                    placeholder="딜 검색 (학교명, 담당자...)"
+                    className="h-9 text-sm pr-8"
+                  />
+                  <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                  {dealDropOpen && (
+                    <div className="absolute z-[9999] top-full left-0 right-0 mt-1 rounded-lg border bg-background shadow-xl overflow-hidden">
+                      <div className="max-h-72 overflow-y-auto divide-y divide-border">
+                        {(() => {
+                          const q = dealSearch.toLowerCase();
+                          const filtered = (deals ?? [])
+                            .filter(d => !q
+                              || (d.fields.Org_Name ?? '').toLowerCase().includes(q)
+                              || (d.fields.Contact_Name ?? '').toLowerCase().includes(q)
+                              || (d.fields.Deal_Name ?? '').toLowerCase().includes(q)
+                              || (d.fields.Quote_Plan ?? '').toLowerCase().includes(q))
+                            .sort((a, b) => (b.fields.Quote_Date ?? '').localeCompare(a.fields.Quote_Date ?? ''))
+                            .slice(0, 40);
+                          if (filtered.length === 0) return (
+                            <div className="px-3 py-3 text-xs text-muted-foreground text-center">검색 결과가 없습니다.</div>
+                          );
+                          return filtered.map(d => (
+                            <button key={d.id} type="button"
+                              onMouseDown={e => {
+                                e.preventDefault(); // blur 방지 → 목록이 사라지지 않음
+                                setSelectedDealId(d.id);
+                                setDealSearch('');
+                                setDealDropOpen(false);
+                                loadRecipientsFromDeal(d.id);
+                              }}
+                              className={`w-full text-left px-3 py-2.5 hover:bg-muted/60 transition-colors ${selectedDealId === d.id ? 'bg-primary/5' : ''}`}>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-sm">{d.fields.Org_Name || d.fields.Deal_Name || d.id.slice(-8)}</span>
+                                {d.fields.Deal_Stage && (
+                                  <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">{d.fields.Deal_Stage}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                                {d.fields.Contact_Name && <span>{d.fields.Contact_Name}</span>}
+                                {d.fields.Quote_Plan && <span>· {d.fields.Quote_Plan}</span>}
+                                {d.fields.Final_Contract_Value && (
+                                  <span>· {new Intl.NumberFormat('ko-KR').format(d.fields.Final_Contract_Value)}원</span>
+                                )}
+                                {d.fields.Quote_Date && <span>· {d.fields.Quote_Date.slice(0, 10)}</span>}
+                              </div>
+                            </button>
+                          ));
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {selectedDealId && !dealDropOpen && (
+                  <p className="text-xs text-teal-700 flex items-center gap-1.5">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    딜 선택됨: {deals?.find(d => d.id === selectedDealId)?.fields.Org_Name || selectedDealId.slice(-8)}
+                  </p>
+                )}
               </div>
             ) : (
               <div className="space-y-2">
                 <Label className="text-xs">이벤트 선택</Label>
-                <Select value={selectedEventId} onValueChange={setSelectedEventId}>
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="이벤트를 선택하세요..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(events ?? []).map(e => (
-                      <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="relative">
+                    <Input
+                      value={eventSearch || (selectedEventId
+                        ? (events?.find(e => e.id === selectedEventId)?.name ?? '')
+                        : '')}
+                      onChange={e => { setEventSearch(e.target.value); if (!e.target.value) setSelectedEventId(''); }}
+                      onFocus={() => { if (!eventSearch) setEventSearch(' '); }}
+                      onBlur={() => setTimeout(() => setEventSearch(''), 200)}
+                      placeholder="이벤트 검색..."
+                      className="h-9 text-sm pr-8"
+                    />
+                    <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                    {eventSearch && (
+                      <div className="absolute z-[9999] top-full left-0 right-0 mt-1 rounded-lg border bg-background shadow-xl overflow-hidden">
+                        <div className="max-h-64 overflow-y-auto divide-y divide-border">
+                          {(() => {
+                            const q = eventSearch.trim().toLowerCase();
+                            const filtered = (events ?? [])
+                              .filter(e => !q || e.name.toLowerCase().includes(q) || (e.description ?? '').toLowerCase().includes(q))
+                              .slice(0, 30);
+                            if (filtered.length === 0) return (
+                              <div className="px-3 py-3 text-xs text-muted-foreground text-center">검색 결과가 없습니다.</div>
+                            );
+                            return filtered.map(e => (
+                              <button key={e.id} type="button"
+                                onMouseDown={ev => {
+                                  ev.preventDefault(); // blur 방지
+                                  setSelectedEventId(e.id);
+                                  setEventSearch('');
+                                }}
+                                className={`w-full text-left px-3 py-2.5 hover:bg-muted/60 transition-colors ${selectedEventId === e.id ? 'bg-primary/5' : ''}`}>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-sm">{e.name}</span>
+                                  {e.status && (
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${e.status === 'active' ? 'bg-teal-100 text-teal-700' : 'bg-muted text-muted-foreground'}`}>{e.status}</span>
+                                  )}
+                                </div>
+                                {(e.start_date || e.end_date || e.description) && (
+                                  <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                                    {e.start_date && <span>{e.start_date.slice(0, 10)}{e.end_date ? ` ~ ${e.end_date.slice(0, 10)}` : ''}</span>}
+                                    {e.description && <span className="truncate max-w-[220px]">· {e.description}</span>}
+                                  </div>
+                                )}
+                              </button>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                {selectedEventId && !eventSearch && (
+                  <p className="text-xs text-teal-700 flex items-center gap-1.5">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    {(() => {
+                      const e = events?.find(x => x.id === selectedEventId);
+                      return <>이벤트 선택됨: {e?.name}{e?.start_date && <span className="text-muted-foreground ml-1">({e.start_date.slice(0, 10)})</span>}</>;
+                    })()}
+                  </p>
+                )}
                 {(!events || events.length === 0) && (
                   <p className="text-xs text-muted-foreground">
                     이벤트가 없습니다. <a href="/trials" className="text-primary underline">이벤트 관리</a>에서 먼저 추가하세요.
@@ -469,7 +577,7 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
 
         {/* Step 2: 수신자 목록 */}
         {step === 2 && (
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-2 flex-1 overflow-y-auto">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <p className="text-sm font-medium">수신자 목록 ({recipients.length}명)</p>
               <div className="flex gap-1.5">
@@ -571,7 +679,7 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
 
         {/* Step 3: 실행 & 결과 */}
         {step === 3 && (
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-2 flex-1 overflow-y-auto">
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium">
                 {running ? '처리 중...' : doneCount + errorCount === recipients.length && recipients.length > 0
@@ -815,6 +923,7 @@ export default function Licenses() {
 
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | LicenseStatus>('all');
+  const [dateFilter, setDateFilter]     = useState<'all' | 'today' | 'yesterday' | '3days' | '7days' | 'month'>('all');
   const [linkingId, setLinkingId]       = useState<string | null>(null);
   const [linkingDealId, setLinkingDealId] = useState('');
   const [checkedIds, setCheckedIds]     = useState<Set<string>>(new Set());
@@ -823,15 +932,30 @@ export default function Licenses() {
 
   const { data: deals } = useDeals();
   const { widths: colW, startResize } = useResizableColumns('licenses_col_widths', {
-    상태: 90, '쿠폰 코드': 120, 담당자: 100, '학교/기관': 140, 전화번호: 110, 기간: 80, 만료일: 100, 딜: 70,
+    발급일: 90, 상태: 90, '쿠폰 코드': 120, 담당자: 100, '학교/기관': 140, 전화번호: 110, 기간: 80, 만료일: 100, 딜: 70,
   });
 
-  const all = (licenses ?? []).map(lic => ({ ...lic, displayStatus: computeStatus(lic) }));
-  const q   = search.toLowerCase();
+  const all = (licenses ?? [])
+    .map(lic => ({ ...lic, displayStatus: computeStatus(lic) }))
+    .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
+  const q = search.toLowerCase();
   const filtered = all.filter(l => {
     const matchSearch = !q || [l.coupon_code, l.contact_name, l.org_name, l.contact_phone]
       .some(v => v?.toLowerCase().includes(q));
-    return matchSearch && (statusFilter === 'all' || l.displayStatus === statusFilter);
+    const matchStatus = statusFilter === 'all' || l.displayStatus === statusFilter;
+    let matchDate = true;
+    if (dateFilter !== 'all' && l.created_at) {
+      const created = l.created_at.slice(0, 10);
+      const now = new Date();
+      const todayStr = now.toISOString().slice(0, 10);
+      const daysAgo = (n: number) => { const d = new Date(now); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+      if (dateFilter === 'today') matchDate = created === todayStr;
+      else if (dateFilter === 'yesterday') matchDate = created === daysAgo(1);
+      else if (dateFilter === '3days') matchDate = created >= daysAgo(2);
+      else if (dateFilter === '7days') matchDate = created >= daysAgo(6);
+      else if (dateFilter === 'month') matchDate = created.slice(0, 7) === todayStr.slice(0, 7);
+    }
+    return matchSearch && matchStatus && matchDate;
   });
 
   const pipelineCounts = PIPELINE.map(s => ({
@@ -1009,6 +1133,17 @@ export default function Licenses() {
             {PIPELINE.map(s => <SelectItem key={s} value={s}>{STATUS_META[s].label}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Select value={dateFilter} onValueChange={v => setDateFilter(v as typeof dateFilter)}>
+          <SelectTrigger className="w-28 h-8 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">전체 기간</SelectItem>
+            <SelectItem value="today">오늘</SelectItem>
+            <SelectItem value="yesterday">어제</SelectItem>
+            <SelectItem value="3days">최근 3일</SelectItem>
+            <SelectItem value="7days">최근 7일</SelectItem>
+            <SelectItem value="month">이번 달</SelectItem>
+          </SelectContent>
+        </Select>
         <span className="ml-auto text-xs text-muted-foreground self-center">{filtered.length}건</span>
       </div>
 
@@ -1028,7 +1163,7 @@ export default function Licenses() {
                       }} />
                   </th>
                 )}
-                {['상태', '쿠폰 코드', '담당자', '학교/기관', '전화번호', '기간', '만료일', '딜'].map(h => (
+                {['발급일', '상태', '쿠폰 코드', '담당자', '학교/기관', '전화번호', '기간', '만료일', '딜'].map(h => (
                   <th key={h} style={{ width: colW[h] }}
                     className="relative px-4 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">
                     {h}
@@ -1041,7 +1176,7 @@ export default function Licenses() {
             <tbody className="divide-y divide-border">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={canEdit ? 9 : 8} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                  <td colSpan={canEdit ? 10 : 9} className="px-4 py-12 text-center text-muted-foreground text-sm">
                     {all.length === 0
                       ? '이용권이 없습니다. 딜에서 이용권 템플릿을 업로드하면 자동으로 등록됩니다.'
                       : '검색 결과가 없습니다.'}
@@ -1066,6 +1201,9 @@ export default function Licenses() {
                           })} />
                       </td>
                     )}
+                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                      {lic.created_at ? lic.created_at.slice(0, 10) : '-'}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
                         <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${meta.color}`}>

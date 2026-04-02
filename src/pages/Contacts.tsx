@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 import { useContacts, useCreateContact, useUpdateContact, useDeleteContact } from '@/hooks/use-airtable';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
 import { Input } from '@/components/ui/input';
@@ -59,25 +60,19 @@ async function getMDiaryCouponsByName(name: string): Promise<MDiaryCoupon[]> {
 }
 
 async function confirmCouponLink(id: number, contactId: string): Promise<void> {
-  await fetch(`${SUPABASE_URL}/rest/v1/mdiary_coupons?id=eq.${id}`, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY,
-      'Content-Type': 'application/json', Prefer: 'return=minimal',
-    },
-    body: JSON.stringify({ linked_contact_id: contactId, link_confirmed: true }),
-  });
+  const { error } = await supabase
+    .from('mdiary_coupons')
+    .update({ linked_contact_id: contactId, link_confirmed: true })
+    .eq('id', id);
+  if (error) throw new Error(error.message);
 }
 
 async function rejectCouponLink(id: number): Promise<void> {
-  await fetch(`${SUPABASE_URL}/rest/v1/mdiary_coupons?id=eq.${id}`, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY,
-      'Content-Type': 'application/json', Prefer: 'return=minimal',
-    },
-    body: JSON.stringify({ link_confirmed: false }),
-  });
+  const { error } = await supabase
+    .from('mdiary_coupons')
+    .update({ link_confirmed: false })
+    .eq('id', id);
+  if (error) throw new Error(error.message);
 }
 
 async function getLicensesByPhone(phone: string): Promise<LicenseRecord[]> {
@@ -537,7 +532,7 @@ export default function Contacts() {
         setMDiaryCoupons(data);
       }
     }).catch(() => setMDiaryCoupons([]));
-  }, [selected?.id, contacts]);
+  }, [selected?.id]);
 
   const handleSort = (field: string) => {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');

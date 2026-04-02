@@ -1,5 +1,6 @@
+import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/AppLayout";
@@ -10,6 +11,7 @@ import Deals from "./pages/Deals";
 import Partners from "./pages/Partners";
 import Trials from "./pages/Trials";
 import Licenses from "./pages/Licenses";
+import PartnerPortal from "./pages/PartnerPortal";
 import Upload from "./pages/Upload";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
@@ -23,10 +25,25 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 1000 * 60 * 2,
+      gcTime: 1000 * 60 * 30,
+      refetchOnWindowFocus: false,
       retry: 2,
     },
   },
 });
+
+function ForceSignOut() {
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
+  React.useEffect(() => {
+    signOut().then(() => navigate('/login', { replace: true }));
+  }, [signOut, navigate]);
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <p className="text-sm text-muted-foreground">세션이 만료되었습니다. 다시 로그인해주세요.</p>
+    </div>
+  );
+}
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { currentUser, userProfile, loading, profileLoading } = useAuth();
@@ -47,11 +64,29 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // 프로필 없음 = 삭제/미등록 사용자 → 강제 로그아웃
+  if (!userProfile) {
+    return <ForceSignOut />;
+  }
+
+  // 비활성 계정 차단
+  if (userProfile.status === 'inactive') {
+    return <ForceSignOut />;
+  }
+
   // Force password change for invited users
-  const needsPasswordChange = userProfile?.status === 'invited' || userProfile?.status === 'invite_failed'
-    || (!userProfile?.status && userProfile?.is_first_login);
+  const needsPasswordChange = userProfile.status === 'invited' || userProfile.status === 'invite_failed'
+    || (!userProfile.status && userProfile.is_first_login);
   if (needsPasswordChange && location.pathname !== '/change-password') {
     return <Navigate to="/change-password" replace />;
+  }
+
+  // Partner: redirect to partner portal, block other pages
+  if (userProfile?.role === 'partner') {
+    if (location.pathname !== '/partner' && location.pathname !== '/change-password') {
+      return <Navigate to="/partner" replace />;
+    }
+    return <>{children}</>;
   }
 
   // Guest access restriction
@@ -148,6 +183,16 @@ function AppRoutes() {
           <RequireAuth>
             <AppLayout>
               <Trials />
+            </AppLayout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/partner"
+        element={
+          <RequireAuth>
+            <AppLayout>
+              <PartnerPortal />
             </AppLayout>
           </RequireAuth>
         }

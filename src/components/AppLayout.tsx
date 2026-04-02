@@ -15,18 +15,20 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/contexts/AuthContext';
 
-type UserRole = 'admin' | 'sub_admin' | 'guest';
+type UserRole = 'admin' | 'sub_admin' | 'guest' | 'partner';
 
 const ROLE_LABELS: Record<UserRole, string> = {
   admin: '관리자',
   sub_admin: '서브관리자',
   guest: '게스트',
+  partner: '파트너',
 };
 
 const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
   admin: 'bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300',
   sub_admin: 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300',
   guest: 'bg-gray-100 text-gray-600 dark:bg-gray-800/60 dark:text-gray-400',
+  partner: 'bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300',
 };
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -44,6 +46,59 @@ export function AppLayout({ children }: { children: ReactNode }) {
   };
 
   const role = userProfile?.role as UserRole | undefined;
+  const isPartnerRole = role === 'partner';
+
+  // 파트너 전용 미니멀 레이아웃 (사이드바/검색 없음)
+  if (isPartnerRole) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <header className="h-14 flex items-center gap-3 px-6 border-b border-border glass-header sticky top-0 z-30">
+          <h1 className="display-heading text-lg tracking-tight">
+            Seamspace<span className="text-muted-foreground font-normal text-meta ml-1">Partner</span>
+          </h1>
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDark(!dark)}>
+              {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+            {userProfile && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="h-8 gap-2 px-2 hover:bg-accent">
+                    <UserCircle2 className="h-5 w-5 text-muted-foreground shrink-0" />
+                    <span className="text-sm font-medium max-w-[120px] truncate">
+                      {userProfile.name || userProfile.email.split('@')[0]}
+                    </span>
+                    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${ROLE_BADGE_CLASSES.partner}`}>
+                      파트너
+                    </span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuLabel className="font-normal">
+                    <p className="text-sm font-medium truncate">{userProfile.name || '—'}</p>
+                    <p className="text-xs text-muted-foreground truncate">{userProfile.email}</p>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => navigate('/change-password')} className="gap-2 cursor-pointer">
+                    <KeyRound className="h-4 w-4" />비밀번호 변경
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleSignOut} className="gap-2 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10">
+                    <LogOut className="h-4 w-4" />로그아웃
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        </header>
+        <main className="flex-1 overflow-auto">
+          <div className="max-w-[1440px] mx-auto px-6 py-6 lg:px-8">
+            {children}
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <SidebarProvider>

@@ -208,6 +208,8 @@ export interface DealQuote {
   supply_price?: number;
   tax_amount?: number;
   final_value?: number;
+  items?: unknown[];
+  discount_amount?: number;
   notes?: string;
   contact_phone?: string;
   is_selected: boolean;
@@ -274,6 +276,16 @@ export async function selectDealQuote(dealId: string, quoteId: string): Promise<
     headers: DB_HEADERS,
     body: JSON.stringify({ is_selected: true }),
   });
+}
+
+export async function fetchAllDealQuoteNumbers(): Promise<string[]> {
+  const res = await fetch(
+    `${QUOTES_URL}?select=quote_number&quote_number=not.is.null`,
+    { headers: DB_HEADERS }
+  );
+  if (!res.ok) return [];
+  const rows: { quote_number: string }[] = await res.json();
+  return rows.map(r => r.quote_number).filter(Boolean);
 }
 
 export async function deleteDealLicense(id: string): Promise<void> {

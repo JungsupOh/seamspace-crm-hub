@@ -58,6 +58,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   admin: '관리자',
   sub_admin: '서브관리자',
   guest: '게스트',
+  partner: '파트너',
 };
 
 const STATUS_LABELS: Record<UserStatus, string> = {
@@ -78,6 +79,7 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
   admin: 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800',
   sub_admin: 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800',
   guest: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800/60 dark:text-gray-400 dark:border-gray-700',
+  partner: 'bg-teal-100 text-teal-700 border-teal-200 dark:bg-teal-950/40 dark:text-teal-300 dark:border-teal-800',
 };
 
 function generateCode(length = 8): string {

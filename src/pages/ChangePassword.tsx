@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Eye, EyeOff, Lock, ShieldAlert } from 'lucide-react';
+import { sendTelegramNotification } from '@/lib/telegram';
 
 export default function ChangePassword() {
   const { changePassword, userProfile, signOut } = useAuth();
@@ -38,6 +39,14 @@ export default function ChangePassword() {
     setLoading(true);
     try {
       await changePassword(newPassword, isFirstLogin ? undefined : currentPassword);
+      if (isFirstLogin && userProfile) {
+        sendTelegramNotification(
+          `👤 <b>사용자 활성화</b>\n\n` +
+          `📧 ${userProfile.email}\n` +
+          `🏷 ${userProfile.name || '—'}\n` +
+          `🔑 역할: ${userProfile.role === 'partner' ? '파트너' : userProfile.role}`
+        );
+      }
       toast.success('비밀번호가 성공적으로 변경되었습니다.');
       navigate('/', { replace: true });
     } catch (error: unknown) {

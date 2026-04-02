@@ -16,13 +16,17 @@ import {
   Plus, Search, ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown,
   Paperclip, ExternalLink, Loader2, Upload, User, Building2, Phone, Mail,
   FileText, Receipt, Package, Pencil, Trash2, UserCheck, UserPlus, X, Users,
-  FileSpreadsheet, CheckCircle2, AlertCircle,
+  FileSpreadsheet, CheckCircle2, AlertCircle, FileDown,
 } from 'lucide-react';
 import { airtable, AirtableRecord } from '@/lib/airtable';
 import { DealFields, ContactFields } from '@/types/airtable';
 import { DEAL_STAGES, ALL_DEAL_STAGES } from '@/lib/grades';
-import { uploadDealFile, parseFileLinks, getDealFiles, saveDealFileRecord, deleteDealFileRecord, DealFileRecord, saveDealLicenses, getDealLicenses, DealLicenseRecord, getDealQuotes, saveDealQuote, updateDealQuote, deleteDealQuote, selectDealQuote, DealQuote, attachCouponToDeal } from '@/lib/storage';
+import { uploadDealFile, parseFileLinks, getDealFiles, saveDealFileRecord, deleteDealFileRecord, DealFileRecord, saveDealLicenses, getDealLicenses, DealLicenseRecord, getDealQuotes, saveDealQuote, updateDealQuote, deleteDealQuote, selectDealQuote, DealQuote, attachCouponToDeal, fetchAllDealQuoteNumbers } from '@/lib/storage';
 import { searchSchools, SchoolInfo } from '@/lib/neis';
+import { generateQuotePdf, generateQuotePdfBlob } from '@/lib/generateQuotePdf';
+import { sendQuoteEmail } from '@/lib/email';
+import { QuoteLineItem, PLAN_LIST, DURATION_OPTIONS, makeItem, recommendItems, calcQuoteTotals, getS2BNumber } from '@/lib/pricing';
+import { notifyNewDeal } from '@/lib/telegram';
 import { toast } from 'sonner';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -805,13 +809,34 @@ interface PhoneStatus {
 }
 
 // ── 딜 폼 ─────────────────────────────────────────
+// ── 견적 탭 로컬 타입 ──────────────────────────────
+interface QuoteTab {
+  id?: string;
+  is_selected?: boolean;
+  quote_number?: string;
+  quote_date?: string;
+  plan?: string;
+  qty?: number;
+  license_qty?: number;
+  duration?: number;
+  unit_price?: number;
+  final_value?: number;
+  supply_price?: number;
+  tax_amount?: number;
+  items?: QuoteLineItem[];
+  discount_amount?: number;
+  notes?: string;
+}
+
 function DealForm({
-  initial, onSave, onCancel, saving, contacts, allDeals, initialContact, existingFiles,
+  initial, onSave, onCancel, saving, contacts, allDeals, initialContact, existingFiles, initialQuotes, draftKey,
 }: {
   initial?: Partial<DealFields>;
   initialContact?: AirtableRecord<ContactFields>;
   existingFiles?: DealFileRecord[];
-  onSave: (fields: Partial<DealFields>, files: Record<string, File>, receiptFiles: File[], licenseFiles: File[], licenseContacts: LicenseContact[], contactToUpdate?: AirtableRecord<ContactFields>, removedFileIds?: string[], removedReceiptIds?: string[], removedLicenseIds?: string[]) => void;
+  initialQuotes?: DealQuote[];
+  draftKey?: string;
+  onSave: (fields: Partial<DealFields>, files: Record<string, File>, receiptFiles: File[], licenseFiles: File[], licenseContacts: LicenseContact[], contactToUpdate?: AirtableRecord<ContactFields>, removedFileIds?: string[], removedReceiptIds?: string[], removedLicenseIds?: string[], quoteTabs?: QuoteTab[]) => void;
   onCancel: () => void;
   saving: boolean;
   contacts?: AirtableRecord<ContactFields>[];
@@ -840,7 +865,29 @@ function DealForm({
     staleTime: 1000 * 60 * 5,
   });
 
-  const [f, setF] = useState<Partial<DealFields>>(initial ?? {});
+  const DRAFT_STORAGE_KEY = draftKey ? `deal_draft_${draftKey}` : null;
+
+  // draft에 의미있는 데이터가 있는지 확인 (initial 대비 변경된 필드)
+  const hasMeaningfulData = (fields: Partial<DealFields>): boolean => {
+    const init = initial ?? {};
+    return Object.keys(fields).some(k => {
+      const v = fields[k as keyof DealFields];
+      const iv = init[k as keyof DealFields];
+      return v !== undefined && v !== null && v !== '' && v !== iv;
+    });
+  };
+
+  const loadDraft = () => {
+    if (!DRAFT_STORAGE_KEY) return null;
+    try { return JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) ?? 'null'); }
+    catch { return null; }
+  };
+
+  const draft = loadDraft();
+  const draftIsMeaningful = draft ? hasMeaningfulData(draft.fields ?? {}) : false;
+  const [draftRestored, setDraftRestored] = useState(draftIsMeaningful);
+
+  const [f, setF] = useState<Partial<DealFields>>(draftIsMeaningful ? (draft?.fields ?? initial ?? {}) : (initial ?? {}));
   const [phoneStatus, setPhoneStatus]       = useState<PhoneStatus | null>(null);
   const [showContactNotes, setShowContactNotes] = useState(false);
   const [pendingFiles, setPendingFiles]     = useState<Record<string, File>>({});
@@ -861,13 +908,149 @@ function DealForm({
   const [licenseContacts, setLicenseContacts] = useState<LicenseContact[]>([]);
   const [showCustomSource, setShowCustomSource] = useState(false);
   const [parsingTemplate, setParsingTemplate] = useState(false);
+  const [pdfGenAttaching, setPdfGenAttaching] = useState(false);
+  const [quoteSendPreview, setQuoteSendPreview] = useState<{
+    blobUrl: string; base64: string; fileName: string;
+  } | null>(null);
+  const [quoteSending, setQuoteSending] = useState(false);
+  const [quoteNumGenerating, setQuoteNumGenerating] = useState(false);
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // ── 견적 탭 상태 ───────────────────────────────
+  const [localTabs, setLocalTabs] = useState<QuoteTab[]>(() => {
+    if (draftIsMeaningful && draft?.tabs) return draft.tabs;
+    if (initialQuotes && initialQuotes.length > 0) {
+      return initialQuotes.map(q => ({
+        id: q.id, is_selected: q.is_selected,
+        quote_number: q.quote_number, quote_date: q.quote_date,
+        plan: q.plan, qty: q.qty, license_qty: q.license_qty,
+        duration: q.duration, unit_price: q.unit_price,
+        final_value: q.final_value, supply_price: q.supply_price,
+        tax_amount: q.tax_amount, notes: q.notes,
+        items: (q.items as QuoteLineItem[] | undefined) ?? [],
+        discount_amount: q.discount_amount ?? 0,
+      }));
+    }
+    return [{
+      quote_number: initial?.Quote_Number, quote_date: initial?.Quote_Date,
+      plan: initial?.Quote_Plan, qty: initial?.Quote_Qty,
+      duration: initial?.License_Duration, unit_price: initial?.Unit_Price,
+      final_value: initial?.Final_Contract_Value, supply_price: initial?.Supply_Price,
+      tax_amount: initial?.Tax_Amount,
+    }];
+  });
+  const [activeTabIdx, setActiveTabIdx] = useState(() => {
+    if (draftIsMeaningful && draft?.activeTabIdx != null) return draft.activeTabIdx;
+    if (initialQuotes && initialQuotes.length > 0) {
+      const sel = initialQuotes.findIndex(q => q.is_selected);
+      return sel >= 0 ? sel : 0;
+    }
+    return 0;
+  });
+
+  const upTab = (key: keyof QuoteTab, value: number | undefined) => {
+    setLocalTabs(prev => {
+      const next = [...prev];
+      next[activeTabIdx] = { ...next[activeTabIdx], [key]: value };
+      return next;
+    });
+  };
+
+  const readCurrentTabData = (): QuoteTab => {
+    const tab = localTabs[activeTabIdx];
+    const items = tab?.items ?? [];
+    const primaryPlan = items[0]?.plan;
+    return {
+      ...tab,
+      quote_number: f.Quote_Number ?? undefined,
+      quote_date: f.Quote_Date ?? undefined,
+      plan: primaryPlan ?? f.Quote_Plan ?? undefined,
+      qty: f.Quote_Qty ?? undefined,
+      duration: f.License_Duration ?? undefined,
+      unit_price: items[0]?.unit_price ?? f.Unit_Price ?? undefined,
+      final_value: f.Final_Contract_Value ?? undefined,
+      supply_price: f.Supply_Price ?? undefined,
+      tax_amount: f.Tax_Amount ?? undefined,
+      items,
+      discount_amount: tab?.discount_amount,
+    };
+  };
+
+  const applyTabToForm = (tab: QuoteTab) => {
+    setF(prev => ({
+      ...prev,
+      Quote_Number:          tab.quote_number ?? '',
+      Quote_Date:            tab.quote_date ?? '',
+      Quote_Plan:            tab.plan ?? '',
+      Quote_Qty:             tab.qty,
+      License_Duration:      tab.duration,
+      Unit_Price:            tab.unit_price,
+      Final_Contract_Value:  tab.final_value,
+      Supply_Price:          tab.supply_price,
+      Tax_Amount:            tab.tax_amount,
+    }));
+  };
+
+  const switchToTab = (idx: number) => {
+    if (idx === activeTabIdx) return;
+    const newTabs = [...localTabs];
+    newTabs[activeTabIdx] = readCurrentTabData();
+    setLocalTabs(newTabs);
+    applyTabToForm(newTabs[idx]);
+    setActiveTabIdx(idx);
+  };
+
+  const addQuoteTab = () => {
+    const newTabs = [...localTabs];
+    newTabs[activeTabIdx] = readCurrentTabData();
+    const newTab: QuoteTab = {};
+    setLocalTabs([...newTabs, newTab]);
+    applyTabToForm(newTab);
+    setActiveTabIdx(newTabs.length);
+  };
+
+  const removeQuoteTab = (idx: number) => {
+    if (localTabs.length <= 1) return;
+    const newTabs = localTabs.filter((_, i) => i !== idx);
+    const newIdx = Math.min(activeTabIdx > idx ? activeTabIdx - 1 : activeTabIdx, newTabs.length - 1);
+    setLocalTabs(newTabs);
+    applyTabToForm(newTabs[newIdx]);
+    setActiveTabIdx(newIdx);
+  };
+
+  const getTabLabel = (t: QuoteTab, idx: number): string => {
+    if (t.quote_number) {
+      const parts = t.quote_number.split('-');
+      return parts[parts.length - 1] ?? t.quote_number;
+    }
+    if (t.plan) return t.plan.replace('플랜', '').replace('학교(', '학교').replace(')', '');
+    if (t.final_value) return `${Math.round(t.final_value / 10000)}만`;
+    return `견적 ${idx + 1}`;
+  };
+
+  // ── Draft 자동저장 (의미있는 데이터가 있을 때만) ──
+  useEffect(() => {
+    if (!DRAFT_STORAGE_KEY) return;
+    if (!hasMeaningfulData(f)) {
+      // 빈 폼이면 기존 draft 삭제
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      return;
+    }
+    const timer = setTimeout(() => {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({ fields: f, tabs: localTabs, activeTabIdx }));
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [f, localTabs, activeTabIdx, DRAFT_STORAGE_KEY]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const clearDraft = () => {
+    if (DRAFT_STORAGE_KEY) localStorage.removeItem(DRAFT_STORAGE_KEY);
+  };
 
   // 파일+날짜 상태 기반 스테이지 자동 계산
   const autoStage = (pending: Record<string, File>, stored: Record<string, DealFileRecord>, pendingLic: File[], storedLic: DealFileRecord[], fields: Partial<DealFields>): string => {
     if (fields.Payment_Date) return '입금완료';
     if (pendingLic.length > 0 || storedLic.length > 0) return '이용권 발송완료';
-    if ('quote' in pending || 'quote' in stored) return '견적';
+    if (Object.keys(pending).some(k => k.startsWith('quote')) || Object.keys(stored).some(k => k.startsWith('quote'))) return '견적';
     return 'Lead';
   };
 
@@ -982,6 +1165,91 @@ function DealForm({
   };
   const fileRef = (key: string) => (el: HTMLInputElement | null) => { fileRefs.current[key] = el; };
 
+  const getQuotePdfData = () => {
+    const tab = localTabs[activeTabIdx];
+    const items = tab?.items ?? [];
+    const discount = tab?.discount_amount ?? 0;
+    const totals = calcQuoteTotals(items, discount);
+    return {
+      quoteNumber: n('Quote_Number'),
+      quoteDate: n('Quote_Date'),
+      orgName: n('Org_Name'),
+      contactName: n('Contact_Name'),
+      items,
+      discountAmount: discount,
+      plan: items[0]?.plan || n('Quote_Plan') || '',
+      duration: num('License_Duration') ?? items[0]?.duration ?? 0,
+      unitPrice: items[0]?.unit_price ?? num('Unit_Price') ?? 0,
+      licenseQty: tab?.license_qty ?? 0,
+      finalValue: totals.finalValue || (num('Final_Contract_Value') ?? 0),
+      supplyPrice: totals.supplyPrice || (num('Supply_Price') ?? 0),
+      taxAmount: totals.taxAmount || (num('Tax_Amount') ?? 0),
+      notes: tab?.notes,
+    };
+  };
+
+  const handleQuoteGenerateNumber = async () => {
+    setQuoteNumGenerating(true);
+    try {
+      const dbNums = await fetchAllDealQuoteNumbers().catch(() => [] as string[]);
+      const airtableNums = (allDeals ?? []).flatMap(d => d.fields.Quote_Number ? [d.fields.Quote_Number] : []);
+      up('Quote_Number', generateQuoteNumber([...airtableNums, ...dbNums]));
+    } finally { setQuoteNumGenerating(false); }
+  };
+
+  const handleQuoteGenerateAndAttach = async (qSlot: string) => {
+    setPdfGenAttaching(true);
+    try {
+      const { blob, fileName } = await generateQuotePdfBlob(getQuotePdfData());
+      const file = new File([blob], fileName, { type: 'application/pdf' });
+      setPendingFiles(prev => ({ ...prev, [qSlot]: file }));
+    } catch { toast.error('PDF 생성 실패'); }
+    finally { setPdfGenAttaching(false); }
+  };
+
+  const handleQuoteOpenSendPreview = async (qSlot: string) => {
+    const contactEmail = n('Contact_Email');
+    if (!contactEmail) { toast.error('담당자 이메일이 없습니다'); return; }
+    const pendingFile = pendingFiles[qSlot];
+    const storedFile = storedFiles[qSlot];
+    let blob: Blob;
+    let fileName: string;
+    if (pendingFile) {
+      blob = pendingFile; fileName = pendingFile.name;
+    } else if (storedFile) {
+      const r = await fetch(storedFile.file_url).catch(() => null);
+      if (!r?.ok) { toast.error('파일을 불러올 수 없습니다'); return; }
+      blob = await r.blob(); fileName = storedFile.file_name;
+    } else { toast.error('첨부된 파일이 없습니다'); return; }
+    const blobUrl = URL.createObjectURL(blob);
+    const base64 = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+      reader.readAsDataURL(blob);
+    });
+    setQuoteSendPreview({ blobUrl, base64, fileName });
+  };
+
+  const handleQuoteConfirmSend = async () => {
+    if (!quoteSendPreview) return;
+    setQuoteSending(true);
+    try {
+      await sendQuoteEmail({
+        to: n('Contact_Email'),
+        orgName: n('Org_Name'),
+        contactName: n('Contact_Name'),
+        quoteNumber: n('Quote_Number'),
+        attachmentBase64: quoteSendPreview.base64,
+        attachmentFileName: quoteSendPreview.fileName,
+      });
+      toast.success(`${n('Contact_Email')}으로 견적서를 발송했습니다`);
+      URL.revokeObjectURL(quoteSendPreview.blobUrl);
+      setQuoteSendPreview(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '발송 실패');
+    } finally { setQuoteSending(false); }
+  };
+
   // 전화번호 재구매/신규 감지
   useEffect(() => {
     const phone = f.Contact_Phone?.trim() ?? '';
@@ -1022,8 +1290,19 @@ function DealForm({
   const computedName = f.Deal_Name
     || (f.Contact_Name && f.Org_Name ? `${f.Contact_Name} (${f.Org_Name})` : f.Contact_Name || f.Org_Name || '');
 
-  return (
+  return (<>
     <div className="space-y-6">
+
+      {/* Draft 복원 배너 */}
+      {draftRestored && (
+        <div className="flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          <span className="flex-1">⚠️ 이전에 작성 중이던 내용이 복원됐습니다.</span>
+          <button type="button" onClick={() => { clearDraft(); setF(initial ?? {}); setDraftRestored(false); }}
+            className="underline hover:opacity-70 whitespace-nowrap">초기화</button>
+          <button type="button" onClick={() => setDraftRestored(false)}
+            className="text-amber-500 hover:opacity-70 ml-1">✕</button>
+        </div>
+      )}
 
       {/* 스테이지 + 유형 */}
       <div className="flex gap-2 flex-wrap">
@@ -1201,72 +1480,252 @@ function DealForm({
 
       {/* 견적 */}
       <Section icon={FileText} title="견적">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="견적일">
-            <DateInput value={n('Quote_Date')} onChange={v => up('Quote_Date', v)} className="h-8 text-sm" />
-          </Field>
-          <Field label="수량 (명)">
-            <NumericInput value={num('Quote_Qty')} onChange={v => up('Quote_Qty', v)} className="h-8 text-sm" />
-          </Field>
-          <div className="col-span-2">
-            <Field label="플랜">
-              <div className="flex flex-wrap gap-1.5 mt-1">
-                {PLANS.map(p => (
-                  <button key={p} type="button" onClick={() => togglePlan(p)}
-                    className={`text-xs rounded-md px-2.5 py-1 border transition-colors
-                      ${selectedPlans.includes(p)
-                        ? 'border-primary bg-primary/10 text-primary font-medium'
-                        : 'border-border hover:border-primary/50 text-muted-foreground'}`}>
-                    {p}
-                  </button>
-                ))}
+        <div className="rounded-lg border border-border overflow-hidden">
+          {/* 탭 바 */}
+          <div className="flex items-end bg-muted/30 border-b border-border overflow-x-auto px-1.5 pt-1.5">
+            {localTabs.map((tab, idx) => (
+              <button key={idx} type="button" onClick={() => switchToTab(idx)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs border-t border-l border-r rounded-t-md mr-0.5 flex-shrink-0 transition-colors
+                  ${idx === activeTabIdx
+                    ? 'bg-background border-border text-foreground font-medium -mb-px z-10'
+                    : 'bg-transparent border-border/40 text-muted-foreground hover:bg-background/60'}`}>
+                <span>{getTabLabel(tab, idx)}</span>
+                {localTabs.length > 1 && (
+                  <span
+                    onClick={e => { e.stopPropagation(); removeQuoteTab(idx); }}
+                    className="ml-0.5 text-muted-foreground hover:text-destructive leading-none cursor-pointer">×</span>
+                )}
+              </button>
+            ))}
+            <button type="button" onClick={addQuoteTab}
+              className="px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground flex-shrink-0 mb-0.5">
+              +
+            </button>
+          </div>
+
+        <div className="p-3 space-y-3">
+          {/* 견적서번호 | 견적일 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-muted-foreground">견적서 번호</Label>
+                <button type="button" onClick={handleQuoteGenerateNumber} disabled={quoteNumGenerating}
+                  className="text-[11px] px-2 py-0.5 rounded border border-primary/50 text-primary hover:bg-primary/10 disabled:opacity-50 flex items-center gap-1">
+                  {quoteNumGenerating && <Loader2 className="h-3 w-3 animate-spin" />}생성
+                </button>
               </div>
-            </Field>
-          </div>
-          <Field label="이용기간 (개월)">
-            <NumericInput value={num('License_Duration')} onChange={v => up('License_Duration', v)} className="h-8 text-sm" />
-          </Field>
-          <Field label="단가 (원)">
-            <NumericInput value={num('Unit_Price')} onChange={v => up('Unit_Price', v)} className="h-8 text-sm" />
-          </Field>
-          {/* 실결제금액 → 자동계산 */}
-          <div className="col-span-2">
-            <Field label="실결제금액 (원)">
-              <NumericInput
-                value={num('Final_Contract_Value')}
-                onChange={v => {
-                  if (v != null && v > 0) {
-                    const supply = Math.round(v / 1.1);
-                    setF(prev => ({ ...prev, Final_Contract_Value: v, Supply_Price: supply, Tax_Amount: v - supply }));
-                  } else {
-                    up('Final_Contract_Value', v);
-                  }
-                }}
-                className="h-8 text-sm font-medium" placeholder="입력하면 공급가액·세액 자동계산" />
-            </Field>
-          </div>
-          <Field label="공급가액 (원)">
-            <NumericInput value={num('Supply_Price')} onChange={v => up('Supply_Price', v)} className="h-8 text-sm" />
-          </Field>
-          <Field label="세액 (원)">
-            <NumericInput value={num('Tax_Amount')} onChange={v => up('Tax_Amount', v)} className="h-8 text-sm" />
-          </Field>
-          {/* 견적서 번호 (별도 항목) */}
-          <div className="col-span-2">
-            <Field label="견적서 번호">
               <Input value={n('Quote_Number')} onChange={e => up('Quote_Number', e.target.value)}
                 className="h-8 text-sm" placeholder="견적서 번호" />
+            </div>
+            <Field label="견적일">
+              <DateInput value={n('Quote_Date')} onChange={v => up('Quote_Date', v)} className="h-8 text-sm" />
             </Field>
           </div>
-          {/* 견적서 파일 첨부 */}
-          <div className="col-span-2">
-            <FileAttachInput label="견적서 파일"
-              slotKey="quote"
-              file={pendingFiles['quote']} onFileSelect={handleFileSelect}
-              inputRef={fileRef('quote')}
-              storedFile={storedFiles['quote']} onRemoveStored={removeStoredFile} />
+          {/* 총인원 | 이용권수량 | 이용기간 */}
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="총인원 (명)">
+              <NumericInput value={num('Quote_Qty')} onChange={v => up('Quote_Qty', v)} className="h-8 text-sm" />
+            </Field>
+            <Field label="이용권 수 (장)">
+              <NumericInput value={localTabs[activeTabIdx]?.license_qty ?? undefined} onChange={v => upTab('license_qty', v)} className="h-8 text-sm" />
+            </Field>
+            <Field label="이용기간 (개월)">
+              <NumericInput value={num('License_Duration')} onChange={v => up('License_Duration', v)} className="h-8 text-sm" />
+            </Field>
           </div>
+          {/* 상품 */}
+          {(() => {
+            const items: QuoteLineItem[] = localTabs[activeTabIdx]?.items ?? [];
+            const discount = localTabs[activeTabIdx]?.discount_amount ?? 0;
+            const totals = calcQuoteTotals(items, discount);
+
+            const setItems = (next: QuoteLineItem[]) => {
+              setLocalTabs(prev => {
+                const tabs = [...prev];
+                tabs[activeTabIdx] = { ...tabs[activeTabIdx], items: next };
+                return tabs;
+              });
+              const t = calcQuoteTotals(next, discount);
+              setF(prev => ({ ...prev, Final_Contract_Value: t.finalValue, Supply_Price: t.supplyPrice, Tax_Amount: t.taxAmount }));
+            };
+            const setDiscount = (d: number | undefined) => {
+              const dv = d ?? 0;
+              setLocalTabs(prev => {
+                const tabs = [...prev];
+                tabs[activeTabIdx] = { ...tabs[activeTabIdx], discount_amount: dv };
+                return tabs;
+              });
+              const t = calcQuoteTotals(items, dv);
+              setF(prev => ({ ...prev, Final_Contract_Value: t.finalValue, Supply_Price: t.supplyPrice, Tax_Amount: t.taxAmount }));
+            };
+            const updateItem = (idx: number, patch: Partial<QuoteLineItem>) => {
+              const next = items.map((it, i) => {
+                if (i !== idx) return it;
+                const updated = { ...it, ...patch };
+                if ('plan' in patch || 'duration' in patch) {
+                  const newItem = makeItem(updated.plan, updated.duration, updated.qty);
+                  updated.unit_price = newItem.unit_price;
+                  updated.s2b_number = newItem.s2b_number;
+                }
+                updated.amount = updated.unit_price * updated.qty;
+                return updated;
+              });
+              setItems(next);
+            };
+            const removeItem = (idx: number) => setItems(items.filter((_, i) => i !== idx));
+            const addItem = () => setItems([...items, makeItem('학급플랜', 6, 1)]);
+            const aiRecommend = () => {
+              const rec = recommendItems(num('Quote_Qty') ?? 0, localTabs[activeTabIdx]?.license_qty ?? 0, num('License_Duration') ?? 0);
+              if (rec.length) { setItems(rec); toast.success('AI 추천 상품이 추가되었습니다'); }
+              else toast.error('총인원 또는 이용기간을 입력해주세요');
+            };
+
+            return (<>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">상품</Label>
+                  <div className="flex gap-1.5">
+                    <button type="button" onClick={aiRecommend}
+                      className="text-[11px] px-2 py-0.5 rounded border border-violet-400 text-violet-600 hover:bg-violet-50 flex items-center gap-1">
+                      ✦ AI추천
+                    </button>
+                    <button type="button" onClick={addItem}
+                      className="text-[11px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted flex items-center gap-1">
+                      <Plus className="h-3 w-3" />추가
+                    </button>
+                  </div>
+                </div>
+                {items.length === 0 ? (
+                  <div className="text-center py-4 text-xs text-muted-foreground border border-dashed rounded-md">
+                    상품을 추가하세요
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {items.map((it, idx) => (
+                      <div key={idx} className="rounded-md border border-border p-2 space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <select value={it.plan} onChange={e => updateItem(idx, { plan: e.target.value, unit_price: 0 })}
+                            className="h-7 text-xs border rounded px-1.5 flex-1 bg-background">
+                            {PLAN_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+                          </select>
+                          <select value={it.duration} onChange={e => updateItem(idx, { duration: Number(e.target.value), unit_price: 0 })}
+                            className="h-7 text-xs border rounded px-1.5 w-20 bg-background">
+                            {DURATION_OPTIONS.map(d => <option key={d} value={d}>{d}개월</option>)}
+                          </select>
+                          <span className="text-xs text-muted-foreground">×</span>
+                          <input type="number" value={it.qty || ''} min={1}
+                            onChange={e => updateItem(idx, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
+                            className="h-7 text-xs border rounded px-1.5 w-12 text-center bg-background" />
+                          <button type="button" onClick={() => removeItem(idx)}
+                            className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive flex-shrink-0">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                          <span>단가 {it.unit_price > 0 ? it.unit_price.toLocaleString('ko-KR') : '-'} {it.s2b_number && `· S2B ${it.s2b_number}`}</span>
+                          <span className="font-medium text-foreground tabular-nums">{it.amount > 0 ? `${it.amount.toLocaleString('ko-KR')}원` : '-'}</span>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="text-right text-xs text-muted-foreground pt-1">
+                      소계: <span className="font-medium text-foreground tabular-nums">{totals.subtotal.toLocaleString('ko-KR')}원</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {/* 할인금액 */}
+              <Field label="할인금액 (원)">
+                <NumericInput value={discount || undefined} onChange={v => setDiscount(v)} className="h-8 text-sm" placeholder="0" />
+              </Field>
+              {/* 실결제금액 | 공급가액 | 세액 (자동계산) */}
+              <div className="grid grid-cols-3 gap-3">
+                <Field label="실결제금액 (원)">
+                  <div className="h-8 flex items-center text-sm font-medium tabular-nums px-3 border rounded-md bg-muted/30">
+                    {totals.finalValue > 0 ? totals.finalValue.toLocaleString('ko-KR') : '-'}
+                  </div>
+                </Field>
+                <Field label="공급가액 (원)">
+                  <div className="h-8 flex items-center text-sm text-muted-foreground tabular-nums px-3 border rounded-md bg-muted/30">
+                    {totals.supplyPrice > 0 ? totals.supplyPrice.toLocaleString('ko-KR') : '자동계산'}
+                  </div>
+                </Field>
+                <Field label="세액 (원)">
+                  <div className="h-8 flex items-center text-sm text-muted-foreground tabular-nums px-3 border rounded-md bg-muted/30">
+                    {totals.taxAmount > 0 ? totals.taxAmount.toLocaleString('ko-KR') : '자동계산'}
+                  </div>
+                </Field>
+              </div>
+            </>);
+          })()}
+          {/* 견적서 파일 첨부 (탭별 슬롯) */}
+          {(() => {
+            const qSlot = localTabs[activeTabIdx]?.id
+              ? `quote_file_${localTabs[activeTabIdx].id}`
+              : `quote_tab_${activeTabIdx}`;
+            const pendingFile = pendingFiles[qSlot];
+            const storedFile = storedFiles[qSlot];
+            return (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">견적서 파일</Label>
+                  <button type="button" onClick={() => handleQuoteGenerateAndAttach(qSlot)} disabled={pdfGenAttaching}
+                    className="text-[11px] px-2 py-0.5 rounded border border-primary/50 text-primary hover:bg-primary/10 disabled:opacity-50 flex items-center gap-1">
+                    {pdfGenAttaching && <Loader2 className="h-3 w-3 animate-spin" />}생성
+                  </button>
+                </div>
+                <input ref={fileRef(qSlot)} type="file" className="hidden" accept=".pdf,.doc,.docx"
+                  onChange={e => { handleFileSelect(qSlot, e.target.files?.[0] ?? null); e.target.value = ''; }} />
+                <div
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => { e.preventDefault(); const fl = e.dataTransfer.files[0]; if (fl) handleFileSelect(qSlot, fl); }}
+                  onClick={() => { if (!pendingFile && !storedFile) fileRefs.current[qSlot]?.click(); }}
+                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs transition-colors border-dashed border-border hover:border-primary/50 ${!pendingFile && !storedFile ? 'cursor-pointer' : 'cursor-default'}`}>
+                  {pendingFile ? (
+                    <>
+                      <Paperclip className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                      <span className="flex-1 truncate">{pendingFile.name}</span>
+                      <button type="button" onClick={e => { e.stopPropagation(); handleFileSelect(qSlot, null); }}
+                        className="p-0.5 rounded hover:bg-muted flex-shrink-0">
+                        <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                      </button>
+                      <button type="button" onClick={e => { e.stopPropagation(); handleQuoteOpenSendPreview(qSlot); }}
+                        className="flex-shrink-0 text-[11px] px-2 py-0.5 rounded border border-blue-400 text-blue-600 hover:bg-blue-50">
+                        발송
+                      </button>
+                    </>
+                  ) : storedFile ? (
+                    <>
+                      <Paperclip className="h-3.5 w-3.5 text-green-600 flex-shrink-0" />
+                      <a href={storedFile.file_url} target="_blank" rel="noopener noreferrer"
+                        className="flex-1 truncate text-green-700 hover:underline" onClick={e => e.stopPropagation()}>
+                        {storedFile.file_name}
+                      </a>
+                      <button type="button" title="다시 업로드"
+                        onClick={e => { e.stopPropagation(); fileRefs.current[qSlot]?.click(); }}
+                        className="flex-shrink-0 text-[11px] px-1.5 py-0.5 rounded border border-border hover:bg-muted text-muted-foreground">
+                        재업로드
+                      </button>
+                      <button type="button" onClick={e => { e.stopPropagation(); removeStoredFile(qSlot); }}
+                        className="p-0.5 rounded hover:bg-muted flex-shrink-0">
+                        <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                      </button>
+                      <button type="button" onClick={e => { e.stopPropagation(); handleQuoteOpenSendPreview(qSlot); }}
+                        className="flex-shrink-0 text-[11px] px-2 py-0.5 rounded border border-blue-400 text-blue-600 hover:bg-blue-50">
+                        발송
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                      <span className="text-muted-foreground">클릭하거나 파일을 끌어다 놓기</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </div>
+        </div>{/* end rounded border container */}
       </Section>
 
       {/* 이용권 */}
@@ -1444,30 +1903,69 @@ function DealForm({
         <Button variant="outline" onClick={onCancel} className="flex-1">취소</Button>
         <Button onClick={() => {
           const name = f.Deal_Name || computedName || '(이름없음)';
-          onSave({ ...f, Deal_Name: name }, pendingFiles, pendingReceiptFiles, pendingLicenseFiles, licenseContacts, phoneStatus?.contactRecord ?? initialContact, removedFileIds, removedReceiptIds, removedLicenseIds);
+          const finalTabs = [...localTabs];
+          finalTabs[activeTabIdx] = readCurrentTabData();
+          clearDraft();
+          onSave({ ...f, Deal_Name: name }, pendingFiles, pendingReceiptFiles, pendingLicenseFiles, licenseContacts, phoneStatus?.contactRecord ?? initialContact, removedFileIds, removedReceiptIds, removedLicenseIds, finalTabs);
         }} disabled={saving} className="flex-1">
           {saving ? <><Loader2 className="h-4 w-4 animate-spin mr-1" />저장 중...</> : '저장'}
         </Button>
       </div>
     </div>
-  );
+
+    {/* 견적서 발송 미리보기 + 확인 */}
+    {quoteSendPreview && (
+      <Dialog open={true} onOpenChange={() => { URL.revokeObjectURL(quoteSendPreview.blobUrl); setQuoteSendPreview(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>견적서 발송 확인</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="bg-muted/50 rounded-lg p-3 text-sm space-y-1.5">
+              <div className="flex gap-3">
+                <span className="text-muted-foreground w-12 flex-shrink-0">수신</span>
+                <span className="font-medium text-foreground">{n('Contact_Email') || '(이메일 미입력)'}</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-muted-foreground w-12 flex-shrink-0">답장</span>
+                <span>sales@tebahsoft.com</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-muted-foreground w-12 flex-shrink-0">파일</span>
+                <span className="truncate">{quoteSendPreview.fileName}</span>
+              </div>
+            </div>
+            <iframe src={quoteSendPreview.blobUrl} className="w-full h-[480px] rounded border border-border" title="견적서 미리보기" />
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => { URL.revokeObjectURL(quoteSendPreview.blobUrl); setQuoteSendPreview(null); }}>취소</Button>
+              <Button onClick={handleQuoteConfirmSend} disabled={quoteSending || !n('Contact_Email')}>
+                {quoteSending ? <><Loader2 className="h-4 w-4 animate-spin mr-1" />발송 중...</> : '이 주소로 발송'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )}
+  </>);
 }
 
 // ── 견적 추가/편집 다이얼로그 ──────────────────────
-// 견적서 번호 자동 생성: YYYY-01-NNN (01 = AI마음일기)
+// 견적서 번호 자동 생성: YYYY-01-NNNN (01 = AI마음일기, 4자리 일련번호)
+const QUOTE_NUMBER_RE = /^\d{4}-01-\d{4}$/;
 function generateQuoteNumber(existingNumbers: string[]): string {
   const year = new Date().getFullYear();
   const prefix = `${year}-01-`;
   const max = existingNumbers
-    .filter(n => n?.startsWith(prefix))
+    .filter(n => n && QUOTE_NUMBER_RE.test(n) && n.startsWith(prefix))
     .map(n => parseInt(n.slice(prefix.length), 10))
     .filter(n => !isNaN(n))
     .reduce((a, b) => Math.max(a, b), 0);
-  return `${prefix}${String(max + 1).padStart(3, '0')}`;
+  return `${prefix}${String(max + 1).padStart(4, '0')}`;
 }
 
 function QuoteDialog({
   open, onClose, dealId, quote, onSaved, existingNumbers,
+  orgName, contactName, contactEmail,
 }: {
   open: boolean;
   onClose: () => void;
@@ -1475,57 +1973,149 @@ function QuoteDialog({
   quote?: DealQuote | null;
   onSaved: (q: DealQuote) => void;
   existingNumbers: string[];
+  orgName: string;
+  contactName: string;
+  contactEmail: string;
 }) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<Partial<DealQuote>>(quote ?? {});
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [existingFileRec, setExistingFileRec] = useState<DealFileRecord | null>(null);
+  const [removeFile, setRemoveFile] = useState(false);
+  const [numGenerating, setNumGenerating] = useState(false);
+  const [pdfGenAttaching, setPdfGenAttaching] = useState(false);
+  const [sendPreview, setSendPreview] = useState<{
+    blobUrl: string; base64: string; fileName: string;
+  } | null>(null);
+  const [sending, setSending] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   useEffect(() => {
     if (quote) {
       setForm(quote);
+      getDealFiles(dealId).then(files => {
+        const quoteFiles = files.filter(f => f.slot_key?.startsWith('quote_file_') || f.slot_key?.startsWith('quote_tab_'));
+        // 정확히 quote_file_{id} 매칭 시도
+        const exact = quoteFiles.find(f => f.slot_key === `quote_file_${quote.id}`);
+        // 없으면 quote_tab_N 매칭 (DealForm에서 업로드된 파일)
+        setExistingFileRec(exact ?? quoteFiles[0] ?? null);
+      }).catch(() => {});
     } else {
       // 새 견적 — 번호 자동 생성
       setForm({ quote_number: generateQuoteNumber(existingNumbers) });
+      setExistingFileRec(null);
     }
+    setPendingFile(null);
+    setRemoveFile(false);
   }, [quote, open]);
 
   const up = (k: keyof DealQuote, v: unknown) => setForm(p => ({ ...p, [k]: v }));
   const n = (k: keyof DealQuote) => (form[k] as string) ?? '';
   const num = (k: keyof DealQuote) => form[k] as number | undefined;
 
+  const effectiveStoredFile = removeFile ? undefined : existingFileRec;
+
+  const getPdfData = () => ({
+    quoteNumber: n('quote_number'),
+    quoteDate: n('quote_date'),
+    orgName,
+    contactName,
+    plan: n('plan'),
+    duration: num('duration') ?? 0,
+    unitPrice: num('unit_price') ?? 0,
+    licenseQty: num('license_qty') ?? 0,
+    finalValue: num('final_value') ?? 0,
+    supplyPrice: num('supply_price') ?? 0,
+    taxAmount: num('tax_amount') ?? 0,
+    notes: n('notes') || undefined,
+  });
+
+  const handleGenerateNumber = async () => {
+    setNumGenerating(true);
+    try {
+      const dbNums = await fetchAllDealQuoteNumbers().catch(() => [] as string[]);
+      up('quote_number', generateQuoteNumber([...existingNumbers, ...dbNums]));
+    } finally { setNumGenerating(false); }
+  };
+
+  const handleGenerateAndAttach = async () => {
+    setPdfGenAttaching(true);
+    try {
+      const { blob, fileName } = await generateQuotePdfBlob(getPdfData());
+      setPendingFile(new File([blob], fileName, { type: 'application/pdf' }));
+      setRemoveFile(false);
+    } catch { toast.error('PDF 생성 실패'); }
+    finally { setPdfGenAttaching(false); }
+  };
+
+  const handleOpenSendPreview = async () => {
+    if (!contactEmail) { toast.error('담당자 이메일이 없습니다'); return; }
+    let blob: Blob;
+    let fileName: string;
+    if (pendingFile) {
+      blob = pendingFile; fileName = pendingFile.name;
+    } else if (effectiveStoredFile) {
+      const r = await fetch(effectiveStoredFile.file_url).catch(() => null);
+      if (!r?.ok) { toast.error('파일을 불러올 수 없습니다'); return; }
+      blob = await r.blob(); fileName = effectiveStoredFile.file_name;
+    } else { toast.error('첨부된 파일이 없습니다'); return; }
+    const blobUrl = URL.createObjectURL(blob);
+    const base64 = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+      reader.readAsDataURL(blob);
+    });
+    setSendPreview({ blobUrl, base64, fileName });
+  };
+
+  const handleConfirmSend = async () => {
+    if (!sendPreview) return;
+    setSending(true);
+    try {
+      await sendQuoteEmail({
+        to: contactEmail,
+        orgName,
+        contactName,
+        quoteNumber: n('quote_number'),
+        attachmentBase64: sendPreview.base64,
+        attachmentFileName: sendPreview.fileName,
+      });
+      toast.success(`${contactEmail}으로 견적서를 발송했습니다`);
+      URL.revokeObjectURL(sendPreview.blobUrl);
+      setSendPreview(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '발송 실패');
+    } finally { setSending(false); }
+  };
+
+  const quoteFields = {
+    quote_date: form.quote_date, plan: form.plan, qty: form.qty,
+    license_qty: form.license_qty, duration: form.duration, unit_price: form.unit_price,
+    supply_price: form.supply_price, tax_amount: form.tax_amount,
+    final_value: form.final_value, quote_number: form.quote_number, notes: form.notes,
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
+      let savedId: string;
       if (quote) {
-        await updateDealQuote(quote.id, {
-          quote_date: form.quote_date,
-          plan: form.plan,
-          qty: form.qty,
-          license_qty: form.license_qty,
-          duration: form.duration,
-          unit_price: form.unit_price,
-          supply_price: form.supply_price,
-          tax_amount: form.tax_amount,
-          final_value: form.final_value,
-          quote_number: form.quote_number,
-          notes: form.notes,
-        });
+        await updateDealQuote(quote.id, quoteFields);
         onSaved({ ...quote, ...form });
+        savedId = quote.id;
       } else {
-        const saved = await saveDealQuote({
-          deal_id: dealId,
-          quote_date: form.quote_date,
-          plan: form.plan,
-          qty: form.qty,
-          license_qty: form.license_qty,
-          duration: form.duration,
-          unit_price: form.unit_price,
-          supply_price: form.supply_price,
-          tax_amount: form.tax_amount,
-          final_value: form.final_value,
-          quote_number: form.quote_number,
-          notes: form.notes,
-          is_selected: false,
-        });
+        const saved = await saveDealQuote({ deal_id: dealId, ...quoteFields, is_selected: false });
         onSaved(saved);
+        savedId = saved.id;
+      }
+      // 파일 처리
+      if (removeFile && existingFileRec) {
+        await deleteDealFileRecord(existingFileRec.id).catch(() => {});
+      }
+      if (pendingFile) {
+        if (existingFileRec && !removeFile) await deleteDealFileRecord(existingFileRec.id).catch(() => {});
+        const { name, url } = await uploadDealFile(dealId, pendingFile);
+        await saveDealFileRecord({ deal_id: dealId, slot_key: `quote_file_${savedId}`, label: '견적서', file_name: name, file_url: url });
       }
       onClose();
     } catch (e: unknown) {
@@ -1533,7 +2123,7 @@ function QuoteDialog({
     } finally { setSaving(false); }
   };
 
-  return (
+  return (<>
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
@@ -1546,40 +2136,26 @@ function QuoteDialog({
               <Input type="date" value={n('quote_date')} onChange={e => up('quote_date', e.target.value)} className="h-8 text-sm" />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">견적서 번호</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">견적서 번호</Label>
+                <button type="button" onClick={handleGenerateNumber} disabled={numGenerating}
+                  className="text-[11px] px-2 py-0.5 rounded border border-primary/50 text-primary hover:bg-primary/10 disabled:opacity-50 flex items-center gap-1">
+                  {numGenerating && <Loader2 className="h-3 w-3 animate-spin" />}생성
+                </button>
+              </div>
               <Input value={n('quote_number')} onChange={e => up('quote_number', e.target.value)} className="h-8 text-sm" />
             </div>
             <div className="col-span-2 space-y-1">
               <Label className="text-xs">플랜</Label>
-              {(() => {
-                const PLAN_CAP: Record<string, number> = {
-                  '학급플랜': 40, '학년플랜': 200, '학교(소)': 500, '학교(중)': 1000, '학교(대)': Infinity,
-                };
-                const cap = PLAN_CAP[n('plan')] ?? 0;
-                const totalQty = num('qty') ?? 0;
-                const planCount = cap > 0 && cap < Infinity ? Math.ceil(totalQty / cap) : null;
-                return (
-                  <div className="flex items-start gap-3">
-                    <div className="flex flex-wrap gap-1.5 flex-1">
-                      {['학급플랜', '학년플랜', '학교(소)', '학교(중)', '학교(대)'].map(p => (
-                        <button key={p} type="button" onClick={() => up('plan', p)}
-                          className={`text-xs rounded-md px-2.5 py-1 border transition-colors
-                            ${n('plan') === p ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50 text-muted-foreground'}`}>
-                          {p}
-                        </button>
-                      ))}
-                    </div>
-                    {n('plan') && (
-                      <div className="shrink-0 text-right">
-                        <div className="text-[10px] text-muted-foreground">플랜별 수량</div>
-                        <div className="text-sm font-semibold text-primary">
-                          {planCount != null ? `${planCount}개` : '무제한'}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
+              <div className="flex flex-wrap gap-1.5 mt-0.5">
+                {['학급플랜', '학년플랜', '학교(소)', '학교(중)', '학교(대)'].map(p => (
+                  <button key={p} type="button" onClick={() => up('plan', p)}
+                    className={`text-xs rounded-md px-2.5 py-1 border transition-colors
+                      ${n('plan') === p ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50 text-muted-foreground'}`}>
+                    {p}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">총인원 (명)</Label>
@@ -1618,6 +2194,63 @@ function QuoteDialog({
               <Label className="text-xs">메모</Label>
               <Input value={n('notes')} onChange={e => up('notes', e.target.value)} className="h-8 text-sm" />
             </div>
+            <div className="col-span-2 space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">견적서 파일</Label>
+                <button type="button" onClick={handleGenerateAndAttach} disabled={pdfGenAttaching}
+                  className="text-[11px] px-2 py-0.5 rounded border border-primary/50 text-primary hover:bg-primary/10 disabled:opacity-50 flex items-center gap-1">
+                  {pdfGenAttaching && <Loader2 className="h-3 w-3 animate-spin" />}생성
+                </button>
+              </div>
+              <input ref={el => { fileInputRef.current = el; }} type="file" className="hidden" accept=".pdf,.doc,.docx"
+                onChange={e => { const f = e.target.files?.[0] ?? null; setPendingFile(f); if (f) setRemoveFile(false); e.target.value = ''; }} />
+              <div
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { setPendingFile(f); setRemoveFile(false); } }}
+                onClick={() => { if (!pendingFile && !effectiveStoredFile) fileInputRef.current?.click(); }}
+                className={`flex items-center gap-2 rounded-md border px-3 py-2 text-xs transition-colors border-dashed border-border hover:border-primary/50 ${!pendingFile && !effectiveStoredFile ? 'cursor-pointer' : 'cursor-default'}`}>
+                {pendingFile ? (
+                  <>
+                    <Paperclip className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                    <span className="flex-1 truncate">{pendingFile.name}</span>
+                    <button type="button" onClick={e => { e.stopPropagation(); setPendingFile(null); }}
+                      className="p-0.5 rounded hover:bg-muted flex-shrink-0">
+                      <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                    </button>
+                    <button type="button" onClick={e => { e.stopPropagation(); handleOpenSendPreview(); }}
+                      className="flex-shrink-0 text-[11px] px-2 py-0.5 rounded border border-blue-400 text-blue-600 hover:bg-blue-50">
+                      발송
+                    </button>
+                  </>
+                ) : effectiveStoredFile ? (
+                  <>
+                    <Paperclip className="h-3.5 w-3.5 text-green-600 flex-shrink-0" />
+                    <a href={effectiveStoredFile.file_url} target="_blank" rel="noopener noreferrer"
+                      className="flex-1 truncate text-green-700 hover:underline" onClick={e => e.stopPropagation()}>
+                      {effectiveStoredFile.file_name}
+                    </a>
+                    <button type="button" title="다시 업로드"
+                      onClick={e => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                      className="flex-shrink-0 text-[11px] px-1.5 py-0.5 rounded border border-border hover:bg-muted text-muted-foreground">
+                      재업로드
+                    </button>
+                    <button type="button" onClick={e => { e.stopPropagation(); setRemoveFile(true); setPendingFile(null); }}
+                      className="p-0.5 rounded hover:bg-muted flex-shrink-0">
+                      <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
+                    </button>
+                    <button type="button" onClick={e => { e.stopPropagation(); handleOpenSendPreview(); }}
+                      className="flex-shrink-0 text-[11px] px-2 py-0.5 rounded border border-blue-400 text-blue-600 hover:bg-blue-50">
+                      발송
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                    <span className="text-muted-foreground">클릭하거나 파일을 끌어다 놓기</span>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
           <Button className="w-full" onClick={handleSave} disabled={saving}>
             {saving ? <><Loader2 className="h-4 w-4 animate-spin mr-1" />저장 중...</> : '저장'}
@@ -1625,6 +2258,41 @@ function QuoteDialog({
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* 견적서 발송 미리보기 + 확인 */}
+    {sendPreview && (
+      <Dialog open={true} onOpenChange={() => { URL.revokeObjectURL(sendPreview.blobUrl); setSendPreview(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>견적서 발송 확인</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="bg-muted/50 rounded-lg p-3 text-sm space-y-1.5">
+              <div className="flex gap-3">
+                <span className="text-muted-foreground w-12 flex-shrink-0">수신</span>
+                <span className="font-medium text-foreground">{contactEmail || '(이메일 미입력)'}</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-muted-foreground w-12 flex-shrink-0">답장</span>
+                <span>sales@tebahsoft.com</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-muted-foreground w-12 flex-shrink-0">파일</span>
+                <span className="truncate">{sendPreview.fileName}</span>
+              </div>
+            </div>
+            <iframe src={sendPreview.blobUrl} className="w-full h-[480px] rounded border border-border" title="견적서 미리보기" />
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => { URL.revokeObjectURL(sendPreview.blobUrl); setSendPreview(null); }}>취소</Button>
+              <Button onClick={handleConfirmSend} disabled={sending || !contactEmail}>
+                {sending ? <><Loader2 className="h-4 w-4 animate-spin mr-1" />발송 중...</> : '이 주소로 발송'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )}
+  </>
   );
 }
 
@@ -1649,6 +2317,7 @@ export default function Deals() {
   const [sortDir, setSortDir]           = useState<'asc' | 'desc'>('desc');
   const [uploading, setUploading]       = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [dealFiles, setDealFiles]           = useState<DealFileRecord[]>([]);
   const [dealLicenses, setDealLicenses]     = useState<DealLicenseRecord[]>([]);
   const [attachCode, setAttachCode]         = useState('');
@@ -1669,6 +2338,7 @@ export default function Deals() {
   const [dealQuotes, setDealQuotes]         = useState<DealQuote[]>([]);
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
   const [editingQuote, setEditingQuote]     = useState<DealQuote | null>(null);
+  const [pdfGenerating, setPdfGenerating]   = useState<string | null>(null); // quote id
   const [periodFilter, setPeriodFilter]     = useState(String(new Date().getFullYear()));
   const { widths: colW, startResize } = useResizableColumns('deals_col_widths', {
     견적일: 90, 견적번호: 120, 담당자: 130, '학교/기관': 140, 유형: 72, 스테이지: 80, 실결제금액: 100, 계약일: 90, 입금일: 90, 구매처: 90, '📎': 36,
@@ -2031,6 +2701,7 @@ export default function Deals() {
     removedFileIds?: string[],
     removedReceiptIds?: string[],
     removedLicenseIds?: string[],
+    quoteTabs?: QuoteTab[],
   ) => {
     setUploading(true);
     try {
@@ -2088,6 +2759,12 @@ export default function Deals() {
       // 최신 노트 추적 (step1에서 업데이트된 내용을 step2에서 참조)
       const updatedNotesMap = new Map<string, string>(); // phone_norm → 최신 Notes
 
+      // 딜 스테이지로 구매 여부 판단: 계약/입금 단계만 '구매고객'
+      const PURCHASE_STAGES = new Set(['계약체결/구매', '결제예정', '이용권 발송완료', '템플릿 회신대기', '입금대기', '입금완료', 'Contract', 'Closed_Won']);
+      const isPurchase = PURCHASE_STAGES.has(fields.Deal_Stage ?? '');
+      const actionLabel = isPurchase ? '구매' : '견적요청';
+      const leadStage = isPurchase ? '구매' : '관심';
+
       // ── Step 1: 딜 담당자 → 01_Contacts upsert ─────────────
       // 딜 폼의 정확한 이름/이메일로 연락처를 먼저 생성/보완
       if (fields.Contact_Phone) {
@@ -2100,36 +2777,41 @@ export default function Deals() {
           fields.Quote_Qty ? `(${fields.Quote_Qty}명)` : '',
           fields.License_Duration ? ` ${fields.License_Duration}개월` : '',
         ].filter(Boolean).join('').trim();
-        const purchaseNote = `[${today}] ${planLabel ? planLabel + ' ' : ''}구매 ·${dealId}`.trim();
+        const purchaseNote = `[${today}] ${planLabel ? planLabel + ' ' : ''}${actionLabel} ·${dealId}`.trim();
 
         if (!existing) {
-          // 신규: 딜 폼의 정확한 정보로 생성 + 구매 이력
+          // 신규: 딜 폼의 정확한 정보로 생성
           await airtable.createRecord<ContactFields>('01_Contacts', {
             Name:             fields.Contact_Name,
             Phone:            fields.Contact_Phone,
             phone_normalized: norm,
             ...(fields.Contact_Email ? { Email: fields.Contact_Email } : {}),
             Org_Name:         fields.Org_Name,
-            Contact_Type:     '구매고객',
-            Lead_Stage:       '구매',
+            ...(isPurchase ? { Contact_Type: '구매고객' } : {}),
+            Lead_Stage:       leadStage,
             Notes:            purchaseNote,
           });
           updatedNotesMap.set(norm, purchaseNote);
         } else {
-          // 기존: 누락된 이메일·유형만 보완 (이름 변경 없음)
-          // 구매 노트는 contactToUpdate 다이얼로그 또는 여기서 직접 추가
+          // 기존: 누락된 이메일만 보완, 구매고객은 다운그레이드 안 함
           const prevNotes = existing.fields.Notes ?? '';
           const alreadyNoted = prevNotes.includes(`·${dealId}`);
-          const updates: Partial<ContactFields> = { Contact_Type: '구매고객' };
+          const updates: Partial<ContactFields> = {};
+          // 구매 단계: 무조건 업그레이드 / 견적 단계: 기존이 구매고객이면 유지
+          if (isPurchase) {
+            updates.Contact_Type = '구매고객';
+          }
           if (!existing.fields.Email && fields.Contact_Email) updates.Email = fields.Contact_Email;
-          // 신규 딜일 때만 구매 노트 추가 (contactToUpdate 다이얼로그가 없는 경우)
+          // 신규 딜일 때만 활동 노트 추가 (contactToUpdate 다이얼로그가 없는 경우)
           if (!contactToUpdate && !alreadyNoted) {
             updates.Notes = [purchaseNote, prevNotes].filter(Boolean).join('\n');
             updatedNotesMap.set(norm, updates.Notes);
           } else {
             updatedNotesMap.set(norm, prevNotes);
           }
-          await airtable.updateRecord<ContactFields>('01_Contacts', existing.id, updates);
+          if (Object.keys(updates).length > 0) {
+            await airtable.updateRecord<ContactFields>('01_Contacts', existing.id, updates);
+          }
         }
         qc.invalidateQueries({ queryKey: ['contacts'] });
       }
@@ -2235,12 +2917,79 @@ export default function Deals() {
         }
       }
 
+      // ── 견적 탭 Supabase 저장 ─────────────────────────
+      if (quoteTabs && quoteTabs.length > 0) {
+        const existingQuotes = await getDealQuotes(dealId).catch(() => [] as DealQuote[]);
+        const existingById = new Map(existingQuotes.map(q => [q.id, q]));
+        for (let i = 0; i < quoteTabs.length; i++) {
+          const tab = quoteTabs[i];
+          const isSelected = i === 0 && quoteTabs.length === 1 ? true : (tab.is_selected ?? false);
+          if (tab.id && existingById.has(tab.id)) {
+            await updateDealQuote(tab.id, {
+              quote_number: tab.quote_number,
+              quote_date: tab.quote_date,
+              plan: tab.plan,
+              qty: tab.qty,
+              license_qty: tab.license_qty,
+              duration: tab.duration,
+              unit_price: tab.unit_price,
+              final_value: tab.final_value,
+              supply_price: tab.supply_price,
+              tax_amount: tab.tax_amount,
+              items: tab.items as unknown[],
+              discount_amount: tab.discount_amount,
+              notes: tab.notes,
+              is_selected: isSelected,
+            }).catch(e => console.warn('견적 탭 업데이트 실패:', e));
+          } else if (!tab.id) {
+            await saveDealQuote({
+              deal_id: dealId,
+              quote_number: tab.quote_number,
+              quote_date: tab.quote_date,
+              plan: tab.plan,
+              qty: tab.qty,
+              license_qty: tab.license_qty,
+              duration: tab.duration,
+              unit_price: tab.unit_price,
+              final_value: tab.final_value,
+              supply_price: tab.supply_price,
+              tax_amount: tab.tax_amount,
+              items: tab.items as unknown[],
+              discount_amount: tab.discount_amount,
+              notes: tab.notes,
+              is_selected: isSelected,
+            }).catch(e => console.warn('견적 탭 저장 실패:', e));
+          }
+        }
+      }
+
+      // 저장 성공 시 draft 삭제
+      const dk = editMode === 'edit' ? `edit_${selected?.id}` : 'new';
+      localStorage.removeItem(`deal_draft_${dk}`);
       setDialogOpen(false);
+      if (editMode === 'add') {
+        notifyNewDeal(fields.Deal_Name as string, fields.Org_Name as string, fields.Contact_Name as string, fields.Final_Contract_Value as number);
+      }
       toast.success(editMode === 'add' ? '딜이 추가되었습니다' : '저장되었습니다');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류';
       toast.error(msg, { duration: 8000 });
     } finally { setUploading(false); }
+  };
+
+  // 닫기 전 임시저장 확인
+  const handleCloseDialog = () => {
+    const dk = editMode === 'edit' ? `edit_${selected?.id}` : 'new';
+    const hasDraft = !!localStorage.getItem(`deal_draft_${dk}`);
+    if (hasDraft) { setDiscardConfirmOpen(true); return; }
+    setDialogOpen(false);
+  };
+
+  const confirmDiscardAndClose = () => {
+    const dk = editMode === 'edit' ? `edit_${selected?.id}` : 'new';
+    localStorage.removeItem(`deal_draft_${dk}`);
+    setDiscardConfirmOpen(false);
+    setDialogOpen(false);
   };
 
   if (isLoading) return (
@@ -2503,9 +3252,11 @@ export default function Deals() {
                     <td className="px-4 py-2.5 text-xs tabular-nums text-muted-foreground whitespace-nowrap">
                       {d.fields.Quote_Date || '-'}
                     </td>
-                    <td className={`px-4 py-2.5 text-xs font-mono text-muted-foreground whitespace-nowrap ${isChecked ? 'bg-primary/5' : 'bg-background'}`}
+                    <td className={`px-4 py-2.5 whitespace-nowrap ${isChecked ? 'bg-primary/5' : 'bg-background'}`}
                       style={{ position: 'sticky', left: stickyLeft['견적번호'], zIndex: 1 }}>
-                      {d.fields.Quote_Number || '-'}
+                      {d.fields.Quote_Number
+                        ? <span className="inline-flex items-center bg-teal-50 text-teal-700 border border-teal-200 rounded px-1.5 py-0.5 font-mono font-semibold text-xs">{d.fields.Quote_Number}</span>
+                        : <span className="text-muted-foreground text-xs">-</span>}
                     </td>
                     <td className={`px-4 py-2.5 overflow-hidden ${isChecked ? 'bg-primary/5' : 'bg-background'}`}
                       style={{ position: 'sticky', left: stickyLeft['담당자'], zIndex: 1 }}>
@@ -2548,7 +3299,20 @@ export default function Deals() {
       </div>
 
       {/* ── 추가/편집 팝업 ── */}
-      <Dialog open={dialogOpen} onOpenChange={open => { if (!open) setDialogOpen(false); }}>
+      <Dialog open={discardConfirmOpen} onOpenChange={open => { if (!open) setDiscardConfirmOpen(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>임시저장 삭제</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground py-2">작성 중인 내용의 임시저장을 삭제하고 닫으시겠습니까?</p>
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" onClick={() => setDiscardConfirmOpen(false)}>취소 (계속 작성)</Button>
+            <Button variant="destructive" onClick={confirmDiscardAndClose}>예, 삭제하고 닫기</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={dialogOpen} onOpenChange={open => { if (!open) handleCloseDialog(); }}>
         <DialogContent
           className="max-w-3xl p-0 gap-0 flex flex-col max-h-[92vh]"
           onInteractOutside={e => e.preventDefault()}
@@ -2568,8 +3332,10 @@ export default function Deals() {
                   })
                 : undefined}
               existingFiles={editMode === 'edit' ? dealFiles : []}
+              initialQuotes={editMode === 'edit' ? dealQuotes : []}
+              draftKey={editMode === 'edit' ? `edit_${selected?.id}` : 'new'}
               onSave={handleSave}
-              onCancel={() => setDialogOpen(false)}
+              onCancel={handleCloseDialog}
               saving={createDeal.isPending || updateDeal.isPending || uploading}
               contacts={contacts}
               allDeals={deals}
@@ -2645,8 +3411,8 @@ export default function Deals() {
                     ))}
                   </div>
 
-                  {/* 비교 견적 목록 */}
-                  <Section icon={FileText} title="비교 견적">
+                  {/* 견적 목록 */}
+                  <Section icon={FileText} title="견적 목록">
                     <div className="space-y-2">
                       {dealQuotes.length === 0 ? (
                         <p className="text-xs text-muted-foreground">등록된 견적이 없습니다.</p>
@@ -2665,6 +3431,37 @@ export default function Deals() {
                               )}
                             </div>
                             <div className="flex items-center gap-1 flex-shrink-0">
+                              <button
+                                title="견적서 PDF 생성"
+                                disabled={pdfGenerating === q.id}
+                                onClick={async () => {
+                                  setPdfGenerating(q.id);
+                                  try {
+                                    await generateQuotePdf({
+                                      quoteNumber: q.quote_number ?? '',
+                                      quoteDate: q.quote_date ?? '',
+                                      orgName: selected!.fields.Org_Name ?? '',
+                                      contactName: selected!.fields.Contact_Name ?? '',
+                                      plan: q.plan ?? '',
+                                      duration: q.duration ?? 0,
+                                      unitPrice: q.unit_price ?? 0,
+                                      licenseQty: q.license_qty ?? 0,
+                                      finalValue: q.final_value ?? 0,
+                                      supplyPrice: q.supply_price ?? 0,
+                                      taxAmount: q.tax_amount ?? 0,
+                                      notes: q.notes,
+                                    });
+                                  } catch (e) {
+                                    toast.error('PDF 생성 실패');
+                                  } finally {
+                                    setPdfGenerating(null);
+                                  }
+                                }}
+                                className="p-1 rounded hover:bg-muted text-muted-foreground disabled:opacity-50">
+                                {pdfGenerating === q.id
+                                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  : <FileDown className="h-3.5 w-3.5" />}
+                              </button>
                               {!q.is_selected && (
                                 <button
                                   onClick={async () => {
@@ -2710,10 +3507,12 @@ export default function Deals() {
                             </div>
                           </div>
                           <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                            {q.quote_number && (
+                              <span className="inline-flex items-center bg-teal-50 text-teal-700 border border-teal-200 rounded px-1.5 py-0.5 font-mono font-semibold text-[11px]">{q.quote_number}</span>
+                            )}
                             {q.quote_date && <span>{q.quote_date}</span>}
                             {q.qty != null && <span>{q.qty.toLocaleString('ko-KR')}명</span>}
                             {q.duration != null && <span>{q.duration}개월</span>}
-                            {q.quote_number && <span>#{q.quote_number}</span>}
                             {q.notes && <span className="text-muted-foreground/70">{q.notes}</span>}
                           </div>
                         </div>
@@ -2793,10 +3592,15 @@ export default function Deals() {
 
                   {/* 견적 */}
                   <Section icon={FileText} title="견적">
+                    {f.Quote_Number && (
+                      <div className="mb-3 flex items-center gap-2">
+                        <span className="text-[10px] text-muted-foreground">견적서 번호</span>
+                        <span className="inline-flex items-center bg-teal-50 text-teal-700 border border-teal-200 rounded-md px-2.5 py-1 font-mono font-bold text-sm tracking-wide">{f.Quote_Number}</span>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-2">
                       {[
                         { l: '견적일',     v: f.Quote_Date },
-                        { l: '견적서 번호', v: f.Quote_Number },
                         { l: '플랜',       v: f.Quote_Plan },
                         { l: '수량',       v: f.Quote_Qty != null ? `${f.Quote_Qty.toLocaleString('ko-KR')}명` : undefined },
                         { l: '이용기간',   v: f.License_Duration ? `${f.License_Duration}개월` : undefined },
@@ -2956,6 +3760,9 @@ export default function Deals() {
           dealId={selected.id}
           quote={editingQuote}
           existingNumbers={(deals ?? []).flatMap(d => d.fields.Quote_Number ? [d.fields.Quote_Number] : [])}
+          orgName={selected.fields.Org_Name ?? ''}
+          contactName={selected.fields.Contact_Name ?? ''}
+          contactEmail={selected.fields.Contact_Email ?? ''}
           onSaved={q => {
             setDealQuotes(prev => {
               const idx = prev.findIndex(dq => dq.id === q.id);
@@ -2966,6 +3773,18 @@ export default function Deals() {
               }
               return [...prev, q];
             });
+            // 딜 확정 견적이면 Airtable 딜 필드도 동기화
+            if (q.is_selected && selected) {
+              const updates: Partial<DealFields> = {
+                Quote_Date: q.quote_date, Quote_Plan: q.plan, Quote_Qty: q.qty,
+                License_Duration: q.duration, Unit_Price: q.unit_price,
+                Supply_Price: q.supply_price, Tax_Amount: q.tax_amount,
+                Final_Contract_Value: q.final_value, Quote_Number: q.quote_number,
+              };
+              updateDeal.mutateAsync({ id: selected.id, fields: updates }).then(() => {
+                setSelected(prev => prev ? { ...prev, fields: { ...prev.fields, ...updates } } : null);
+              }).catch(() => {});
+            }
           }}
         />
       )}

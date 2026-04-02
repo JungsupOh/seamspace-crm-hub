@@ -17,11 +17,17 @@ const mainItems = [
   { title: '데이터 업로드', url: '/upload', icon: Upload, guestAllowed: false },
 ];
 
+const partnerItems = [
+  { title: '파트너 포털', url: '/partner', icon: Building2 },
+];
+
 export function AppSidebar() {
   const { state } = useSidebar();
-  const { isAdmin, isGuest } = useAuth();
+  const { isAdmin, isGuest, isPartner } = useAuth();
   const collapsed = state === 'collapsed';
-  const visibleItems = mainItems.filter(item => !isGuest || item.guestAllowed);
+  const visibleItems = isPartner
+    ? partnerItems
+    : mainItems.filter(item => !isGuest || item.guestAllowed);
 
   return (
     <Sidebar collapsible="icon">

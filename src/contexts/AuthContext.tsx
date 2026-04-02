@@ -1,8 +1,8 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
-export type UserRole = 'admin' | 'sub_admin' | 'guest';
+export type UserRole = 'admin' | 'sub_admin' | 'guest' | 'partner';
 export type UserStatus = 'invite_failed' | 'invited' | 'active' | 'inactive';
 
 export interface UserProfile {
@@ -13,6 +13,7 @@ export interface UserProfile {
   status: UserStatus;
   is_first_login: boolean;
   created_by: string | null;
+  partner_id: string | null;
   created_at: string;
 }
 
@@ -29,6 +30,7 @@ interface AuthContextValue {
   isAdmin: boolean;
   isSubAdmin: boolean;
   isGuest: boolean;
+  isPartner: boolean;
   canEdit: boolean;
 }
 
@@ -40,6 +42,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
+  // 이미 로드된 유저 ID 추적 — 탭 전환 시 토큰 갱신 이벤트에서 profileLoading 블로킹 방지
+  const loadedUserIdRef = useRef<string | null>(null);
 
   const fetchProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
     const { data, error } = await supabase
@@ -84,6 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (session?.user) {
           const profile = await fetchProfile(session.user.id);
           setUserProfile(profile);
+          loadedUserIdRef.current = session.user.id;
         }
         setLoading(false);
       })
@@ -103,12 +108,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
 
       if (session?.user) {
-        setProfileLoading(true);
-        fetchProfile(session.user.id).then((profile) => {
-          setUserProfile(profile);
-          setProfileLoading(false);
-        });
+        if (loadedUserIdRef.current === session.user.id) {
+          // 이미 이 유저의 프로필이 로드됨 (탭 복귀 시 TOKEN_REFRESHED/SIGNED_IN)
+          // → profileLoading 없이 백그라운드에서만 조용히 갱신
+          fetchProfile(session.user.id).then(p => { if (p) setUserProfile(p); });
+        } else {
+          // 신규 로그인 — 블로킹 로드
+          loadedUserIdRef.current = session.user.id;
+          setProfileLoading(true);
+          fetchProfile(session.user.id).then(p => {
+            setUserProfile(p);
+            setProfileLoading(false);
+          });
+        }
       } else {
+        loadedUserIdRef.current = null;
         setUserProfile(null);
         setProfileLoading(false);
       }
@@ -176,6 +190,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isAdmin = userProfile?.role === 'admin';
   const isSubAdmin = userProfile?.role === 'sub_admin';
   const isGuest = userProfile?.role === 'guest';
+  const isPartner = userProfile?.role === 'partner';
   const canEdit = isAdmin || isSubAdmin;
 
   return (
@@ -193,6 +208,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAdmin,
         isSubAdmin,
         isGuest,
+        isPartner,
         canEdit,
       }}
     >

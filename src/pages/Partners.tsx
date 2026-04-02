@@ -9,9 +9,15 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Textarea } from '@/components/ui/textarea';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
 import { toast } from 'sonner';
-import { Plus, Upload, Scan, FileText, Trash2, ExternalLink, Building2, Search, TrendingUp } from 'lucide-react';
+import { Plus, Upload, Scan, FileText, Trash2, ExternalLink, Building2, Search, TrendingUp, Pencil, Link2, X, Loader2, UserPlus } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDeals } from '@/hooks/use-airtable';
 import type { AirtableRecord, DealFields } from '@/types/airtable';
+import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals } from '@/lib/partner-deals';
+import type { PartnerDeal } from '@/lib/partner-deals';
+import { sendInviteEmail } from '@/lib/email';
+import { supabase } from '@/lib/supabase';
+import { notifyPartnerDeal } from '@/lib/telegram';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -37,6 +43,7 @@ interface Partner {
   contact_name: string | null;
   contact_phone: string | null;
   contact_email: string | null;
+  commission_rate: number | null;
   notes: string | null;
   status: 'active' | 'inactive';
   created_at: string;
@@ -266,7 +273,8 @@ const EMPTY: Partial<PartnerFields> = {
   name: '', business_number: null, representative: null,
   address: null, business_type: null, bank_name: null,
   bank_account: null, account_holder: null,
-  contact_name: null, contact_phone: null, contact_email: null, notes: null, status: 'active',
+  contact_name: null, contact_phone: null, contact_email: null,
+  commission_rate: 15, notes: null, status: 'active',
 };
 
 interface PartnerSheetProps {
@@ -290,6 +298,8 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
   const [dragOver, setDragOver]   = useState<FileType | null>(null);
   const [saving, setSaving]   = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [inviting, setInviting] = useState(false);
+  const [partnerUsers, setPartnerUsers] = useState<Array<{ id: string; email: string; name: string | null; status: string; last_sign_in_at?: string }>>([]);
 
   const refBizReg  = useRef<HTMLInputElement>(null);
   const refBank    = useRef<HTMLInputElement>(null);
@@ -308,6 +318,72 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
     if (!initial?.id) { setFiles([]); return; }
     getPartnerFiles(initial.id).then(setFiles).catch(() => setFiles([]));
   }, [initial?.id]);
+
+  // 파트너에 연결된 사용자 목록 로드
+  useEffect(() => {
+    if (!initial?.id) { setPartnerUsers([]); return; }
+    supabase.from('user_profiles').select('id,email,name,status').eq('partner_id', initial.id)
+      .then(({ data }) => setPartnerUsers(data ?? []))
+      .catch(() => setPartnerUsers([]));
+  }, [initial?.id]);
+
+  const handleInvitePartner = async () => {
+    const email = f.contact_email?.trim();
+    if (!email) { toast.error('담당자 이메일을 입력해주세요'); return; }
+    if (!initial?.id) { toast.error('파트너를 먼저 저장하세요'); return; }
+    setInviting(true);
+    try {
+      // 초대코드 생성
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+      const code = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+      // Supabase auth 사용자 생성 (service role 필요)
+      const serviceKey = (import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY ?? '') as string;
+      let userId: string | null = null;
+      if (serviceKey) {
+        const { createClient } = await import('@supabase/supabase-js');
+        const admin = createClient(SUPABASE_URL, serviceKey);
+        const { data: authUser, error: authErr } = await admin.auth.admin.createUser({
+          email, password: code, email_confirm: true,
+          user_metadata: { name: f.contact_name || email.split('@')[0], role: 'partner', partner_id: initial.id },
+        });
+        if (authErr && !authErr.message.includes('already')) throw authErr;
+        userId = authUser?.user?.id ?? null;
+        // 이미 존재하면 ID 조회
+        if (!userId) {
+          const { data: { users } } = await admin.auth.admin.listUsers();
+          userId = users?.find(u => u.email === email)?.id ?? null;
+        }
+      }
+      if (!userId) throw new Error('서비스 키가 없어 사용자 생성 불가');
+      // user_profiles를 partner 역할로 확실히 업데이트 (service role로 RLS 우회)
+      await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?id=eq.${userId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${serviceKey}`,
+          apikey: serviceKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          role: 'partner',
+          partner_id: initial.id,
+          name: f.contact_name || null,
+          status: 'invited',
+          is_first_login: true,
+        }),
+      });
+      // 초대 이메일 발송
+      await sendInviteEmail({
+        to: email, name: f.contact_name || '', inviteCode: code,
+        role: 'partner', invitedBy: '심스페이스',
+      });
+      toast.success(`${email}으로 파트너 초대를 발송했습니다`);
+      // 새로고침
+      const { data } = await supabase.from('user_profiles').select('id,email,name,status').eq('partner_id', initial.id);
+      setPartnerUsers(data ?? []);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '초대 실패');
+    } finally { setInviting(false); }
+  };
 
   const n   = (k: keyof PartnerFields) => (f[k] as string) ?? '';
   const set = (k: keyof PartnerFields, v: string | null) =>
@@ -458,7 +534,31 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
             </div>
           </section>
 
-          {/* 담당자 연락처 */}
+          {/* 수수료 설정 */}
+          <section className="space-y-3">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">수수료 설정</h3>
+            <div className="grid grid-cols-3 gap-2">
+              {[15, 17, 20].map(rate => (
+                <button key={rate} type="button"
+                  onClick={() => setF(prev => ({ ...prev, commission_rate: rate }))}
+                  className={`h-8 text-sm rounded-md border transition-colors
+                    ${(f.commission_rate ?? 15) === rate
+                      ? 'border-primary bg-primary/10 text-primary font-medium'
+                      : 'border-border text-muted-foreground hover:border-primary/40'}`}>
+                  {rate}%
+                </button>
+              ))}
+            </div>
+            <div>
+              <Label className="text-xs">직접 입력 (%)</Label>
+              <Input type="number" min={0} max={100} step={0.5}
+                value={f.commission_rate ?? 15}
+                onChange={e => setF(prev => ({ ...prev, commission_rate: parseFloat(e.target.value) || 0 }))}
+                className="mt-1 h-8 text-sm w-24" />
+            </div>
+          </section>
+
+          {/* 담당자 연락처 & 초대 */}
           <section className="space-y-3">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">담당자 연락처</h3>
             <div className="grid grid-cols-2 gap-3">
@@ -471,64 +571,55 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
                 <Input value={n('contact_phone')} onChange={e => set('contact_phone', e.target.value)} className="mt-1 h-8 text-sm" />
               </div>
               <div>
-                <Label className="text-xs">이메일</Label>
-                <Input value={n('contact_email')} onChange={e => set('contact_email', e.target.value)} className="mt-1 h-8 text-sm" />
+                <Label className="text-xs">이메일 *</Label>
+                <Input value={n('contact_email')} onChange={e => set('contact_email', e.target.value)} className="mt-1 h-8 text-sm" placeholder="파트너 로그인용" />
               </div>
             </div>
-          </section>
-
-          {/* 연관 딜 & 월별 매출 */}
-          {isEdit && partnerDeals.length > 0 && (
-            <section className="space-y-3">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                <TrendingUp className="h-3.5 w-3.5" />
-                연관 딜 ({partnerDeals.length}건)
-              </h3>
-
-              {/* 월별 매출 요약 */}
-              <MonthlySummary deals={partnerDeals} />
-
-              {/* 딜 목록 — 스크롤 */}
-              <div className="rounded-lg border border-border overflow-hidden">
-                <div className="overflow-y-auto max-h-56">
-                  <table className="w-full text-xs">
-                    <thead className="sticky top-0 z-10">
-                      <tr className="bg-muted/90 backdrop-blur border-b border-border">
-                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">학교/기관</th>
-                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">담당자</th>
-                        <th className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">계약일</th>
-                        <th className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap">금액(원)</th>
-                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">단계</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {[...partnerDeals]
-                        .sort((a, b) => (b.fields.Contract_Date ?? '').localeCompare(a.fields.Contract_Date ?? ''))
-                        .map(d => (
-                          <tr key={d.id} className="hover:bg-muted/30">
-                            <td className="px-3 py-2 font-medium">{d.fields.Org_Name || '-'}</td>
-                            <td className="px-3 py-2 text-muted-foreground">{d.fields.Contact_Name || '-'}</td>
-                            <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
-                              {d.fields.Contract_Date?.slice(0, 7) || '-'}
-                            </td>
-                            <td className="px-3 py-2 text-right font-mono">
-                              {d.fields.Final_Contract_Value
-                                ? d.fields.Final_Contract_Value.toLocaleString()
-                                : '-'}
-                            </td>
-                            <td className="px-3 py-2 text-muted-foreground">{d.fields.Deal_Stage || '-'}</td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
+            {/* 파트너 초대 & 연결된 사용자 */}
+            {isEdit && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">파트너 계정</span>
+                  {canEdit && (
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleInvitePartner} disabled={inviting || !n('contact_email')}>
+                      {inviting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <UserPlus className="h-3 w-3 mr-1" />}
+                      담당자 초대
+                    </Button>
+                  )}
                 </div>
-                {partnerDeals.length > 8 && (
-                  <div className="px-3 py-1.5 bg-muted/30 border-t border-border text-center text-xs text-muted-foreground">
-                    총 {partnerDeals.length}건 · 스크롤하여 더 보기
+                {partnerUsers.length > 0 ? (
+                  <div className="space-y-1">
+                    {partnerUsers.map(u => (
+                      <div key={u.id} className="flex items-center justify-between px-3 py-1.5 rounded-md bg-muted/30 text-xs">
+                        <div>
+                          <span className="font-medium">{u.name || u.email}</span>
+                          <span className="text-muted-foreground ml-2">{u.email}</span>
+                        </div>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium
+                          ${u.status === 'active' ? 'bg-teal-100 text-teal-700'
+                            : u.status === 'invited' ? 'bg-blue-100 text-blue-700'
+                            : 'bg-slate-100 text-slate-500'}`}>
+                          {u.status === 'active' ? '활성' : u.status === 'invited' ? '초대됨' : u.status}
+                        </span>
+                      </div>
+                    ))}
                   </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground/60">연결된 파트너 계정이 없습니다.</p>
                 )}
               </div>
-            </section>
+            )}
+          </section>
+
+          {/* 파트너 딜 관리 */}
+          {isEdit && (
+            <PartnerDealsSection
+              partnerId={initial!.id}
+              partnerName={n('name')}
+              commissionRate={f.commission_rate ?? 15}
+              crmDeals={partnerDeals}
+              allCrmDeals={allDeals ?? []}
+            />
           )}
 
           {/* 계약 서류 */}
@@ -637,6 +728,276 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
   );
 }
 
+// ── 파트너 딜 관리 섹션 ──────────────────────────────
+function PartnerDealsSection({
+  partnerId, partnerName, commissionRate, crmDeals, allCrmDeals,
+}: {
+  partnerId: string;
+  partnerName: string;
+  commissionRate: number;
+  crmDeals: AirtableRecord<DealFields>[];
+  allCrmDeals: AirtableRecord<DealFields>[];
+}) {
+  const [deals, setDeals] = useState<PartnerDeal[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<Partial<PartnerDeal>>({});
+  const [adding, setAdding] = useState(false);
+  const [linking, setLinking] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    getPartnerDeals(partnerId).then(setDeals).catch(() => setDeals([])).finally(() => setLoading(false));
+  }, [partnerId]);
+
+  const [dealPeriod, setDealPeriod] = useState('all');
+  const now2 = new Date();
+  const filteredByPeriod = deals.filter(d => {
+    if (dealPeriod === 'all') return true;
+    const date = d.contract_date ?? '';
+    const y = now2.getFullYear(), m = now2.getMonth();
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    if (dealPeriod === 'this_month') { const ym = `${y}-${pad2(m + 1)}`; return date >= `${ym}-01` && date <= `${ym}-31`; }
+    if (dealPeriod === 'last_month') { const d2 = new Date(y, m - 1, 1); const ym = `${d2.getFullYear()}-${pad2(d2.getMonth() + 1)}`; return date >= `${ym}-01` && date <= `${ym}-31`; }
+    if (dealPeriod === 'this_year') return date >= `${y}-01-01` && date <= `${y}-12-31`;
+    return true;
+  });
+
+  const totalPayment = filteredByPeriod.reduce((s, d) => s + (d.payment_amount ?? 0), 0);
+  const totalCommission = filteredByPeriod.reduce((s, d) => s + (d.commission_amount ?? 0), 0);
+  const totalSettlement = filteredByPeriod.reduce((s, d) => s + (d.settlement_amount ?? 0), 0);
+
+  const handleAdd = async () => {
+    setAdding(true);
+    try {
+      const seq = deals.length + 1;
+      const created = await createPartnerDeal({ partner_id: partnerId, seq_number: seq });
+      setDeals(prev => [...prev, created]);
+      setEditingId(created.id);
+      setEditForm(created);
+    } catch (e) { toast.error('추가 실패'); }
+    finally { setAdding(false); }
+  };
+
+  const handleSave = async (id: string) => {
+    try {
+      const { commission, settlement } = calcCommission(editForm.payment_amount ?? 0, commissionRate);
+      const updates = { ...editForm, commission_amount: commission, settlement_amount: settlement };
+      await updatePartnerDeal(id, updates);
+      setDeals(prev => prev.map(d => d.id === id ? { ...d, ...updates } as PartnerDeal : d));
+      setEditingId(null);
+      // 학교명이나 결제금액이 있으면 알림
+      if (editForm.school_name || editForm.payment_amount) {
+        notifyPartnerDeal(partnerName, editForm.school_name ?? '', editForm.buyer_name ?? '', editForm.payment_amount as number);
+      }
+      toast.success('저장됨');
+    } catch { toast.error('저장 실패'); }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await deletePartnerDeal(id);
+      setDeals(prev => prev.filter(d => d.id !== id));
+    } catch { toast.error('삭제 실패'); }
+  };
+
+  const handleAutoLink = async () => {
+    setLinking(true);
+    try {
+      const matches = autoLinkPartnerDeals(deals, allCrmDeals);
+      let count = 0;
+      for (const [pdId, match] of matches) {
+        await updatePartnerDeal(pdId, {
+          linked_deal_id: match.dealId,
+          license_issue_date: match.licenseDate ?? undefined,
+          tax_invoice_date: match.invoiceDate ?? undefined,
+          deposit_date: match.depositDate ?? undefined,
+        });
+        count++;
+      }
+      if (count > 0) {
+        const refreshed = await getPartnerDeals(partnerId);
+        setDeals(refreshed);
+        toast.success(`${count}건 자동 연결 완료`);
+      } else {
+        toast.info('새로 연결할 딜이 없습니다');
+      }
+    } catch { toast.error('자동 연결 실패'); }
+    finally { setLinking(false); }
+  };
+
+  const ef = (k: keyof PartnerDeal) => (editForm[k] as string) ?? '';
+  const efn = (k: keyof PartnerDeal) => editForm[k] as number | undefined;
+  const eset = (k: keyof PartnerDeal, v: unknown) => setEditForm(prev => ({ ...prev, [k]: v }));
+
+  return (
+    <section className="space-y-4">
+      {/* 기간 필터 + 버튼 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          {([
+            { id: 'all', label: '전체' }, { id: 'this_month', label: '이번달' },
+            { id: 'last_month', label: '지난달' }, { id: 'this_year', label: '올해' },
+          ] as const).map(({ id, label }) => (
+            <button key={id} onClick={() => setDealPeriod(id)}
+              className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors
+                ${dealPeriod === id ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
+              {label}
+            </button>
+          ))}
+          <span className="text-xs text-muted-foreground ml-2">{filteredByPeriod.length}건</span>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={handleAutoLink} disabled={linking}>
+            {linking ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Link2 className="h-3.5 w-3.5 mr-1.5" />}
+            CRM 자동연결
+          </Button>
+          <Button size="sm" onClick={handleAdd} disabled={adding}>
+            <Plus className="h-3.5 w-3.5 mr-1.5" />딜 추가
+          </Button>
+        </div>
+      </div>
+
+      {/* 실적 요약 카드 */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="surface-card ring-container p-4">
+          <p className="text-xs text-muted-foreground mb-1">매출 (결제금액)</p>
+          <p className="text-2xl font-bold tabular-nums">{totalPayment.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">원</span></p>
+        </div>
+        <div className="surface-card ring-container p-4">
+          <p className="text-xs text-muted-foreground mb-1">수수료</p>
+          <p className="text-2xl font-bold tabular-nums text-amber-600">{totalCommission.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">원</span></p>
+        </div>
+        <div className="surface-card ring-container p-4">
+          <p className="text-xs text-muted-foreground mb-1">정산금액</p>
+          <p className="text-2xl font-bold tabular-nums text-teal-700">{totalSettlement.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">원</span></p>
+        </div>
+      </div>
+
+      {/* CRM 연관 딜 (참조) */}
+      {crmDeals.length > 0 && (
+        <details className="text-xs">
+          <summary className="text-muted-foreground cursor-pointer hover:text-foreground">CRM 연관 딜 {crmDeals.length}건 (참조)</summary>
+          <div className="mt-1 rounded border border-border overflow-hidden max-h-40 overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0"><tr className="bg-muted/90 border-b border-border">
+                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">학교</th>
+                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">담당자</th>
+                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">계약일</th>
+                <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">금액</th>
+                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">단계</th>
+              </tr></thead>
+              <tbody className="divide-y divide-border">
+                {crmDeals.map(d => (
+                  <tr key={d.id} className="hover:bg-muted/30">
+                    <td className="px-3 py-1.5">{d.fields.Org_Name || '-'}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{d.fields.Contact_Name || '-'}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{d.fields.Contract_Date || '-'}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">{d.fields.Final_Contract_Value?.toLocaleString() || '-'}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{d.fields.Deal_Stage || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+
+      {/* 딜 목록 */}
+      {loading ? (
+        <div className="text-center py-8 text-sm text-muted-foreground">로딩 중...</div>
+      ) : deals.length === 0 ? (
+        <div className="text-center py-12 text-sm text-muted-foreground border border-dashed rounded-md">
+          파트너 딜이 없습니다. [딜 추가] 버튼으로 등록하세요.
+        </div>
+      ) : (
+        <div className="surface-card ring-container overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/60">
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground w-10">#</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">계약일</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">학교명</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">구매자</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">연락처</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">플랜</th>
+                  <th className="px-3 py-3 text-center text-xs font-medium text-muted-foreground">수량</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">결제금액</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">수수료</th>
+                  <th className="px-3 py-3 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">정산금액</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">이용권발급</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">입금일</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">비고</th>
+                  <th className="px-3 py-3 text-center text-xs font-medium text-muted-foreground">연결</th>
+                  <th className="px-3 py-3 w-16"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filteredByPeriod.map((d, idx) => {
+                  const isEditing = editingId === d.id;
+                  if (isEditing) {
+                    return (
+                      <tr key={d.id} className="bg-primary/5">
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{idx + 1}</td>
+                        <td className="px-3 py-2"><input type="date" value={ef('contract_date')} onChange={e => eset('contract_date', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-32" /></td>
+                        <td className="px-3 py-2"><input value={ef('school_name')} onChange={e => eset('school_name', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-full" placeholder="학교명" /></td>
+                        <td className="px-3 py-2"><input value={ef('buyer_name')} onChange={e => eset('buyer_name', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-full" placeholder="구매자" /></td>
+                        <td className="px-3 py-2"><input value={ef('buyer_phone')} onChange={e => eset('buyer_phone', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-28" placeholder="연락처" /></td>
+                        <td className="px-3 py-2"><input value={ef('plan_name')} onChange={e => eset('plan_name', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-20" /></td>
+                        <td className="px-3 py-2"><input type="number" value={efn('quantity') ?? ''} onChange={e => eset('quantity', parseInt(e.target.value) || 1)} className="h-7 text-xs border rounded px-1.5 w-14 text-center" /></td>
+                        <td className="px-3 py-2"><input type="number" value={efn('payment_amount') ?? ''} onChange={e => eset('payment_amount', parseInt(e.target.value) || 0)} className="h-7 text-xs border rounded px-1.5 w-28 text-right" /></td>
+                        <td className="px-3 py-2 text-right text-xs text-muted-foreground tabular-nums">{calcCommission(efn('payment_amount') ?? 0, commissionRate).commission.toLocaleString()}</td>
+                        <td className="px-3 py-2 text-right text-xs text-muted-foreground tabular-nums">{calcCommission(efn('payment_amount') ?? 0, commissionRate).settlement.toLocaleString()}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{d.license_issue_date || '-'}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">{d.deposit_date || '-'}</td>
+                        <td className="px-3 py-2"><input value={ef('remarks')} onChange={e => eset('remarks', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-full" /></td>
+                        <td className="px-3 py-2 text-center">{d.linked_deal_id ? <Link2 className="h-3.5 w-3.5 text-teal-600 inline" /> : <span className="text-muted-foreground/40">-</span>}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex gap-1">
+                            <button onClick={() => handleSave(d.id)} className="text-[11px] px-2 py-1 rounded bg-primary text-primary-foreground">저장</button>
+                            <button onClick={() => setEditingId(null)} className="text-[11px] px-1.5 py-1 rounded border border-border">취소</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  return (
+                    <tr key={d.id} className="hover:bg-muted/30">
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{idx + 1}</td>
+                      <td className="px-3 py-2.5 text-sm whitespace-nowrap">{d.contract_date || '-'}</td>
+                      <td className="px-3 py-2.5 font-medium">{d.school_name || '-'}</td>
+                      <td className="px-3 py-2.5 text-muted-foreground">{d.buyer_name || '-'}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.buyer_phone || '-'}</td>
+                      <td className="px-3 py-2.5 text-muted-foreground">{d.plan_name || '-'}</td>
+                      <td className="px-3 py-2.5 text-center">{d.quantity || '-'}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-medium">{(d.payment_amount ?? 0) > 0 ? d.payment_amount!.toLocaleString() : '-'}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-amber-600">{(d.commission_amount ?? 0) > 0 ? d.commission_amount!.toLocaleString() : '-'}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-teal-700">{(d.settlement_amount ?? 0) > 0 ? d.settlement_amount!.toLocaleString() : '-'}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.license_issue_date || '-'}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.deposit_date || '-'}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground truncate max-w-[120px]">{d.remarks || '-'}</td>
+                      <td className="px-3 py-2.5 text-center">{d.linked_deal_id ? <Link2 className="h-3.5 w-3.5 text-teal-600 inline" /> : <span className="text-muted-foreground/40">-</span>}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex gap-1">
+                          <button onClick={() => { setEditingId(d.id); setEditForm(d); }}
+                            className="p-1 rounded hover:bg-muted text-muted-foreground"><Pencil className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => handleDelete(d.id)}
+                            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ── 메인 페이지 ──────────────────────────────────
 export default function Partners() {
   const { canEdit } = useAuth();
@@ -645,13 +1006,14 @@ export default function Partners() {
   const { data: allDeals } = useDeals();
   const [selected, setSelected] = useState<Partner | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [detailPartner, setDetailPartner] = useState<Partner | null>(null);
   const [search, setSearch] = useState('');
   const [periodFilter, setPeriodFilter] = useState('this_month');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo]   = useState('');
 
   const handleAdd  = () => { setSelected(null); setSheetOpen(true); };
-  const handleEdit = (p: Partner) => { setSelected(p); setSheetOpen(true); };
+  const handleEditSheet = (p: Partner) => { setSelected(p); setSheetOpen(true); };
   const handleClose = () => { setSheetOpen(false); };
 
   if (isLoading) return (
@@ -715,6 +1077,69 @@ export default function Partners() {
     monthlyByPartner[src] = (monthlyByPartner[src] ?? 0) + amount;
     totalThisMonth += amount;
     totalThisMonthDeals++;
+  }
+
+  // ── 상세 뷰 (전체 화면) ──
+  if (detailPartner) {
+    const dp = detailPartner;
+    const dpDeals = (allDeals ?? []).filter(d => d.fields.Lead_Source?.trim() === dp.name.trim());
+    return (
+      <div className="space-y-4">
+        {/* 헤더: 뒤로가기 + 파트너명 + 편집 */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setDetailPartner(null)}
+              className="p-1.5 rounded-md border border-border hover:bg-muted text-muted-foreground transition-colors">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+            </button>
+            <div>
+              <h1 className="text-2xl font-semibold flex items-center gap-2">
+                <Building2 className="h-5 w-5 text-muted-foreground" />
+                {dp.name}
+              </h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                수수료율 {dp.commission_rate ?? 15}%
+                {dp.business_number && ` · ${dp.business_number}`}
+                {dp.representative && ` · ${dp.representative}`}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => handleEditSheet(dp)}>
+              <Pencil className="h-3.5 w-3.5 mr-1.5" />파트너 정보 편집
+            </Button>
+          </div>
+        </div>
+
+        {/* 파트너 딜 — 전체 너비 */}
+        <PartnerDealsSection
+          partnerId={dp.id}
+          partnerName={dp.name}
+          commissionRate={dp.commission_rate ?? 15}
+          crmDeals={dpDeals}
+          allCrmDeals={allDeals ?? []}
+        />
+
+        {/* Sheet (편집용) */}
+        {sheetOpen && (
+          <PartnerSheetErrorBoundary>
+            <PartnerSheet
+              open={sheetOpen}
+              onClose={handleClose}
+              initial={selected}
+              onSaved={() => {
+                qc.invalidateQueries({ queryKey: ['partners'] });
+                // 상세 파트너 정보 새로고침
+                getPartners().then(list => {
+                  const updated = list.find(p => p.id === dp.id);
+                  if (updated) setDetailPartner(updated);
+                });
+              }}
+            />
+          </PartnerSheetErrorBoundary>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -797,7 +1222,7 @@ export default function Partners() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/60">
-                {['파트너명', '사업자번호', '대표자', '정산 계좌', '담당자', periodLabel, '서류', '상태'].map(h => (
+                {['파트너명', '사업자번호', '대표자', '수수료율', '담당자', periodLabel, '서류', '상태'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -812,7 +1237,7 @@ export default function Partners() {
                   </td>
                 </tr>
               ) : filtered.map(p => (
-                <tr key={p.id} onClick={() => handleEdit(p)}
+                <tr key={p.id} onClick={() => setDetailPartner(p)}
                   className="hover:bg-muted/30 transition-colors cursor-pointer">
                   <td className="px-4 py-3 font-medium">
                     <div className="flex items-center gap-2">
@@ -822,10 +1247,8 @@ export default function Partners() {
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.business_number || '-'}</td>
                   <td className="px-4 py-3 text-muted-foreground">{p.representative || '-'}</td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                    {p.bank_name && p.bank_account
-                      ? <><span className="font-medium text-foreground">{p.bank_name}</span> {p.bank_account}</>
-                      : '-'}
+                  <td className="px-4 py-3 text-sm tabular-nums">
+                    {p.commission_rate != null ? `${p.commission_rate}%` : '-'}
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     <div>{p.contact_name || '-'}</div>
