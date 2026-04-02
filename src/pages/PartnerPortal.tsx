@@ -1,15 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDeals } from '@/hooks/use-airtable';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Plus, TrendingUp, Pencil, Trash2, Link2, Loader2 } from 'lucide-react';
-import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission } from '@/lib/partner-deals';
-import type { PartnerDeal } from '@/lib/partner-deals';
+import { Plus, Pencil, Trash2, Loader2, Search, X, Users } from 'lucide-react';
+import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, createDealBuyers, getDealBuyers } from '@/lib/partner-deals';
+import type { PartnerDeal, PartnerDealBuyer } from '@/lib/partner-deals';
+import { searchSchools, type SchoolInfo } from '@/lib/neis';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -22,18 +22,42 @@ interface PartnerInfo {
   contact_email: string | null;
 }
 
+interface BuyerInput {
+  buyer_name: string;
+  buyer_phone: string;
+  buyer_email: string;
+  student_count: number;
+  month_count: number | '';
+  plan_name: string;
+}
+
+const emptyBuyer = (): BuyerInput => ({
+  buyer_name: '', buyer_phone: '', buyer_email: '',
+  student_count: 40, month_count: '', plan_name: '학급별',
+});
+
 export default function PartnerPortal() {
   const { userProfile } = useAuth();
   const { data: allDeals } = useDeals();
   const [partner, setPartner] = useState<PartnerInfo | null>(null);
   const [deals, setDeals] = useState<PartnerDeal[]>([]);
+  const [dealBuyersMap, setDealBuyersMap] = useState<Record<string, PartnerDealBuyer[]>>({});
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<PartnerDeal>>({});
   const [adding, setAdding] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addForm, setAddForm] = useState<Partial<PartnerDeal>>({});
+  const [buyers, setBuyers] = useState<BuyerInput[]>([emptyBuyer()]);
   const [periodFilter, setPeriodFilter] = useState('this_month');
+
+  // 학교 검색
+  const [schoolQuery, setSchoolQuery] = useState('');
+  const [schoolResults, setSchoolResults] = useState<SchoolInfo[]>([]);
+  const [schoolSearching, setSchoolSearching] = useState(false);
+  const [showSchoolDropdown, setShowSchoolDropdown] = useState(false);
+  const schoolRef = useRef<HTMLDivElement>(null);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   // 파트너 정보 로드
   useEffect(() => {
@@ -50,8 +74,58 @@ export default function PartnerPortal() {
   useEffect(() => {
     if (!partner?.id) return;
     setLoading(true);
-    getPartnerDeals(partner.id).then(setDeals).catch(() => setDeals([])).finally(() => setLoading(false));
+    getPartnerDeals(partner.id)
+      .then(async (dealList) => {
+        setDeals(dealList);
+        // 각 딜의 구매자 로드
+        const buyersMap: Record<string, PartnerDealBuyer[]> = {};
+        await Promise.all(dealList.map(async d => {
+          const b = await getDealBuyers(d.id);
+          if (b.length > 0) buyersMap[d.id] = b;
+        }));
+        setDealBuyersMap(buyersMap);
+      })
+      .catch(() => setDeals([]))
+      .finally(() => setLoading(false));
   }, [partner?.id]);
+
+  // 학교 검색 (디바운스)
+  const handleSchoolSearch = useCallback((query: string) => {
+    setSchoolQuery(query);
+    setAddForm(p => ({ ...p, school_name: query }));
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (query.trim().length < 2) {
+      setSchoolResults([]);
+      setShowSchoolDropdown(false);
+      return;
+    }
+    searchTimerRef.current = setTimeout(async () => {
+      setSchoolSearching(true);
+      try {
+        const results = await searchSchools(query);
+        setSchoolResults(results);
+        setShowSchoolDropdown(results.length > 0);
+      } catch { setSchoolResults([]); }
+      finally { setSchoolSearching(false); }
+    }, 300);
+  }, []);
+
+  const selectSchool = (school: SchoolInfo) => {
+    setSchoolQuery(school.name);
+    setAddForm(p => ({ ...p, school_name: school.name }));
+    setShowSchoolDropdown(false);
+  };
+
+  // 외부 클릭 시 드롭다운 닫기
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (schoolRef.current && !schoolRef.current.contains(e.target as Node)) {
+        setShowSchoolDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // 기간 필터
   const now = new Date();
@@ -82,30 +156,54 @@ export default function PartnerPortal() {
 
   const handleOpenAddDialog = () => {
     setAddForm({ quantity: 1 });
+    setBuyers([emptyBuyer()]);
+    setSchoolQuery('');
+    setSchoolResults([]);
+    setShowSchoolDropdown(false);
     setAddDialogOpen(true);
   };
 
   const handleAddSubmit = async () => {
     if (!partner) return;
+    // 구매자 최소 1명 이름 필수
+    const validBuyers = buyers.filter(b => b.buyer_name.trim());
+    if (validBuyers.length === 0) {
+      toast.error('구매자를 최소 1명 입력해주세요');
+      return;
+    }
     setAdding(true);
     try {
       const seq = deals.length + 1;
       const { commission, settlement } = calcCommission(addForm.payment_amount ?? 0, commissionRate);
+      // 첫 번째 구매자를 딜의 대표 구매자로 저장 (하위 호환)
+      const firstBuyer = validBuyers[0];
       const created = await createPartnerDeal({
         partner_id: partner.id,
         seq_number: seq,
         contract_date: addForm.contract_date || null,
         school_name: addForm.school_name || null,
-        buyer_name: addForm.buyer_name || null,
-        buyer_phone: addForm.buyer_phone || null,
+        buyer_name: firstBuyer.buyer_name || null,
+        buyer_phone: firstBuyer.buyer_phone || null,
+        buyer_email: firstBuyer.buyer_email || null,
         plan_name: addForm.plan_name || null,
-        quantity: addForm.quantity ?? 1,
+        quantity: validBuyers.length,
         payment_amount: addForm.payment_amount ?? 0,
         commission_amount: commission,
         settlement_amount: settlement,
         remarks: addForm.remarks || null,
       });
+      // 구매자 레코드 생성
+      const createdBuyers = await createDealBuyers(created.id, validBuyers.map(b => ({
+        buyer_name: b.buyer_name || undefined,
+        buyer_phone: b.buyer_phone || undefined,
+        buyer_email: b.buyer_email || undefined,
+        student_count: b.student_count,
+        month_count: b.month_count === '' ? undefined : b.month_count,
+        plan_name: b.plan_name || undefined,
+        quantity: 1,
+      })));
       setDeals(prev => [...prev, created]);
+      setDealBuyersMap(prev => ({ ...prev, [created.id]: createdBuyers }));
       setAddDialogOpen(false);
       toast.success('딜이 추가되었습니다');
     } catch { toast.error('추가 실패'); }
@@ -127,12 +225,23 @@ export default function PartnerPortal() {
     try {
       await deletePartnerDeal(id);
       setDeals(prev => prev.filter(d => d.id !== id));
+      setDealBuyersMap(prev => { const n = { ...prev }; delete n[id]; return n; });
     } catch { toast.error('삭제 실패'); }
   };
 
   const ef = (k: keyof PartnerDeal) => (editForm[k] as string) ?? '';
   const efn = (k: keyof PartnerDeal) => editForm[k] as number | undefined;
   const eset = (k: keyof PartnerDeal, v: unknown) => setEditForm(prev => ({ ...prev, [k]: v }));
+
+  // 구매자 입력 핸들러
+  const updateBuyer = (idx: number, field: keyof BuyerInput, value: string | number) => {
+    setBuyers(prev => prev.map((b, i) => i === idx ? { ...b, [field]: value } : b));
+  };
+  const addBuyer = () => setBuyers(prev => [...prev, emptyBuyer()]);
+  const removeBuyer = (idx: number) => {
+    if (buyers.length <= 1) return;
+    setBuyers(prev => prev.filter((_, i) => i !== idx));
+  };
 
   if (!userProfile?.partner_id) {
     return (
@@ -221,6 +330,15 @@ export default function PartnerPortal() {
                 <tr><td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">등록된 딜이 없습니다.</td></tr>
               ) : filteredDeals.map((d, idx) => {
                 const isEditing = editingId === d.id;
+                const dbBuyers = dealBuyersMap[d.id] ?? [];
+                const buyerCount = dbBuyers.length || 1;
+                const buyerDisplay = dbBuyers.length > 1
+                  ? `${d.buyer_name} 외 ${dbBuyers.length - 1}명`
+                  : d.buyer_name || '-';
+                const phoneDisplay = dbBuyers.length > 1
+                  ? `${d.buyer_phone ?? ''} ...`
+                  : d.buyer_phone || '-';
+
                 if (isEditing) {
                   return (
                     <tr key={d.id} className="bg-primary/5">
@@ -251,10 +369,15 @@ export default function PartnerPortal() {
                     <td className="px-3 py-2.5 text-xs text-muted-foreground">{idx + 1}</td>
                     <td className="px-3 py-2.5 text-xs whitespace-nowrap">{d.contract_date || '-'}</td>
                     <td className="px-3 py-2.5 text-xs font-medium">{d.school_name || '-'}</td>
-                    <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.buyer_name || '-'}</td>
-                    <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.buyer_phone || '-'}</td>
+                    <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        {buyerDisplay}
+                        {dbBuyers.length > 1 && <Users className="h-3 w-3 text-primary/60" />}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-xs text-muted-foreground">{phoneDisplay}</td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.plan_name || '-'}</td>
-                    <td className="px-3 py-2.5 text-xs text-center">{d.quantity || '-'}</td>
+                    <td className="px-3 py-2.5 text-xs text-center">{buyerCount}</td>
                     <td className="px-3 py-2.5 text-xs text-right tabular-nums font-medium">{(d.payment_amount ?? 0) > 0 ? d.payment_amount!.toLocaleString() : '-'}</td>
                     <td className="px-3 py-2.5 text-xs text-right tabular-nums text-amber-600">{(d.commission_amount ?? 0) > 0 ? d.commission_amount!.toLocaleString() : '-'}</td>
                     <td className="px-3 py-2.5 text-xs text-right tabular-nums text-teal-700">{(d.settlement_amount ?? 0) > 0 ? d.settlement_amount!.toLocaleString() : '-'}</td>
@@ -279,37 +402,103 @@ export default function PartnerPortal() {
 
       {/* 딜 추가 모달 */}
       <Dialog open={addDialogOpen} onOpenChange={open => { if (!open) setAddDialogOpen(false); }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>새 딜 추가</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 pt-2">
+          <div className="space-y-3 pt-2 overflow-y-auto flex-1">
+            {/* 계약일 */}
             <div>
               <Label className="text-xs">계약일</Label>
               <Input type="date" value={(addForm.contract_date as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, contract_date: e.target.value }))} className="h-8 text-sm" />
             </div>
-            <div>
+
+            {/* 학교 검색 */}
+            <div ref={schoolRef} className="relative">
               <Label className="text-xs">학교명</Label>
-              <Input value={(addForm.school_name as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, school_name: e.target.value }))} placeholder="학교명" className="h-8 text-sm" />
+              <div className="relative">
+                <Input
+                  value={schoolQuery}
+                  onChange={e => handleSchoolSearch(e.target.value)}
+                  onFocus={() => { if (schoolResults.length > 0) setShowSchoolDropdown(true); }}
+                  placeholder="학교명을 입력하세요"
+                  className="h-8 text-sm pr-8"
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                  {schoolSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : <Search className="h-3.5 w-3.5 text-muted-foreground" />}
+                </div>
+              </div>
+              {showSchoolDropdown && schoolResults.length > 0 && (
+                <div className="absolute z-50 mt-1 w-full bg-popover border border-border rounded-md shadow-lg max-h-48 overflow-y-auto">
+                  {schoolResults.map((s, i) => (
+                    <button key={i} onClick={() => selectSchool(s)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors flex items-center justify-between">
+                      <span className="font-medium">{s.name}</span>
+                      <span className="text-xs text-muted-foreground ml-2">{s.kind} · {s.eduOffice}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+
+            {/* 구매자 목록 */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-xs flex items-center gap-1">
+                  <Users className="h-3.5 w-3.5" />
+                  구매자 ({buyers.length}명)
+                </Label>
+                <button onClick={addBuyer} className="text-xs text-primary hover:underline flex items-center gap-0.5">
+                  <Plus className="h-3 w-3" />추가
+                </button>
+              </div>
+              <div className="space-y-2">
+                {buyers.map((b, idx) => (
+                  <div key={idx} className="border border-border rounded-md p-2.5 bg-muted/30 relative">
+                    {buyers.length > 1 && (
+                      <button onClick={() => removeBuyer(idx)}
+                        className="absolute top-1.5 right-1.5 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive">
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                    <div className="grid grid-cols-[1fr_1fr_1fr] gap-2 mb-2">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">이름 *</span>
+                        <Input value={b.buyer_name} onChange={e => updateBuyer(idx, 'buyer_name', e.target.value)} placeholder="홍길동" className="h-7 text-xs" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">연락처</span>
+                        <Input value={b.buyer_phone} onChange={e => updateBuyer(idx, 'buyer_phone', e.target.value)} placeholder="010-0000-0000" className="h-7 text-xs" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">이메일</span>
+                        <Input value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">학생 수</span>
+                        <Input type="number" value={b.student_count} onChange={e => updateBuyer(idx, 'student_count', parseInt(e.target.value) || 0)} className="h-7 text-xs" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">개월 수</span>
+                        <Input type="number" value={b.month_count} onChange={e => updateBuyer(idx, 'month_count', parseInt(e.target.value) || '')} placeholder="12" className="h-7 text-xs" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">플랜</span>
+                        <Input value={b.plan_name} onChange={e => updateBuyer(idx, 'plan_name', e.target.value)} className="h-7 text-xs" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 결제 정보 */}
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">구매자</Label>
-                <Input value={(addForm.buyer_name as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, buyer_name: e.target.value }))} placeholder="구매자" className="h-8 text-sm" />
-              </div>
-              <div>
-                <Label className="text-xs">연락처</Label>
-                <Input value={(addForm.buyer_phone as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, buyer_phone: e.target.value }))} placeholder="010-0000-0000" className="h-8 text-sm" />
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label className="text-xs">플랜</Label>
                 <Input value={(addForm.plan_name as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, plan_name: e.target.value }))} className="h-8 text-sm" />
-              </div>
-              <div>
-                <Label className="text-xs">수량</Label>
-                <Input type="number" value={addForm.quantity ?? ''} onChange={e => setAddForm(p => ({ ...p, quantity: parseInt(e.target.value) || 1 }))} className="h-8 text-sm" />
               </div>
               <div>
                 <Label className="text-xs">결제금액</Label>
@@ -325,13 +514,13 @@ export default function PartnerPortal() {
               <Label className="text-xs">비고</Label>
               <Input value={(addForm.remarks as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, remarks: e.target.value }))} className="h-8 text-sm" />
             </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" size="sm" onClick={() => setAddDialogOpen(false)}>취소</Button>
-              <Button size="sm" onClick={handleAddSubmit} disabled={adding}>
-                {adding && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
-                추가
-              </Button>
-            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t">
+            <Button variant="outline" size="sm" onClick={() => setAddDialogOpen(false)}>취소</Button>
+            <Button size="sm" onClick={handleAddSubmit} disabled={adding}>
+              {adding && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              추가
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

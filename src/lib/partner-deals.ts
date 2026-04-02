@@ -9,6 +9,21 @@ const HEADERS: Record<string, string> = {
   'Content-Type': 'application/json',
 };
 
+export interface PartnerDealBuyer {
+  id: string;
+  partner_deal_id: string;
+  buyer_name?: string;
+  buyer_phone?: string;
+  buyer_email?: string;
+  student_count?: number;
+  class_count?: number;
+  month_count?: number;
+  plan_name?: string;
+  quantity?: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PartnerDeal {
   id: string;
   partner_id: string;
@@ -87,6 +102,58 @@ export async function deletePartnerDeal(id: string): Promise<void> {
     headers: HEADERS,
   });
   if (!res.ok) throw new Error(`파트너 딜 삭제 실패: ${res.status}`);
+}
+
+// ── 파트너 딜 구매자 CRUD ────────────────────────────
+const BUYERS_URL = `${SUPABASE_URL}/rest/v1/partner_deal_buyers`;
+
+export async function getDealBuyers(dealId: string): Promise<PartnerDealBuyer[]> {
+  const res = await fetch(
+    `${BUYERS_URL}?partner_deal_id=eq.${encodeURIComponent(dealId)}&order=created_at.asc`,
+    { headers: HEADERS }
+  );
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function getBuyersByPartner(partnerId: string): Promise<PartnerDealBuyer[]> {
+  // partner_deal_buyers 테이블에서 해당 파트너의 모든 구매자 조회
+  const deals = await getPartnerDeals(partnerId);
+  if (deals.length === 0) return [];
+  const dealIds = deals.map(d => d.id);
+  const filter = dealIds.map(id => `"${id}"`).join(',');
+  const res = await fetch(
+    `${BUYERS_URL}?partner_deal_id=in.(${filter})&order=created_at.asc`,
+    { headers: HEADERS }
+  );
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function createDealBuyers(
+  dealId: string,
+  buyers: Array<Omit<PartnerDealBuyer, 'id' | 'partner_deal_id' | 'created_at' | 'updated_at'>>
+): Promise<PartnerDealBuyer[]> {
+  if (buyers.length === 0) return [];
+  const rows = buyers.map(b => ({ ...b, partner_deal_id: dealId }));
+  const res = await fetch(BUYERS_URL, {
+    method: 'POST',
+    headers: { ...HEADERS, Prefer: 'return=representation' },
+    body: JSON.stringify(rows),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `구매자 생성 실패: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteDealBuyers(dealId: string): Promise<void> {
+  const res = await fetch(`${BUYERS_URL}?partner_deal_id=eq.${dealId}`, {
+    method: 'DELETE',
+    headers: HEADERS,
+  });
+  if (!res.ok) throw new Error(`구매자 삭제 실패: ${res.status}`);
 }
 
 // ── 수수료 자동 계산 ─────────────────────────────────
