@@ -917,6 +917,12 @@ function DealForm({
     blobUrl: string; base64: string; fileName: string;
   } | null>(null);
   const [quoteSending, setQuoteSending] = useState(false);
+  // 일괄 발송 미리보기
+  const [quoteBatchPreview, setQuoteBatchPreview] = useState<
+    Array<{ blobUrl: string; base64: string; fileName: string; tabLabel: string }> | null
+  >(null);
+  const [quoteBatchActiveIdx, setQuoteBatchActiveIdx] = useState(0);
+  const [quoteBatchSending, setQuoteBatchSending] = useState(false);
   const [quoteNumGenerating, setQuoteNumGenerating] = useState(false);
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -1312,6 +1318,66 @@ function DealForm({
     } finally { setQuoteSending(false); }
   };
 
+  // 견적서 일괄 발송 미리보기
+  const handleQuoteBatchPreview = async () => {
+    const contactEmail = n('Contact_Email');
+    if (!contactEmail) { toast.error('담당자 이메일이 없습니다'); return; }
+    const previews: Array<{ blobUrl: string; base64: string; fileName: string; tabLabel: string }> = [];
+    for (let i = 0; i < localTabs.length; i++) {
+      const tab = localTabs[i];
+      const qSlot = tab.id ? `quote_file_${tab.id}` : `quote_tab_${i}`;
+      const pendingFile = pendingFiles[qSlot];
+      const storedFile = storedFiles[qSlot];
+      let blob: Blob | null = null;
+      let fileName = '';
+      if (pendingFile) {
+        blob = pendingFile; fileName = pendingFile.name;
+      } else if (storedFile) {
+        const r = await fetch(storedFile.file_url).catch(() => null);
+        if (r?.ok) { blob = await r.blob(); fileName = storedFile.file_name; }
+      }
+      if (blob) {
+        const blobUrl = URL.createObjectURL(blob);
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+          reader.readAsDataURL(blob!);
+        });
+        previews.push({ blobUrl, base64, fileName, tabLabel: getTabLabel(tab, i) });
+      }
+    }
+    if (previews.length === 0) { toast.error('발송할 견적서 파일이 없습니다'); return; }
+    setQuoteBatchPreview(previews);
+    setQuoteBatchActiveIdx(0);
+  };
+
+  const handleQuoteBatchSend = async () => {
+    if (!quoteBatchPreview) return;
+    setQuoteBatchSending(true);
+    try {
+      for (const p of quoteBatchPreview) {
+        await sendQuoteEmail({
+          to: n('Contact_Email'),
+          orgName: n('Org_Name'),
+          contactName: n('Contact_Name'),
+          quoteNumber: n('Quote_Number'),
+          attachmentBase64: p.base64,
+          attachmentFileName: p.fileName,
+        });
+      }
+      toast.success(`${quoteBatchPreview.length}건의 견적서를 ${n('Contact_Email')}으로 발송했습니다`);
+      quoteBatchPreview.forEach(p => URL.revokeObjectURL(p.blobUrl));
+      setQuoteBatchPreview(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '일괄 발송 실패');
+    } finally { setQuoteBatchSending(false); }
+  };
+
+  const cleanupBatchPreview = () => {
+    quoteBatchPreview?.forEach(p => URL.revokeObjectURL(p.blobUrl));
+    setQuoteBatchPreview(null);
+  };
+
   // 전화번호 재구매/신규 감지
   useEffect(() => {
     const phone = f.Contact_Phone?.trim() ?? '';
@@ -1637,6 +1703,12 @@ function DealForm({
               className="px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground flex-shrink-0 mb-0.5">
               +
             </button>
+            <div className="ml-auto flex-shrink-0 mb-0.5 pr-1">
+              <button type="button" onClick={handleQuoteBatchPreview}
+                className="text-[11px] px-2.5 py-1 rounded border border-blue-400 text-blue-600 hover:bg-blue-50 transition-colors flex items-center gap-1">
+                <Mail className="h-3 w-3" />모두 발송
+              </button>
+            </div>
           </div>
 
         <div className="p-3 space-y-3">
@@ -2049,7 +2121,7 @@ function DealForm({
       </div>
     </div>
 
-    {/* 견적서 발송 미리보기 + 확인 */}
+    {/* 견적서 발송 미리보기 + 확인 (단일) */}
     {quoteSendPreview && (
       <Dialog open={true} onOpenChange={() => { URL.revokeObjectURL(quoteSendPreview.blobUrl); setQuoteSendPreview(null); }}>
         <DialogContent className="max-w-2xl">
@@ -2076,6 +2148,56 @@ function DealForm({
               <Button variant="outline" onClick={() => { URL.revokeObjectURL(quoteSendPreview.blobUrl); setQuoteSendPreview(null); }}>취소</Button>
               <Button onClick={handleQuoteConfirmSend} disabled={quoteSending || !n('Contact_Email')}>
                 {quoteSending ? <><Loader2 className="h-4 w-4 animate-spin mr-1" />발송 중...</> : '이 주소로 발송'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )}
+
+    {/* 견적서 일괄 발송 미리보기 */}
+    {quoteBatchPreview && (
+      <Dialog open={true} onOpenChange={cleanupBatchPreview}>
+        <DialogContent className="max-w-2xl max-h-[92vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle>견적서 일괄 발송 ({quoteBatchPreview.length}건)</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 flex-1 overflow-hidden flex flex-col">
+            <div className="bg-muted/50 rounded-lg p-3 text-sm space-y-1.5 flex-shrink-0">
+              <div className="flex gap-3">
+                <span className="text-muted-foreground w-12 flex-shrink-0">수신</span>
+                <span className="font-medium text-foreground">{n('Contact_Email') || '(이메일 미입력)'}</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-muted-foreground w-12 flex-shrink-0">건수</span>
+                <span>{quoteBatchPreview.length}건의 견적서를 각각 이메일로 발송합니다</span>
+              </div>
+            </div>
+            {/* 탭 바 */}
+            <div className="flex border-b border-border overflow-x-auto flex-shrink-0">
+              {quoteBatchPreview.map((p, idx) => (
+                <button key={idx} type="button" onClick={() => setQuoteBatchActiveIdx(idx)}
+                  className={`px-4 py-2 text-xs border-b-2 transition-colors flex-shrink-0
+                    ${idx === quoteBatchActiveIdx
+                      ? 'border-primary text-primary font-medium'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+                  {p.tabLabel}
+                  <span className="ml-1.5 text-[10px] text-muted-foreground">({p.fileName})</span>
+                </button>
+              ))}
+            </div>
+            {/* 미리보기 */}
+            <iframe
+              src={quoteBatchPreview[quoteBatchActiveIdx]?.blobUrl}
+              className="w-full flex-1 min-h-[400px] rounded border border-border"
+              title={`견적서 미리보기 ${quoteBatchActiveIdx + 1}`}
+            />
+            <div className="flex gap-2 justify-end flex-shrink-0">
+              <Button variant="outline" onClick={cleanupBatchPreview}>취소</Button>
+              <Button onClick={handleQuoteBatchSend} disabled={quoteBatchSending || !n('Contact_Email')}>
+                {quoteBatchSending
+                  ? <><Loader2 className="h-4 w-4 animate-spin mr-1" />발송 중...</>
+                  : `${quoteBatchPreview.length}건 모두 발송`}
               </Button>
             </div>
           </div>
