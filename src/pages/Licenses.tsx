@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { formatPhone } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useResizableColumns } from '@/hooks/useResizableColumns';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -276,13 +277,6 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
     contact_name: '', contact_phone: '', org_name: '',
     duration: '12', user_count: '40', coupon_code: '', status: 'pending',
   }]);
-
-  const formatPhone = (raw: string) => {
-    const digits = raw.replace(/\D/g, '').slice(0, 11);
-    if (digits.length <= 3) return digits;
-    if (digits.length <= 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
-    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
-  };
 
   const updateRecipient = (i: number, key: keyof Recipient, val: string) =>
     setRecipients(prev => prev.map((r, idx) =>

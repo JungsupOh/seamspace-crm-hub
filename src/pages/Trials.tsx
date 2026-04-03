@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { formatPhone } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -296,7 +297,7 @@ function AddLicenseRow({ eventId, onDone }: AddLicenseRowProps) {
         placeholder="학교/기관" className="col-span-3 h-7 text-xs" />
       <Input value={row.contact_name} onChange={e => r('contact_name', e.target.value)}
         placeholder="이름" className="col-span-2 h-7 text-xs" />
-      <Input value={row.contact_phone} onChange={e => r('contact_phone', e.target.value)}
+      <Input value={row.contact_phone} onChange={e => r('contact_phone', formatPhone(e.target.value))}
         placeholder="전화번호" className="col-span-2 h-7 text-xs" />
       <Input value={row.coupon_code} onChange={e => r('coupon_code', e.target.value)}
         placeholder="쿠폰코드" className="col-span-2 h-7 text-xs font-mono" />
@@ -417,7 +418,7 @@ function EventDetail({ event, convertedPhones }: EventDetailProps) {
                 placeholder="학교/기관" className="col-span-3 h-7 text-xs" />
               <Input defaultValue={lic.contact_name} onChange={e => er('contact_name', e.target.value)}
                 placeholder="이름" className="col-span-2 h-7 text-xs" />
-              <Input defaultValue={lic.contact_phone} onChange={e => er('contact_phone', e.target.value)}
+              <Input defaultValue={lic.contact_phone} onChange={e => er('contact_phone', formatPhone(e.target.value))}
                 placeholder="전화번호" className="col-span-2 h-7 text-xs" />
               <Input defaultValue={lic.coupon_code} onChange={e => er('coupon_code', e.target.value)}
                 placeholder="쿠폰코드" className="col-span-2 h-7 text-xs font-mono" />

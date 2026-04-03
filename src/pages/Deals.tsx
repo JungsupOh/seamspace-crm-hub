@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { formatPhone } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1456,7 +1457,7 @@ function DealForm({
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <Field label="전화번호 *">
-              <Input value={n('Contact_Phone')} onChange={e => up('Contact_Phone', e.target.value)}
+              <Input value={n('Contact_Phone')} onChange={e => up('Contact_Phone', formatPhone(e.target.value))}
                 className="h-8 text-sm" placeholder="010-0000-0000" />
             </Field>
             <Field label="이름">
@@ -1886,7 +1887,7 @@ function DealForm({
                 </div>
                 <div>
                   <span className="text-[10px] text-muted-foreground">연락처</span>
-                  <Input value={u.user_phone ?? ''} onChange={e => updateDealUser(idx, 'user_phone', e.target.value)}
+                  <Input value={u.user_phone ?? ''} onChange={e => updateDealUser(idx, 'user_phone', formatPhone(e.target.value))}
                     className="h-7 text-xs" placeholder="010-0000-0000" disabled={idx === 0 && u.is_primary} />
                 </div>
                 <div>

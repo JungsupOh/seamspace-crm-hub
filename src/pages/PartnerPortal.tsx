@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { formatPhone } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDeals } from '@/hooks/use-airtable';
 import { Button } from '@/components/ui/button';
@@ -468,7 +469,7 @@ export default function PartnerPortal() {
                       </div>
                       <div>
                         <span className="text-[10px] text-muted-foreground">연락처</span>
-                        <Input value={b.buyer_phone} onChange={e => updateBuyer(idx, 'buyer_phone', e.target.value)} placeholder="010-0000-0000" className="h-7 text-xs" />
+                        <Input value={b.buyer_phone} onChange={e => updateBuyer(idx, 'buyer_phone', formatPhone(e.target.value))} placeholder="010-0000-0000" className="h-7 text-xs" />
                       </div>
                       <div>
                         <span className="text-[10px] text-muted-foreground">이메일</span>

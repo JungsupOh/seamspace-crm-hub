@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, Component } from 'react';
+import { formatPhone } from '@/lib/utils';
 import type { ErrorInfo, ReactNode } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -568,7 +569,7 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
               </div>
               <div>
                 <Label className="text-xs">전화번호</Label>
-                <Input value={n('contact_phone')} onChange={e => set('contact_phone', e.target.value)} className="mt-1 h-8 text-sm" />
+                <Input value={n('contact_phone')} onChange={e => set('contact_phone', formatPhone(e.target.value))} className="mt-1 h-8 text-sm" />
               </div>
               <div>
                 <Label className="text-xs">이메일 *</Label>

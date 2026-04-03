@@ -133,17 +133,15 @@ export function recommendItems(students: number, licenseQty: number, duration: n
     if (bigItems && fillerItems) add([...bigItems, ...fillerItems]);
   }
 
-  // ── 5. 하이브리드: 대형(앞 기간) + 학급 필러(나머지 기간 × 초과인원) ──
-  // 대형 기간 중 전체 인원 커버 (무제한 이용권), 만료 후 초과분만 학급 커버
+  // ── 5. 하이브리드: 대형이 전체 인원 커버 시, 앞 기간 대형 + 나머지 학급 ──
+  // 대형 플랜이 전체 인원을 커버할 수 있어야만 기간 분할 가능
   for (const bp of BIG_PLANS) {
-    const excess = st - PLAN_CAPACITY[bp];
-    if (excess <= 0) continue;
-    const fillerQty = Math.ceil(excess / 40);
+    if (PLAN_CAPACITY[bp] < st) continue;
+    const fillerQty = Math.ceil(st / 40);
 
     for (const bigPeriod of DURATION_OPTIONS) {
       const remaining = dur - bigPeriod;
       if (bigPeriod >= dur || remaining <= 0) continue;
-      // 대형 플랜은 나머지 기간 이상이어야 함 (과반수 커버)
       if (bigPeriod < remaining) continue;
       const bigPrice = getUnitPrice(bp, bigPeriod);
       if (!bigPrice) continue;
@@ -151,20 +149,6 @@ export function recommendItems(students: number, licenseQty: number, duration: n
       const fillerItems = decomposeToItems(remaining, '학급플랜', fillerQty);
       if (fillerItems) {
         add([makeItem(bp, bigPeriod, 1), ...fillerItems]);
-      }
-    }
-
-    // 대형을 기간 분해(여러 period)로 + 학급 필러도 같은 구조
-    const bigDecomp = decomposeDuration(dur, bp);
-    if (bigDecomp.length > 1) {
-      // 대형의 가장 큰 기간만 사용, 나머지는 학급 필러
-      const largestPeriod = bigDecomp[0].period;
-      const remaining = dur - largestPeriod;
-      if (remaining > 0) {
-        const fillerItems = decomposeToItems(remaining, '학급플랜', fillerQty);
-        if (fillerItems) {
-          add([makeItem(bp, largestPeriod, 1), ...fillerItems]);
-        }
       }
     }
   }

@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { formatPhone } from '@/lib/utils';
 // Toss Payments 결제창 SDK loaded via CDN (https://js.tosspayments.com/v1)
 import { searchSchools, SchoolInfo } from '@/lib/neis';
 import { Button } from '@/components/ui/button';
@@ -123,13 +124,6 @@ function getSuggestions(targetMonths: number, plan: PlanKey): Suggestion[] {
 }
 
 function fmt(n: number) { return n.toLocaleString('ko-KR') + '원'; }
-
-function formatPhone(value: string): string {
-  const d = value.replace(/\D/g, '').slice(0, 11);
-  if (d.length <= 3) return d;
-  if (d.length <= 7) return `${d.slice(0, 3)}-${d.slice(3)}`;
-  return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
-}
 
 function normalizePhone(p: string) { return p.replace(/\D/g, ''); }
 function normalizeEmail(e: string) { return e.trim().toLowerCase(); }

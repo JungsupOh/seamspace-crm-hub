@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { formatPhone } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useContacts, useCreateContact, useUpdateContact, useDeleteContact } from '@/hooks/use-airtable';
@@ -248,7 +249,7 @@ function AddContactDialog({ open, onClose }: { open: boolean; onClose: () => voi
             </div>
             <div className="space-y-1">
               <Label className="text-xs">전화</Label>
-              <Input value={f.Phone ?? ''} onChange={e => set('Phone', e.target.value)} className="h-8 text-sm" placeholder="010-0000-0000" />
+              <Input value={f.Phone ?? ''} onChange={e => set('Phone', formatPhone(e.target.value))} className="h-8 text-sm" placeholder="010-0000-0000" />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">이메일</Label>
@@ -350,7 +351,7 @@ function ContactEditForm({ contact, onCancel, onSaved }: ContactEditFormProps) {
         </div>
         <div>
           <label className="text-xs text-muted-foreground">전화</label>
-          <Input value={f.Phone ?? ''} onChange={e => set('Phone', e.target.value)} className="mt-1 h-8 text-sm" />
+          <Input value={f.Phone ?? ''} onChange={e => set('Phone', formatPhone(e.target.value))} className="mt-1 h-8 text-sm" />
         </div>
         <div>
           <label className="text-xs text-muted-foreground">유형</label>
