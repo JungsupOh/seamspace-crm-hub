@@ -1077,19 +1077,22 @@ function DealForm({
     setDealUsers(prev => prev.map((u, i) => i === idx ? { ...u, [field]: value } : u));
   };
   const addDealUser = () => {
-    // 새 사용자를 추가할 때 기본값은 첫 번째 사용자의 값을 복사
     const base = dealUsers[0];
-    setDealUsers(prev => [...prev, {
+    const next = [...dealUsers, {
       user_name: '', user_phone: '', user_email: '',
       student_count: base?.student_count ?? 40,
       month_count: base?.month_count,
       plan_name: base?.plan_name ?? '학급별',
       is_primary: false,
-    }]);
+    }];
+    setDealUsers(next);
+    up('License_Code_Count', next.length);
   };
   const removeDealUser = (idx: number) => {
     if (dealUsers.length <= 1) return;
-    setDealUsers(prev => prev.filter((_, i) => i !== idx));
+    const next = dealUsers.filter((_, i) => i !== idx);
+    setDealUsers(next);
+    up('License_Code_Count', next.length);
   };
   // 전체 사용자에게 동일 값 일괄 적용
   const applyToAllUsers = (field: keyof DealUserInput, value: unknown) => {
@@ -1522,80 +1525,6 @@ function DealForm({
         </div>
       </Section>
 
-      {/* 사용자 (이용권 수신자) */}
-      <Section icon={Users} title={`사용자 (${dealUsers.length}명)`}>
-        <div className="space-y-2">
-          <p className="text-[11px] text-muted-foreground">이용권을 받을 사용자입니다. 기본값은 담당자와 동일합니다.</p>
-          {dealUsers.map((u, idx) => (
-            <div key={idx} className="border border-border rounded-md p-2.5 bg-muted/20 relative">
-              {idx > 0 && (
-                <button type="button" onClick={() => removeDealUser(idx)}
-                  className="absolute top-1.5 right-1.5 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive">
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-              {idx === 0 && <span className="text-[10px] text-primary font-medium">대표 사용자 (담당자)</span>}
-              <div className="grid grid-cols-3 gap-2 mt-1">
-                <div>
-                  <span className="text-[10px] text-muted-foreground">이름</span>
-                  <Input value={u.user_name ?? ''} onChange={e => updateDealUser(idx, 'user_name', e.target.value)}
-                    className="h-7 text-xs" placeholder="홍길동" disabled={idx === 0 && u.is_primary} />
-                </div>
-                <div>
-                  <span className="text-[10px] text-muted-foreground">연락처</span>
-                  <Input value={u.user_phone ?? ''} onChange={e => updateDealUser(idx, 'user_phone', e.target.value)}
-                    className="h-7 text-xs" placeholder="010-0000-0000" disabled={idx === 0 && u.is_primary} />
-                </div>
-                <div>
-                  <span className="text-[10px] text-muted-foreground">이메일</span>
-                  <Input value={u.user_email ?? ''} onChange={e => updateDealUser(idx, 'user_email', e.target.value)}
-                    className="h-7 text-xs" placeholder="email@example.com" disabled={idx === 0 && u.is_primary} />
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-2 mt-2">
-                <div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] text-muted-foreground">학생 수</span>
-                    {idx === 0 && dealUsers.length > 1 && (
-                      <button type="button" onClick={() => applyToAllUsers('student_count', u.student_count)}
-                        className="text-[9px] text-primary hover:underline">전체 적용</button>
-                    )}
-                  </div>
-                  <Input type="number" value={u.student_count ?? ''} onChange={e => updateDealUser(idx, 'student_count', parseInt(e.target.value) || 0)}
-                    className="h-7 text-xs" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] text-muted-foreground">기간 (개월)</span>
-                    {idx === 0 && dealUsers.length > 1 && (
-                      <button type="button" onClick={() => applyToAllUsers('month_count', u.month_count)}
-                        className="text-[9px] text-primary hover:underline">전체 적용</button>
-                    )}
-                  </div>
-                  <Input type="number" value={u.month_count ?? ''} onChange={e => updateDealUser(idx, 'month_count', parseInt(e.target.value) || undefined)}
-                    className="h-7 text-xs" placeholder="12" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] text-muted-foreground">플랜</span>
-                    {idx === 0 && dealUsers.length > 1 && (
-                      <button type="button" onClick={() => applyToAllUsers('plan_name', u.plan_name)}
-                        className="text-[9px] text-primary hover:underline">전체 적용</button>
-                    )}
-                  </div>
-                  <Input value={u.plan_name ?? ''} onChange={e => updateDealUser(idx, 'plan_name', e.target.value)}
-                    className="h-7 text-xs" />
-                </div>
-              </div>
-            </div>
-          ))}
-          <button type="button" onClick={addDealUser}
-            className="w-full border border-dashed border-border rounded-md py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors flex items-center justify-center gap-1">
-            <Plus className="h-3 w-3" />사용자 추가
-          </button>
-        </div>
-      </Section>
-
       {/* 기관 */}
       <Section icon={Building2} title="기관">
         <div className="grid grid-cols-2 gap-3">
@@ -1934,6 +1863,80 @@ function DealForm({
           })()}
         </div>
         </div>{/* end rounded border container */}
+      </Section>
+
+      {/* 사용자 (이용권 수신자) */}
+      <Section icon={Users} title={`사용자 (${dealUsers.length}명) — 이용권 수량 ${dealUsers.length}장`}>
+        <div className="space-y-2">
+          <p className="text-[11px] text-muted-foreground">이용권을 받을 사용자입니다. 사용자 수 = 이용권 수량</p>
+          {dealUsers.map((u, idx) => (
+            <div key={idx} className="border border-border rounded-md p-2.5 bg-muted/20 relative">
+              {idx > 0 && (
+                <button type="button" onClick={() => removeDealUser(idx)}
+                  className="absolute top-1.5 right-1.5 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive">
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+              {idx === 0 && <span className="text-[10px] text-primary font-medium">대표 사용자 (담당자)</span>}
+              <div className="grid grid-cols-3 gap-2 mt-1">
+                <div>
+                  <span className="text-[10px] text-muted-foreground">이름</span>
+                  <Input value={u.user_name ?? ''} onChange={e => updateDealUser(idx, 'user_name', e.target.value)}
+                    className="h-7 text-xs" placeholder="홍길동" disabled={idx === 0 && u.is_primary} />
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground">연락처</span>
+                  <Input value={u.user_phone ?? ''} onChange={e => updateDealUser(idx, 'user_phone', e.target.value)}
+                    className="h-7 text-xs" placeholder="010-0000-0000" disabled={idx === 0 && u.is_primary} />
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground">이메일</span>
+                  <Input value={u.user_email ?? ''} onChange={e => updateDealUser(idx, 'user_email', e.target.value)}
+                    className="h-7 text-xs" placeholder="email@example.com" disabled={idx === 0 && u.is_primary} />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                <div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-muted-foreground">학생 수</span>
+                    {idx === 0 && dealUsers.length > 1 && (
+                      <button type="button" onClick={() => applyToAllUsers('student_count', u.student_count)}
+                        className="text-[9px] text-primary hover:underline">전체 적용</button>
+                    )}
+                  </div>
+                  <Input type="number" value={u.student_count ?? ''} onChange={e => updateDealUser(idx, 'student_count', parseInt(e.target.value) || 0)}
+                    className="h-7 text-xs" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-muted-foreground">기간 (개월)</span>
+                    {idx === 0 && dealUsers.length > 1 && (
+                      <button type="button" onClick={() => applyToAllUsers('month_count', u.month_count)}
+                        className="text-[9px] text-primary hover:underline">전체 적용</button>
+                    )}
+                  </div>
+                  <Input type="number" value={u.month_count ?? ''} onChange={e => updateDealUser(idx, 'month_count', parseInt(e.target.value) || undefined)}
+                    className="h-7 text-xs" placeholder="12" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-muted-foreground">플랜</span>
+                    {idx === 0 && dealUsers.length > 1 && (
+                      <button type="button" onClick={() => applyToAllUsers('plan_name', u.plan_name)}
+                        className="text-[9px] text-primary hover:underline">전체 적용</button>
+                    )}
+                  </div>
+                  <Input value={u.plan_name ?? ''} onChange={e => updateDealUser(idx, 'plan_name', e.target.value)}
+                    className="h-7 text-xs" />
+                </div>
+              </div>
+            </div>
+          ))}
+          <button type="button" onClick={addDealUser}
+            className="w-full border border-dashed border-border rounded-md py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors flex items-center justify-center gap-1">
+            <Plus className="h-3 w-3" />사용자 추가
+          </button>
+        </div>
       </Section>
 
       {/* 이용권 */}
