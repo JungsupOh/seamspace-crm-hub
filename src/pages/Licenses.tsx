@@ -231,6 +231,30 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
   // 딜 선택 시 deal_licenses에서 수신자 자동 로드
   const loadRecipientsFromDeal = async (dealId: string) => {
     try {
+      // 1) deal_users 테이블에서 사용자 로드
+      const usersRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/deal_users?deal_id=eq.${encodeURIComponent(dealId)}&order=is_primary.desc,created_at.asc`,
+        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+      );
+      const users = usersRes.ok ? await usersRes.json() : [];
+
+      if (users.length > 0) {
+        // deal_users가 있으면 이를 수신자로 사용
+        const deal = deals?.find(d => d.id === dealId);
+        const orgName = deal?.fields.Org_Name || '';
+        setRecipients(users.map((u: { user_name?: string; user_phone?: string; month_count?: number; student_count?: number }) => ({
+          contact_name:  u.user_name || '',
+          contact_phone: u.user_phone || '',
+          org_name:      orgName,
+          duration:      String(u.month_count || 12),
+          user_count:    String(u.student_count || 40),
+          coupon_code:   '',
+          status: 'pending' as const,
+        })));
+        return;
+      }
+
+      // 2) 기존 deal_licenses에서 로드 (fallback)
       const res = await fetch(
         `${SUPABASE_URL}/rest/v1/deal_licenses?deal_id=eq.${dealId}&order=created_at.asc`,
         { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }

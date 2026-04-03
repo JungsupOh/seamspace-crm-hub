@@ -27,6 +27,7 @@ import { generateQuotePdf, generateQuotePdfBlob } from '@/lib/generateQuotePdf';
 import { sendQuoteEmail } from '@/lib/email';
 import { QuoteLineItem, PLAN_LIST, DURATION_OPTIONS, makeItem, recommendItems, calcQuoteTotals, getS2BNumber } from '@/lib/pricing';
 import { notifyNewDeal } from '@/lib/telegram';
+import { getDealUsers, saveDealUsers, type DealUserInput } from '@/lib/deal-users';
 import { toast } from 'sonner';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -836,7 +837,7 @@ function DealForm({
   existingFiles?: DealFileRecord[];
   initialQuotes?: DealQuote[];
   draftKey?: string;
-  onSave: (fields: Partial<DealFields>, files: Record<string, File>, receiptFiles: File[], licenseFiles: File[], licenseContacts: LicenseContact[], contactToUpdate?: AirtableRecord<ContactFields>, removedFileIds?: string[], removedReceiptIds?: string[], removedLicenseIds?: string[], quoteTabs?: QuoteTab[]) => void;
+  onSave: (fields: Partial<DealFields>, files: Record<string, File>, receiptFiles: File[], licenseFiles: File[], licenseContacts: LicenseContact[], contactToUpdate?: AirtableRecord<ContactFields>, removedFileIds?: string[], removedReceiptIds?: string[], removedLicenseIds?: string[], quoteTabs?: QuoteTab[], dealUsers?: DealUserInput[]) => void;
   onCancel: () => void;
   saving: boolean;
   contacts?: AirtableRecord<ContactFields>[];
@@ -906,6 +907,9 @@ function DealForm({
   );
   const [removedLicenseIds, setRemovedLicenseIds] = useState<string[]>([]);
   const [licenseContacts, setLicenseContacts] = useState<LicenseContact[]>([]);
+  // ── 사용자(이용권 수신자) 상태 ──
+  const [dealUsers, setDealUsers] = useState<DealUserInput[]>([]);
+  const [dealUsersLoaded, setDealUsersLoaded] = useState(false);
   const [showCustomSource, setShowCustomSource] = useState(false);
   const [parsingTemplate, setParsingTemplate] = useState(false);
   const [pdfGenAttaching, setPdfGenAttaching] = useState(false);
@@ -1026,6 +1030,64 @@ function DealForm({
     if (t.plan) return t.plan.replace('플랜', '').replace('학교(', '학교').replace(')', '');
     if (t.final_value) return `${Math.round(t.final_value / 10000)}만`;
     return `견적 ${idx + 1}`;
+  };
+
+  // ── 사용자 로드 (편집 시 기존 사용자 / 추가 시 담당자로 초기화) ──
+  useEffect(() => {
+    if (dealUsersLoaded) return;
+    if (initial && draftKey?.startsWith('edit_')) {
+      // 편집 모드: DB에서 사용자 로드
+      // draftKey가 edit_{id} 형태이므로 deal_id 추출 불가 - initial이 있으면 편집 모드
+      // 실제 deal_id는 부모에서 전달받을 수 없으므로, 별도 prop이 필요
+      // 여기서는 초기 담당자로 세팅하고 parent에서 로드하는 방식 사용
+    }
+    // 담당자 기반 기본 사용자 세팅
+    if (dealUsers.length === 0) {
+      setDealUsers([{
+        user_name: initial?.Contact_Name,
+        user_phone: initial?.Contact_Phone,
+        user_email: initial?.Contact_Email,
+        student_count: 40,
+        month_count: initial?.License_Duration,
+        plan_name: initial?.Quote_Plan || '학급별',
+        is_primary: true,
+      }]);
+    }
+    setDealUsersLoaded(true);
+  }, [initial, dealUsersLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 담당자 변경 시 primary 사용자 자동 업데이트
+  useEffect(() => {
+    if (dealUsers.length > 0 && dealUsers[0]?.is_primary) {
+      setDealUsers(prev => {
+        const first = prev[0];
+        if (first.user_name === f.Contact_Name && first.user_phone === f.Contact_Phone && first.user_email === f.Contact_Email) return prev;
+        return [{ ...first, user_name: f.Contact_Name, user_phone: f.Contact_Phone, user_email: f.Contact_Email }, ...prev.slice(1)];
+      });
+    }
+  }, [f.Contact_Name, f.Contact_Phone, f.Contact_Email]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updateDealUser = (idx: number, field: keyof DealUserInput, value: unknown) => {
+    setDealUsers(prev => prev.map((u, i) => i === idx ? { ...u, [field]: value } : u));
+  };
+  const addDealUser = () => {
+    // 새 사용자를 추가할 때 기본값은 첫 번째 사용자의 값을 복사
+    const base = dealUsers[0];
+    setDealUsers(prev => [...prev, {
+      user_name: '', user_phone: '', user_email: '',
+      student_count: base?.student_count ?? 40,
+      month_count: base?.month_count,
+      plan_name: base?.plan_name ?? '학급별',
+      is_primary: false,
+    }]);
+  };
+  const removeDealUser = (idx: number) => {
+    if (dealUsers.length <= 1) return;
+    setDealUsers(prev => prev.filter((_, i) => i !== idx));
+  };
+  // 전체 사용자에게 동일 값 일괄 적용
+  const applyToAllUsers = (field: keyof DealUserInput, value: unknown) => {
+    setDealUsers(prev => prev.map(u => ({ ...u, [field]: value })));
   };
 
   // ── Draft 자동저장 (의미있는 데이터가 있을 때만) ──
@@ -1391,6 +1453,80 @@ function DealForm({
             <Input value={n('Contact_Email')} onChange={e => up('Contact_Email', e.target.value)}
               type="email" className="h-8 text-sm" />
           </Field>
+        </div>
+      </Section>
+
+      {/* 사용자 (이용권 수신자) */}
+      <Section icon={Users} title={`사용자 (${dealUsers.length}명)`}>
+        <div className="space-y-2">
+          <p className="text-[11px] text-muted-foreground">이용권을 받을 사용자입니다. 기본값은 담당자와 동일합니다.</p>
+          {dealUsers.map((u, idx) => (
+            <div key={idx} className="border border-border rounded-md p-2.5 bg-muted/20 relative">
+              {idx > 0 && (
+                <button type="button" onClick={() => removeDealUser(idx)}
+                  className="absolute top-1.5 right-1.5 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive">
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+              {idx === 0 && <span className="text-[10px] text-primary font-medium">대표 사용자 (담당자)</span>}
+              <div className="grid grid-cols-3 gap-2 mt-1">
+                <div>
+                  <span className="text-[10px] text-muted-foreground">이름</span>
+                  <Input value={u.user_name ?? ''} onChange={e => updateDealUser(idx, 'user_name', e.target.value)}
+                    className="h-7 text-xs" placeholder="홍길동" disabled={idx === 0 && u.is_primary} />
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground">연락처</span>
+                  <Input value={u.user_phone ?? ''} onChange={e => updateDealUser(idx, 'user_phone', e.target.value)}
+                    className="h-7 text-xs" placeholder="010-0000-0000" disabled={idx === 0 && u.is_primary} />
+                </div>
+                <div>
+                  <span className="text-[10px] text-muted-foreground">이메일</span>
+                  <Input value={u.user_email ?? ''} onChange={e => updateDealUser(idx, 'user_email', e.target.value)}
+                    className="h-7 text-xs" placeholder="email@example.com" disabled={idx === 0 && u.is_primary} />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                <div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-muted-foreground">학생 수</span>
+                    {idx === 0 && dealUsers.length > 1 && (
+                      <button type="button" onClick={() => applyToAllUsers('student_count', u.student_count)}
+                        className="text-[9px] text-primary hover:underline">전체 적용</button>
+                    )}
+                  </div>
+                  <Input type="number" value={u.student_count ?? ''} onChange={e => updateDealUser(idx, 'student_count', parseInt(e.target.value) || 0)}
+                    className="h-7 text-xs" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-muted-foreground">기간 (개월)</span>
+                    {idx === 0 && dealUsers.length > 1 && (
+                      <button type="button" onClick={() => applyToAllUsers('month_count', u.month_count)}
+                        className="text-[9px] text-primary hover:underline">전체 적용</button>
+                    )}
+                  </div>
+                  <Input type="number" value={u.month_count ?? ''} onChange={e => updateDealUser(idx, 'month_count', parseInt(e.target.value) || undefined)}
+                    className="h-7 text-xs" placeholder="12" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-muted-foreground">플랜</span>
+                    {idx === 0 && dealUsers.length > 1 && (
+                      <button type="button" onClick={() => applyToAllUsers('plan_name', u.plan_name)}
+                        className="text-[9px] text-primary hover:underline">전체 적용</button>
+                    )}
+                  </div>
+                  <Input value={u.plan_name ?? ''} onChange={e => updateDealUser(idx, 'plan_name', e.target.value)}
+                    className="h-7 text-xs" />
+                </div>
+              </div>
+            </div>
+          ))}
+          <button type="button" onClick={addDealUser}
+            className="w-full border border-dashed border-border rounded-md py-1.5 text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors flex items-center justify-center gap-1">
+            <Plus className="h-3 w-3" />사용자 추가
+          </button>
         </div>
       </Section>
 
@@ -1906,7 +2042,7 @@ function DealForm({
           const finalTabs = [...localTabs];
           finalTabs[activeTabIdx] = readCurrentTabData();
           clearDraft();
-          onSave({ ...f, Deal_Name: name }, pendingFiles, pendingReceiptFiles, pendingLicenseFiles, licenseContacts, phoneStatus?.contactRecord ?? initialContact, removedFileIds, removedReceiptIds, removedLicenseIds, finalTabs);
+          onSave({ ...f, Deal_Name: name }, pendingFiles, pendingReceiptFiles, pendingLicenseFiles, licenseContacts, phoneStatus?.contactRecord ?? initialContact, removedFileIds, removedReceiptIds, removedLicenseIds, finalTabs, dealUsers);
         }} disabled={saving} className="flex-1">
           {saving ? <><Loader2 className="h-4 w-4 animate-spin mr-1" />저장 중...</> : '저장'}
         </Button>
@@ -2702,6 +2838,7 @@ export default function Deals() {
     removedReceiptIds?: string[],
     removedLicenseIds?: string[],
     quoteTabs?: QuoteTab[],
+    dealUsersInput?: DealUserInput[],
   ) => {
     setUploading(true);
     try {
@@ -2960,6 +3097,14 @@ export default function Deals() {
               is_selected: isSelected,
             }).catch(e => console.warn('견적 탭 저장 실패:', e));
           }
+        }
+      }
+
+      // 사용자(이용권 수신자) 저장
+      if (dealUsersInput && dealUsersInput.length > 0) {
+        const validUsers = dealUsersInput.filter(u => u.user_name || u.user_phone);
+        if (validUsers.length > 0) {
+          await saveDealUsers(dealId, validUsers).catch(e => console.warn('사용자 저장 실패:', e));
         }
       }
 
