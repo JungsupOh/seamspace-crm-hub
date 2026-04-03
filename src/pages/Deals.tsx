@@ -1265,7 +1265,10 @@ function DealForm({
     try {
       const dbNums = await fetchAllDealQuoteNumbers().catch(() => [] as string[]);
       const airtableNums = (allDeals ?? []).flatMap(d => d.fields.Quote_Number ? [d.fields.Quote_Number] : []);
-      up('Quote_Number', generateQuoteNumber([...airtableNums, ...dbNums]));
+      const localNums = localTabs
+        .filter((_, i) => i !== activeTabIdx)
+        .flatMap(t => t.quote_number ? [t.quote_number] : []);
+      up('Quote_Number', generateQuoteNumber([...airtableNums, ...dbNums, ...localNums]));
     } finally { setQuoteNumGenerating(false); }
   };
 
