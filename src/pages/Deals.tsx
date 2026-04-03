@@ -2984,13 +2984,49 @@ export default function Deals() {
         await deleteDealFileRecord(id).catch(() => {});
       }
 
+      // ── 견적 탭 Supabase 저장 (파일 업로드보다 먼저 — 새 id 필요) ──
+      const quoteTabIdMap = new Map<string, string>(); // quote_tab_N → quote_file_{newId}
+      if (quoteTabs && quoteTabs.length > 0) {
+        const existingQuotes = await getDealQuotes(dealId).catch(() => [] as DealQuote[]);
+        const existingById = new Map(existingQuotes.map(q => [q.id, q]));
+        for (let i = 0; i < quoteTabs.length; i++) {
+          const tab = quoteTabs[i];
+          const isSelected = i === 0 && quoteTabs.length === 1 ? true : (tab.is_selected ?? false);
+          const quotePayload = {
+            quote_number: tab.quote_number,
+            quote_date: tab.quote_date,
+            plan: tab.plan,
+            qty: tab.qty,
+            license_qty: tab.license_qty,
+            duration: tab.duration,
+            unit_price: tab.unit_price,
+            final_value: tab.final_value,
+            supply_price: tab.supply_price,
+            tax_amount: tab.tax_amount,
+            items: tab.items as unknown[],
+            discount_amount: tab.discount_amount,
+            notes: tab.notes,
+            is_selected: isSelected,
+          };
+          if (tab.id && existingById.has(tab.id)) {
+            await updateDealQuote(tab.id, quotePayload).catch(e => console.warn('견적 탭 업데이트 실패:', e));
+          } else if (!tab.id) {
+            try {
+              const saved = await saveDealQuote({ deal_id: dealId, ...quotePayload });
+              quoteTabIdMap.set(`quote_tab_${i}`, `quote_file_${saved.id}`);
+            } catch (e) { console.warn('견적 탭 저장 실패:', e); }
+          }
+        }
+      }
+
       // 새 파일 업로드 → DB에 메타데이터 저장
       for (const [slotKey, file] of Object.entries(pendingFiles)) {
+        const resolvedSlot = quoteTabIdMap.get(slotKey) ?? slotKey;
         const { name, url } = await uploadDealFile(dealId, file);
         await saveDealFileRecord({
           deal_id:  dealId,
-          slot_key: slotKey,
-          label:    SLOT_LABELS[slotKey] ?? slotKey,
+          slot_key: resolvedSlot,
+          label:    SLOT_LABELS[slotKey] ?? (resolvedSlot.startsWith('quote_file_') ? '견적서' : slotKey),
           file_name: name,
           file_url:  url,
         });
@@ -3180,51 +3216,7 @@ export default function Deals() {
         }
       }
 
-      // ── 견적 탭 Supabase 저장 ─────────────────────────
-      if (quoteTabs && quoteTabs.length > 0) {
-        const existingQuotes = await getDealQuotes(dealId).catch(() => [] as DealQuote[]);
-        const existingById = new Map(existingQuotes.map(q => [q.id, q]));
-        for (let i = 0; i < quoteTabs.length; i++) {
-          const tab = quoteTabs[i];
-          const isSelected = i === 0 && quoteTabs.length === 1 ? true : (tab.is_selected ?? false);
-          if (tab.id && existingById.has(tab.id)) {
-            await updateDealQuote(tab.id, {
-              quote_number: tab.quote_number,
-              quote_date: tab.quote_date,
-              plan: tab.plan,
-              qty: tab.qty,
-              license_qty: tab.license_qty,
-              duration: tab.duration,
-              unit_price: tab.unit_price,
-              final_value: tab.final_value,
-              supply_price: tab.supply_price,
-              tax_amount: tab.tax_amount,
-              items: tab.items as unknown[],
-              discount_amount: tab.discount_amount,
-              notes: tab.notes,
-              is_selected: isSelected,
-            }).catch(e => console.warn('견적 탭 업데이트 실패:', e));
-          } else if (!tab.id) {
-            await saveDealQuote({
-              deal_id: dealId,
-              quote_number: tab.quote_number,
-              quote_date: tab.quote_date,
-              plan: tab.plan,
-              qty: tab.qty,
-              license_qty: tab.license_qty,
-              duration: tab.duration,
-              unit_price: tab.unit_price,
-              final_value: tab.final_value,
-              supply_price: tab.supply_price,
-              tax_amount: tab.tax_amount,
-              items: tab.items as unknown[],
-              discount_amount: tab.discount_amount,
-              notes: tab.notes,
-              is_selected: isSelected,
-            }).catch(e => console.warn('견적 탭 저장 실패:', e));
-          }
-        }
-      }
+      // (견적 탭은 파일 업로드 전에 이미 저장됨 — quoteTabIdMap 참조)
 
       // 사용자(이용권 수신자) 저장
       if (dealUsersInput && dealUsersInput.length > 0) {
