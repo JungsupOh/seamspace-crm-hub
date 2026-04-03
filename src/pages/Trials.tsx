@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
 import {
   Plus, ChevronDown, ChevronRight, ArrowRight, ExternalLink,
@@ -604,6 +605,8 @@ export default function Trials() {
   const qc = useQueryClient();
   const [formOpen, setFormOpen]   = useState(false);
   const [editTarget, setEditTarget] = useState<Event | undefined>();
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   const { data: events, isLoading } = useQuery({
     queryKey: ['events'],
@@ -626,8 +629,14 @@ export default function Trials() {
   });
 
   const handleDelete = (id: string) => {
-    if (!confirm('이벤트와 모든 체험권 기록이 삭제됩니다. 계속할까요?')) return;
-    del.mutate(id);
+    setDeleteTargetId(id);
+    setDeleteConfirmOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (deleteTargetId) del.mutate(deleteTargetId);
+    setDeleteConfirmOpen(false);
+    setDeleteTargetId(null);
   };
 
   const activeCount  = events?.filter(e => e.status === 'active').length ?? 0;
@@ -691,6 +700,20 @@ export default function Trials() {
         onClose={() => { setFormOpen(false); setEditTarget(undefined); }}
         initial={editTarget}
       />
+
+      {/* 이벤트 삭제 확인 */}
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>이벤트 삭제</AlertDialogTitle>
+            <AlertDialogDescription>이벤트와 모든 체험권 기록이 삭제됩니다. 계속할까요?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">삭제</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

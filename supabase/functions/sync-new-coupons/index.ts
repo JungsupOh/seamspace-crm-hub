@@ -9,8 +9,10 @@ const MYSQL_PORT = 12327;
 const MYSQL_DB   = "mdiary2";
 const MYSQL_USER = "md_james";
 
+const RE_KOREAN_NAME = /^[가-힣]{2,4}$/;
+
 const CORS = {
-  "Access-Control-Allow-Origin":  "*",
+  "Access-Control-Allow-Origin":  "https://seamspace-crm-hub.vercel.app",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
@@ -31,7 +33,7 @@ function extractName(descript: string | null): string | null {
   // 마지막 한글 단어
   const parts = d.split(/[\s\-_,]+/).filter(Boolean);
   for (let i = parts.length - 1; i >= 0; i--) {
-    if (/^[가-힣]{2,4}$/.test(parts[i])) return parts[i];
+    if (RE_KOREAN_NAME.test(parts[i])) return parts[i];
   }
   return null;
 }

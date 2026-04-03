@@ -1,8 +1,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 
 // Telegram 알림
-const BOT_TOKEN = '8680036281:AAG465JPrhfYBuYCpDyuNkfUr0UgaOutn2c';
-const CHAT_ID = '-1003754735570';
+const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? '8680036281:AAG465JPrhfYBuYCpDyuNkfUr0UgaOutn2c';
+const CHAT_ID = Deno.env.get('TELEGRAM_CHAT_ID') ?? '-1003754735570';
 
 async function sendTelegram(text: string) {
   await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {

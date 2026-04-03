@@ -18,6 +18,10 @@ export async function uploadDealFile(dealId: string, file: File): Promise<{ name
   const rawExt  = dotIdx >= 0 ? file.name.slice(dotIdx + 1) : '';
   const rawBase = dotIdx >= 0 ? file.name.slice(0, dotIdx) : file.name;
   const ext  = rawExt.replace(/[^a-zA-Z0-9]/g, '') || 'bin';
+  const ALLOWED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'gif', 'hwp', 'hwpx', 'zip', 'csv', 'txt']);
+  if (!ALLOWED_EXTENSIONS.has(ext.toLowerCase())) {
+    throw new Error(`허용되지 않는 파일 형식입니다: .${ext}`);
+  }
   const safe = rawBase
     .replace(/[^a-zA-Z0-9-]/g, '_')
     .replace(/_+/g, '_')
@@ -185,8 +189,9 @@ export async function getAllLicenses(): Promise<DealLicenseRecord[]> {
 
   // deal_licenses coupon_code 목록 (중복 제거용)
   const dealCodes = new Set(dealLicenses.map(l => l.coupon_code));
+  const mdiaryConfirmMap = new Map(mDiaryCoupons.map(c => [`mdiary_${c.id}`, c.link_confirmed]));
   const uniqueMdiary = mdiaryAsLicenses.filter(l =>
-    !dealCodes.has(l.coupon_code) && (mDiaryCoupons.find(c => `mdiary_${c.id}` === l.id)?.link_confirmed !== false)
+    !dealCodes.has(l.coupon_code) && (mdiaryConfirmMap.get(l.id) !== false)
   );
 
   return [...dealLicenses, ...uniqueMdiary].sort(

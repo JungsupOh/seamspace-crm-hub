@@ -85,14 +85,14 @@ async function getLicensesByPhone(phone: string): Promise<LicenseRecord[]> {
   if (!res.ok) return [];
   const data: LicenseRecord[] = await res.json();
   if (data.length > 0) return data;
-  // 전화번호 포맷이 다를 수 있으므로 숫자만으로 재조회
+  // 전화번호 포맷이 다를 수 있으므로 숫자만으로 like 검색
   const res2 = await fetch(
-    `${SUPABASE_URL}/rest/v1/deal_licenses?select=*&order=created_at.desc`,
+    `${SUPABASE_URL}/rest/v1/deal_licenses?contact_phone=like.*${encodeURIComponent(normalized)}*&order=created_at.desc`,
     { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
   );
   if (!res2.ok) return [];
-  const all: LicenseRecord[] = await res2.json();
-  return all.filter(l => l.contact_phone?.replace(/\D/g, '') === normalized);
+  const candidates: LicenseRecord[] = await res2.json();
+  return candidates.filter(l => l.contact_phone?.replace(/\D/g, '') === normalized);
 }
 
 async function getLicensesByName(name: string): Promise<LicenseRecord[]> {
@@ -108,7 +108,7 @@ async function getDealsByContactName(name: string): Promise<import('@/types/airt
   if (!name) return [];
   const { airtable: at } = await import('@/lib/airtable');
   const records = await at.fetchAll<import('@/types/airtable').DealFields>('03_Deals', {
-    filterByFormula: `{Contact_Name}="${name.replace(/"/g, '\\"')}"`,
+    filterByFormula: `{Contact_Name}="${name.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`,
     sort: '[{"field":"Contract_Date","direction":"desc"}]',
   }).catch(() => []);
   return records.map(r => r.fields);
@@ -523,8 +523,9 @@ export default function Contacts() {
 
       if (toAutoConfirm.length > 0) {
         await Promise.all(toAutoConfirm.map(c => confirmCouponLink(c.id, selected.id)));
+        const confirmedIds = new Set(toAutoConfirm.map(ac => ac.id));
         setMDiaryCoupons(data.map(c =>
-          toAutoConfirm.find(ac => ac.id === c.id)
+          confirmedIds.has(c.id)
             ? { ...c, link_confirmed: true, linked_contact_id: selected.id }
             : c
         ));

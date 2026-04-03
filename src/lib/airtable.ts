@@ -1,4 +1,6 @@
-const BASE_URL = `https://api.airtable.com/v0/${import.meta.env.VITE_AIRTABLE_BASE_ID || 'appsnsExBG8ZeEZEk'}`;
+const AIRTABLE_BASE_ID = import.meta.env.VITE_AIRTABLE_BASE_ID;
+if (!AIRTABLE_BASE_ID) throw new Error('VITE_AIRTABLE_BASE_ID 환경변수가 설정되지 않았습니다');
+const BASE_URL = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}`;
 const TOKEN = import.meta.env.VITE_AIRTABLE_TOKEN || '';
 
 interface AirtableResponse<T> {

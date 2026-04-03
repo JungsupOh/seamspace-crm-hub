@@ -2,7 +2,7 @@
 // AlimTok API로 이용권 발송 (TS_6205: 체험 / TS_6206: 구매)
 
 const CORS = {
-  "Access-Control-Allow-Origin":  "*",
+  "Access-Control-Allow-Origin":  "https://seamspace-crm-hub.vercel.app",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };

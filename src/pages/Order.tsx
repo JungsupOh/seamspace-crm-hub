@@ -13,10 +13,10 @@ import {
 
 const nanoid = (n = 21) => crypto.getRandomValues(new Uint8Array(n)).reduce((s, b) => s + (b & 63).toString(36), '');
 
-const TOSS_CLIENT_KEY = import.meta.env.VITE_TOSS_CLIENT_KEY ?? 'test_ck_D4yKeq5bgrpXmmoXXnJrGX0lzW6Y';
+const TOSS_CLIENT_KEY = import.meta.env.VITE_TOSS_CLIENT_KEY ?? '';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-const AIRTABLE_BASE = import.meta.env.VITE_AIRTABLE_BASE_ID || 'appsnsExBG8ZeEZEk';
+const AIRTABLE_BASE = import.meta.env.VITE_AIRTABLE_BASE_ID || '';
 const AIRTABLE_TOKEN = import.meta.env.VITE_AIRTABLE_TOKEN || '';
 
 const BANK_INFO = {
@@ -675,7 +675,7 @@ export default function Order() {
       // 2차: Airtable 조회
       if (AIRTABLE_TOKEN) {
         const atRes = await fetch(
-          `https://api.airtable.com/v0/${AIRTABLE_BASE}/03_Deals?filterByFormula=${encodeURIComponent(`{Quote_Number}="${num}"`)}&maxRecords=1`,
+          `https://api.airtable.com/v0/${AIRTABLE_BASE}/03_Deals?filterByFormula=${encodeURIComponent(`{Quote_Number}="${num.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`)}&maxRecords=1`,
           { headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` } }
         );
         const atData = await atRes.json();

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Plus, Pencil, Trash2, Loader2, Search, X, Users } from 'lucide-react';
 import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, createDealBuyers, getDealBuyers } from '@/lib/partner-deals';
@@ -48,6 +49,8 @@ export default function PartnerPortal() {
   const [editForm, setEditForm] = useState<Partial<PartnerDeal>>({});
   const [adding, setAdding] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [deleteDealConfirmOpen, setDeleteDealConfirmOpen] = useState(false);
+  const [deleteDealTargetId, setDeleteDealTargetId] = useState<string | null>(null);
   const [addForm, setAddForm] = useState<Partial<PartnerDeal>>({});
   const [buyers, setBuyers] = useState<BuyerInput[]>([emptyBuyer()]);
   const [periodFilter, setPeriodFilter] = useState('this_month');
@@ -222,12 +225,21 @@ export default function PartnerPortal() {
     } catch { toast.error('저장 실패'); }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
+    setDeleteDealTargetId(id);
+    setDeleteDealConfirmOpen(true);
+  };
+
+  const confirmDeleteDeal = async () => {
+    if (!deleteDealTargetId) return;
     try {
-      await deletePartnerDeal(id);
-      setDeals(prev => prev.filter(d => d.id !== id));
-      setDealBuyersMap(prev => { const n = { ...prev }; delete n[id]; return n; });
+      await deletePartnerDeal(deleteDealTargetId);
+      setDeals(prev => prev.filter(d => d.id !== deleteDealTargetId));
+      setDealBuyersMap(prev => { const n = { ...prev }; delete n[deleteDealTargetId]; return n; });
+      toast.success('삭제되었습니다');
     } catch { toast.error('삭제 실패'); }
+    setDeleteDealConfirmOpen(false);
+    setDeleteDealTargetId(null);
   };
 
   const ef = (k: keyof PartnerDeal) => (editForm[k] as string) ?? '';
@@ -525,6 +537,20 @@ export default function PartnerPortal() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* 딜 삭제 확인 */}
+      <AlertDialog open={deleteDealConfirmOpen} onOpenChange={setDeleteDealConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>딜 삭제</AlertDialogTitle>
+            <AlertDialogDescription>이 딜을 삭제하시겠습니까?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteDeal} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">삭제</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Search, ChevronRight, RefreshCw, ExternalLink, Send, Download, Upload as UploadIcon, CheckCircle2, XCircle, Loader2, Info, Users, Trash2 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { getAllLicenses, updateLicenseStatus, updateLicenseDeal, attachCouponToDeal, deleteDealLicense, hideMdiaryCoupon, DealLicenseRecord, LicenseStatus, saveDealLicenses } from '@/lib/storage';
@@ -115,6 +116,7 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
   const [dealSearch, setDealSearch] = useState('');
   const [dealDropOpen, setDealDropOpen] = useState(false);
   const [eventSearch, setEventSearch] = useState('');
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 체험권 중복 체크: 고객 DB + 이력 (Airtable + deal_licenses + event_licenses)
@@ -333,7 +335,7 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
       if (updated[i].status === 'done' && updated[i].contact_phone) {
         try {
           const existing = await airtable.fetchAll<ContactFields>('01_Contacts', {
-            filterByFormula: `{Phone} = "${updated[i].contact_phone}"`,
+            filterByFormula: `{Phone} = "${updated[i].contact_phone.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`,
             maxRecords: '1',
           });
           if (existing.length === 0) {
@@ -416,7 +418,15 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
 
   const handleClose = () => {
     if (running) return;
-    if (recipients.length > 0 && !window.confirm('수신자 목록이 있습니다. 창을 닫으시겠습니까?')) return;
+    if (recipients.length > 0) {
+      setCloseConfirmOpen(true);
+      return;
+    }
+    reset(); onClose();
+  };
+
+  const confirmClose = () => {
+    setCloseConfirmOpen(false);
     reset(); onClose();
   };
 
@@ -752,6 +762,20 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
           </div>
         )}
       </DialogContent>
+
+      {/* 닫기 확인 */}
+      <AlertDialog open={closeConfirmOpen} onOpenChange={setCloseConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>창 닫기</AlertDialogTitle>
+            <AlertDialogDescription>수신자 목록이 있습니다. 창을 닫으시겠습니까?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmClose}>닫기</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }
@@ -779,6 +803,7 @@ export default function Licenses() {
   const [autoMatchResult, setAutoMatchResult] = useState<{
     linked: number; created: number; skipped_multi: number; skipped_unused: number;
   } | null>(null);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
 
   const { data: licenses, isLoading } = useQuery({
     queryKey: ['licenses'],
@@ -976,9 +1001,13 @@ export default function Licenses() {
     return matchSearch && matchStatus && matchDate;
   });
 
+  const statusCountMap = new Map<string, number>();
+  for (const l of all) {
+    statusCountMap.set(l.displayStatus, (statusCountMap.get(l.displayStatus) ?? 0) + 1);
+  }
   const pipelineCounts = PIPELINE.map(s => ({
     status: s,
-    count: all.filter(l => l.displayStatus === s).length,
+    count: statusCountMap.get(s) ?? 0,
   }));
 
   // 마지막 동기화 시점 (created_at 기준 최신)
@@ -1013,14 +1042,19 @@ export default function Licenses() {
     }
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = () => {
     if (checkedIds.size === 0) return;
-    if (!confirm(`선택한 ${checkedIds.size}건의 이용권을 목록에서 삭제하시겠습니까?`)) return;
+    setBulkDeleteConfirmOpen(true);
+  };
+
+  const confirmBulkDelete = async () => {
+    setBulkDeleteConfirmOpen(false);
     setBulkDeleting(true);
     try {
       const ids = [...checkedIds];
+      const licMap = new Map(all.map(l => [l.id, l]));
       await Promise.all(ids.map(async id => {
-        const lic = all.find(l => l.id === id);
+        const lic = licMap.get(id);
         if (!lic) return;
         if (id.startsWith('mdiary_')) {
           // mdiary 전용 레코드 → link_confirmed=false 로 숨김
@@ -1352,6 +1386,20 @@ export default function Licenses() {
           </table>
         </div>
       </div>
+
+      {/* 일괄 삭제 확인 */}
+      <AlertDialog open={bulkDeleteConfirmOpen} onOpenChange={setBulkDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>이용권 삭제</AlertDialogTitle>
+            <AlertDialogDescription>선택한 {checkedIds.size}건의 이용권을 목록에서 삭제하시겠습니까?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">삭제</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

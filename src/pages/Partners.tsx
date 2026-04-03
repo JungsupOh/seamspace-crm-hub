@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import { Plus, Upload, Scan, FileText, Trash2, ExternalLink, Building2, Search, TrendingUp, Pencil, Link2, X, Loader2, UserPlus } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -123,6 +124,10 @@ async function deletePartnerFile(id: string): Promise<void> {
 async function uploadPartnerFile(partnerId: string, fileType: FileType, file: File): Promise<PartnerFile> {
   const ts   = Date.now();
   const ext  = file.name.split('.').pop() || 'bin';
+  const ALLOWED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'gif', 'hwp', 'hwpx', 'zip', 'csv', 'txt']);
+  if (!ALLOWED_EXTENSIONS.has(ext.toLowerCase())) {
+    throw new Error(`허용되지 않는 파일 형식입니다: .${ext}`);
+  }
   const path = `${partnerId}/${fileType}-${ts}.${ext}`;
 
   const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
@@ -299,6 +304,9 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
   const [dragOver, setDragOver]   = useState<FileType | null>(null);
   const [saving, setSaving]   = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deletePartnerConfirmOpen, setDeletePartnerConfirmOpen] = useState(false);
+  const [deleteFileConfirmOpen, setDeleteFileConfirmOpen] = useState(false);
+  const [deleteFileTargetId, setDeleteFileTargetId] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
   const [partnerUsers, setPartnerUsers] = useState<Array<{ id: string; email: string; name: string | null; status: string; last_sign_in_at?: string }>>([]);
 
@@ -435,10 +443,19 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
   };
 
   const handleDeleteFile = async (fileId: string) => {
+    setDeleteFileTargetId(fileId);
+    setDeleteFileConfirmOpen(true);
+  };
+
+  const confirmDeleteFile = async () => {
+    if (!deleteFileTargetId) return;
     try {
-      await deletePartnerFile(fileId);
-      setFiles(prev => prev.filter(x => x.id !== fileId));
+      await deletePartnerFile(deleteFileTargetId);
+      setFiles(prev => prev.filter(x => x.id !== deleteFileTargetId));
+      toast.success('삭제되었습니다');
     } catch { toast.error('파일 삭제 실패'); }
+    setDeleteFileConfirmOpen(false);
+    setDeleteFileTargetId(null);
   };
 
   const handleSave = async () => {
@@ -464,7 +481,12 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
 
   const handleDelete = async () => {
     if (!initial?.id) return;
-    if (!confirm(`"${initial.name}" 파트너를 삭제하시겠습니까?`)) return;
+    setDeletePartnerConfirmOpen(true);
+  };
+
+  const confirmDeletePartner = async () => {
+    if (!initial?.id) return;
+    setDeletePartnerConfirmOpen(false);
     setDeleting(true);
     try {
       await deletePartner(initial.id);
@@ -725,6 +747,34 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
           </div>
         </div>
       </SheetContent>
+
+      {/* 파트너 삭제 확인 */}
+      <AlertDialog open={deletePartnerConfirmOpen} onOpenChange={setDeletePartnerConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>파트너 삭제</AlertDialogTitle>
+            <AlertDialogDescription>"{initial?.name}" 파트너를 삭제하시겠습니까?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeletePartner} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">삭제</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 파일 삭제 확인 */}
+      <AlertDialog open={deleteFileConfirmOpen} onOpenChange={setDeleteFileConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>파일 삭제</AlertDialogTitle>
+            <AlertDialogDescription>이 파일을 삭제하시겠습니까?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteFile} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">삭제</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   );
 }
@@ -745,6 +795,8 @@ function PartnerDealsSection({
   const [editForm, setEditForm] = useState<Partial<PartnerDeal>>({});
   const [adding, setAdding] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [deleteDealConfirmOpen, setDeleteDealConfirmOpen] = useState(false);
+  const [deleteDealTargetId, setDeleteDealTargetId] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -795,11 +847,20 @@ function PartnerDealsSection({
     } catch { toast.error('저장 실패'); }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
+    setDeleteDealTargetId(id);
+    setDeleteDealConfirmOpen(true);
+  };
+
+  const confirmDeleteDeal = async () => {
+    if (!deleteDealTargetId) return;
     try {
-      await deletePartnerDeal(id);
-      setDeals(prev => prev.filter(d => d.id !== id));
+      await deletePartnerDeal(deleteDealTargetId);
+      setDeals(prev => prev.filter(d => d.id !== deleteDealTargetId));
+      toast.success('삭제되었습니다');
     } catch { toast.error('삭제 실패'); }
+    setDeleteDealConfirmOpen(false);
+    setDeleteDealTargetId(null);
   };
 
   const handleAutoLink = async () => {
@@ -995,6 +1056,20 @@ function PartnerDealsSection({
           </div>
         </div>
       )}
+
+      {/* 딜 삭제 확인 */}
+      <AlertDialog open={deleteDealConfirmOpen} onOpenChange={setDeleteDealConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>딜 삭제</AlertDialogTitle>
+            <AlertDialogDescription>이 딜을 삭제하시겠습니까?</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteDeal} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">삭제</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
