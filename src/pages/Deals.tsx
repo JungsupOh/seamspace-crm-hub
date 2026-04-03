@@ -1359,16 +1359,13 @@ function DealForm({
     if (!quoteBatchPreview) return;
     setQuoteBatchSending(true);
     try {
-      for (const p of quoteBatchPreview) {
-        await sendQuoteEmail({
-          to: n('Contact_Email'),
-          orgName: n('Org_Name'),
-          contactName: n('Contact_Name'),
-          quoteNumber: n('Quote_Number'),
-          attachmentBase64: p.base64,
-          attachmentFileName: p.fileName,
-        });
-      }
+      await sendQuoteEmail({
+        to: n('Contact_Email'),
+        orgName: n('Org_Name'),
+        contactName: n('Contact_Name'),
+        quoteNumber: n('Quote_Number'),
+        attachments: quoteBatchPreview.map(p => ({ base64: p.base64, fileName: p.fileName })),
+      });
       toast.success(`${quoteBatchPreview.length}건의 견적서를 ${n('Contact_Email')}으로 발송했습니다`);
       quoteBatchPreview.forEach(p => URL.revokeObjectURL(p.blobUrl));
       setQuoteBatchPreview(null);
@@ -2174,7 +2171,7 @@ function DealForm({
               </div>
               <div className="flex gap-3">
                 <span className="text-muted-foreground w-12 flex-shrink-0">건수</span>
-                <span>{quoteBatchPreview.length}건의 견적서를 각각 이메일로 발송합니다</span>
+                <span>{quoteBatchPreview.length}건의 견적서를 1개 이메일에 첨부하여 발송합니다</span>
               </div>
             </div>
             {/* 탭 바 */}

@@ -182,8 +182,9 @@ export async function sendQuoteEmail(params: {
   orgName: string;
   contactName: string;
   quoteNumber: string;
-  attachmentBase64: string;
-  attachmentFileName: string;
+  attachmentBase64?: string;
+  attachmentFileName?: string;
+  attachments?: Array<{ base64: string; fileName: string }>;
 }): Promise<void> {
   const html = layout(`
     <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
@@ -224,7 +225,9 @@ export async function sendQuoteEmail(params: {
     html,
     {
       reply_to: 'sales@tebahsoft.com',
-      attachments: [{ filename: params.attachmentFileName, content: params.attachmentBase64 }],
+      attachments: params.attachments
+        ? params.attachments.map(a => ({ filename: a.fileName, content: a.base64 }))
+        : [{ filename: params.attachmentFileName!, content: params.attachmentBase64! }],
     }
   );
 }
