@@ -3,6 +3,24 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? '';
 const FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL') ?? 'noreply@seamspace.site';
 
+// 발송 실패 시 텔레그램 알림
+const BOT_TOKEN = '8680036281:AAG465JPrhfYBuYCpDyuNkfUr0UgaOutn2c';
+const CHAT_ID = '-1003754735570';
+async function notifyFailure(to: string, subject: string, error: string) {
+  try {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: CHAT_ID,
+        text: `🚨 <b>이메일 발송 실패</b>\n\n📧 수신: ${to}\n📋 제목: ${subject}\n💬 오류: ${error}`,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+    });
+  } catch { /* 알림 실패 무시 */ }
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -14,7 +32,7 @@ serve(async (req) => {
   }
 
   try {
-    const { to, subject, html } = await req.json();
+    const { to, subject, html, reply_to, attachments } = await req.json();
 
     if (!to || !subject || !html) {
       return new Response(JSON.stringify({ error: '필수 파라미터 누락' }), {
@@ -23,24 +41,30 @@ serve(async (req) => {
       });
     }
 
+    const body: Record<string, unknown> = {
+      from: `seamspace <${FROM_EMAIL}>`,
+      to,
+      subject,
+      html,
+    };
+    if (reply_to) body.reply_to = reply_to;
+    if (Array.isArray(attachments) && attachments.length > 0) body.attachments = attachments;
+
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${RESEND_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        from: `Seamspace CRM <${FROM_EMAIL}>`,
-        to,
-        subject,
-        html,
-      }),
+      body: JSON.stringify(body),
     });
 
     const data = await res.json();
 
     if (!res.ok) {
-      return new Response(JSON.stringify({ error: data.message ?? '이메일 발송 실패' }), {
+      const errMsg = data.message ?? '이메일 발송 실패';
+      await notifyFailure(to, subject, errMsg);
+      return new Response(JSON.stringify({ error: errMsg }), {
         status: res.status,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
