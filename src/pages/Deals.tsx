@@ -845,10 +845,18 @@ function DealForm({
   allDeals?: AirtableRecord<DealFields>[];
 }) {
   // existingFiles(DB)로 슬롯별 파일 초기화 (receipt, license 제외)
+  // quote_tab_N 슬롯 → quote_file_{id}로 리매핑 (기존 저장분 호환)
   const initStoredFiles = (): Record<string, DealFileRecord> => {
     const result: Record<string, DealFileRecord> = {};
     for (const rec of existingFiles ?? []) {
-      if (rec.slot_key && rec.slot_key !== 'receipt' && rec.slot_key !== 'license') result[rec.slot_key] = rec;
+      if (!rec.slot_key || rec.slot_key === 'receipt' || rec.slot_key === 'license') continue;
+      let key = rec.slot_key;
+      const tabMatch = key.match(/^quote_tab_(\d+)$/);
+      if (tabMatch && initialQuotes) {
+        const idx = Number(tabMatch[1]);
+        if (initialQuotes[idx]?.id) key = `quote_file_${initialQuotes[idx].id}`;
+      }
+      result[key] = rec;
     }
     return result;
   };
