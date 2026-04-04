@@ -3977,7 +3977,7 @@ export default function Deals() {
                         {dealFiles.map(file => (
                           <div key={file.id} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 hover:bg-muted/40 group">
                             <Paperclip className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                            <span className="text-xs text-muted-foreground w-16 flex-shrink-0">{file.label}</span>
+                            <span className="text-xs text-muted-foreground w-16 flex-shrink-0">{file.slot_key?.startsWith('quote_tab_') || file.slot_key?.startsWith('quote_file_') ? '견적서' : file.label}</span>
                             <a href={file.file_url} target="_blank" rel="noopener noreferrer"
                               className="text-sm flex-1 truncate hover:text-primary hover:underline underline-offset-2">
                               {file.file_name}
