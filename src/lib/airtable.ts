@@ -1,12 +1,7 @@
-const AIRTABLE_BASE_ID = import.meta.env.VITE_AIRTABLE_BASE_ID;
-if (!AIRTABLE_BASE_ID) throw new Error('VITE_AIRTABLE_BASE_ID 환경변수가 설정되지 않았습니다');
-const BASE_URL = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}`;
-const TOKEN = import.meta.env.VITE_AIRTABLE_TOKEN || '';
+import { supabase } from '@/lib/supabase';
 
-interface AirtableResponse<T> {
-  records: AirtableRecord<T>[];
-  offset?: string;
-}
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 export interface AirtableRecord<T> {
   id: string;
@@ -14,96 +9,61 @@ export interface AirtableRecord<T> {
   createdTime: string;
 }
 
-async function fetchAll<T>(tableName: string, params?: Record<string, string>): Promise<AirtableRecord<T>[]> {
-  const allRecords: AirtableRecord<T>[] = [];
-  let offset: string | undefined;
-
-  do {
-    const searchParams = new URLSearchParams({ pageSize: '100', ...params });
-    if (offset) searchParams.set('offset', offset);
-
-    const res = await fetch(`${BASE_URL}/${encodeURIComponent(tableName)}?${searchParams}`, {
-      headers: { Authorization: `Bearer ${TOKEN}` },
-    });
-
-    if (!res.ok) {
-      throw new Error(`Airtable error: ${res.status} ${res.statusText}`);
-    }
-
-    const data: AirtableResponse<T> = await res.json();
-    allRecords.push(...data.records);
-    offset = data.offset;
-  } while (offset);
-
-  return allRecords;
+async function getAccessToken(): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error('로그인이 필요합니다');
+  return session.access_token;
 }
 
-async function parseError(res: Response, prefix: string): Promise<never> {
-  const body = await res.json().catch(() => ({}));
-  const msg = body?.error?.message || body?.message || `${res.status} ${res.statusText}`;
-  throw new Error(`[${prefix}] ${msg}`);
+async function callProxy(body: Record<string, unknown>): Promise<unknown> {
+  const token = await getAccessToken();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/airtable-proxy`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: SUPABASE_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.error || `Proxy error: ${res.status} ${res.statusText}`);
+  }
+  return data;
+}
+
+async function fetchAll<T>(tableName: string, params?: Record<string, string>): Promise<AirtableRecord<T>[]> {
+  const data = await callProxy({ action: 'fetchAll', table: tableName, params }) as { records: AirtableRecord<T>[] };
+  return data.records;
 }
 
 async function createRecord<T>(tableName: string, fields: Partial<T>): Promise<AirtableRecord<T>> {
-  const res = await fetch(`${BASE_URL}/${encodeURIComponent(tableName)}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ fields }),
-  });
-  if (!res.ok) await parseError(res, 'create');
-  return res.json();
+  return await callProxy({ action: 'createRecord', table: tableName, fields }) as AirtableRecord<T>;
 }
 
 async function updateRecord<T>(tableName: string, recordId: string, fields: Partial<T>): Promise<AirtableRecord<T>> {
-  const res = await fetch(`${BASE_URL}/${encodeURIComponent(tableName)}/${recordId}`, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ fields }),
-  });
-  if (!res.ok) await parseError(res, 'update');
-  return res.json();
+  return await callProxy({ action: 'updateRecord', table: tableName, recordId, fields }) as AirtableRecord<T>;
 }
 
 async function deleteRecord(tableName: string, recordId: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/${encodeURIComponent(tableName)}/${recordId}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${TOKEN}` },
-  });
-  if (!res.ok) await parseError(res, 'delete');
+  await callProxy({ action: 'deleteRecord', table: tableName, recordId });
 }
 
 // 최대 10건씩 배치 생성 (Airtable API 제한)
 async function createBatch<T>(tableName: string, fieldsList: Partial<T>[]): Promise<AirtableRecord<T>[]> {
-  const res = await fetch(`${BASE_URL}/${encodeURIComponent(tableName)}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ records: fieldsList.map(fields => ({ fields })) }),
-  });
-  if (!res.ok) await parseError(res, 'create');
-  const data: AirtableResponse<T> = await res.json();
+  const data = await callProxy({
+    action: 'createBatch',
+    table: tableName,
+    records: fieldsList.map(fields => ({ fields })),
+  }) as { records: AirtableRecord<T>[] };
   return data.records;
 }
 
 // 최대 10건씩 배치 수정 (Airtable API 제한)
 async function updateBatch<T>(tableName: string, updates: { id: string; fields: Partial<T> }[]): Promise<void> {
-  for (let i = 0; i < updates.length; i += 10) {
-    const chunk = updates.slice(i, i + 10);
-    const res = await fetch(`${BASE_URL}/${encodeURIComponent(tableName)}`, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ records: chunk.map(u => ({ id: u.id, fields: u.fields })) }),
-    });
-    if (!res.ok) await parseError(res, 'updateBatch');
-  }
+  await callProxy({ action: 'updateBatch', table: tableName, updates });
 }
 
 export const airtable = { fetchAll, createRecord, createBatch, updateRecord, updateBatch, deleteRecord };

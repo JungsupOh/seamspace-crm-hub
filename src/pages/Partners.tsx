@@ -345,41 +345,56 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
       // 초대코드 생성
       const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
       const code = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-      // Supabase auth 사용자 생성 (service role 필요)
-      const serviceKey = (import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY ?? '') as string;
+
+      const session = (await supabase.auth.getSession()).data.session;
+      if (!session) throw new Error('로그인이 필요합니다.');
+
+      const edgeFetch = async (action: string, params: Record<string, unknown> = {}) => {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-auth`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: SUPABASE_KEY,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ action, ...params }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Edge Function 호출 실패');
+        return data;
+      };
+
+      // Edge Function으로 사용자 생성
       let userId: string | null = null;
-      if (serviceKey) {
-        const { createClient } = await import('@supabase/supabase-js');
-        const admin = createClient(SUPABASE_URL, serviceKey);
-        const { data: authUser, error: authErr } = await admin.auth.admin.createUser({
-          email, password: code, email_confirm: true,
+      try {
+        const { user } = await edgeFetch('createUser', {
+          email, password: code,
           user_metadata: { name: f.contact_name || email.split('@')[0], role: 'partner', partner_id: initial.id },
         });
-        if (authErr && !authErr.message.includes('already')) throw authErr;
-        userId = authUser?.user?.id ?? null;
-        // 이미 존재하면 ID 조회
-        if (!userId) {
-          const { data: { users } } = await admin.auth.admin.listUsers();
-          userId = users?.find(u => u.email === email)?.id ?? null;
+        userId = user?.id ?? null;
+      } catch (e) {
+        // 이미 존재하는 경우 목록에서 ID 조회
+        if ((e as Error).message?.includes('already')) {
+          const { users } = await edgeFetch('listUsers');
+          userId = users?.find((u: { email?: string }) => u.email === email)?.id ?? null;
+        } else {
+          throw e;
         }
       }
-      if (!userId) throw new Error('서비스 키가 없어 사용자 생성 불가');
-      // user_profiles를 partner 역할로 확실히 업데이트 (service role로 RLS 우회)
-      await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?id=eq.${userId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${serviceKey}`,
-          apikey: serviceKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      if (!userId) throw new Error('사용자 생성에 실패했습니다');
+
+      // Edge Function으로 user_profiles 업데이트 (RLS 우회)
+      await edgeFetch('updateProfile', {
+        userId,
+        updates: {
           role: 'partner',
           partner_id: initial.id,
           name: f.contact_name || null,
           status: 'invited',
           is_first_login: true,
-        }),
+        },
       });
+
       // 초대 이메일 발송
       await sendInviteEmail({
         to: email, name: f.contact_name || '', inviteCode: code,

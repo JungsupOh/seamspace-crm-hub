@@ -57,10 +57,7 @@ Deno.serve(async (req: Request) => {
       messages: [{
         role: "user",
         content: [
-          {
-            type: "image",
-            source: { type: "base64", media_type: media_type ?? "image/jpeg", data: image_base64 },
-          },
+          { type: "image", source: { type: "base64", media_type: media_type ?? "image/jpeg", data: image_base64 } },
           { type: "text", text: PROMPTS[doc_type] ?? "이 문서에서 주요 정보를 JSON으로 추출하세요." },
         ],
       }],

@@ -143,6 +143,16 @@ Deno.serve(async (req: Request) => {
     const today = new Date().toISOString().split("T")[0];
     let updated = 0;
 
+    // MySQL에서 돌아오지 않은 코드 = 운영DB에서 삭제된 쿠폰
+    const returnedCodes = new Set(rows.map(r => r.coupon_code));
+    const deletedCodes  = codes.filter(c => !returnedCodes.has(c));
+    if (deletedCodes.length > 0) {
+      await Promise.all([
+        supabase.from("deal_licenses").update({ status: "삭제" }).in("coupon_code", deletedCodes),
+        supabase.from("mdiary_coupons").update({ is_used: false }).in("coupon_code", deletedCodes),
+      ]);
+    }
+
     const SYNC_BATCH = 20;
     for (let i = 0; i < rows.length; i += SYNC_BATCH) {
       const batch = rows.slice(i, i + SYNC_BATCH);
@@ -172,7 +182,7 @@ Deno.serve(async (req: Request) => {
       updated += results.filter(([dl, mc]) => !dl.error || !mc.error).length;
     }
 
-    return json({ updated, total: totalCodes, processed: offset + rows.length, hasMore: offset + rows.length < totalCodes });
+    return json({ updated, deleted: deletedCodes.length, total: totalCodes, processed: offset + rows.length, hasMore: offset + rows.length < totalCodes });
   } catch (e) {
     console.error(e);
     return new Response(JSON.stringify({ error: String(e) }), {

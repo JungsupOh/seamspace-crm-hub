@@ -16,8 +16,6 @@ const nanoid = (n = 21) => crypto.getRandomValues(new Uint8Array(n)).reduce((s, 
 const TOSS_CLIENT_KEY = import.meta.env.VITE_TOSS_CLIENT_KEY ?? '';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-const AIRTABLE_BASE = import.meta.env.VITE_AIRTABLE_BASE_ID || '';
-const AIRTABLE_TOKEN = import.meta.env.VITE_AIRTABLE_TOKEN || '';
 
 const BANK_INFO = {
   bank: '국민은행',
@@ -670,38 +668,6 @@ export default function Order() {
         }
         onSuccess(record);
         return;
-      }
-
-      // 2차: Airtable 조회
-      if (AIRTABLE_TOKEN) {
-        const atRes = await fetch(
-          `https://api.airtable.com/v0/${AIRTABLE_BASE}/03_Deals?filterByFormula=${encodeURIComponent(`{Quote_Number}="${num.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`)}&maxRecords=1`,
-          { headers: { Authorization: `Bearer ${AIRTABLE_TOKEN}` } }
-        );
-        const atData = await atRes.json();
-        const record = atData?.records?.[0];
-        if (record) {
-          const f = record.fields;
-          const storedPhone = normalizePhone(f.Contact_Phone ?? '');
-          const storedEmail = normalizeEmail(f.Contact_Email ?? '');
-          const emailOk = entEmail && storedEmail && storedEmail === entEmail;
-          const phoneOk = entPhone && storedPhone && storedPhone === entPhone;
-          const hasStored = !!(storedEmail || storedPhone);
-          if (hasStored && !emailOk && !phoneOk) {
-            setError('이메일 또는 휴대폰 번호가 일치하지 않습니다.');
-            return;
-          }
-          const mapped: QuoteRecord = {
-            id: record.id, deal_id: record.id, quote_number: num,
-            plan: f.Quote_Plan, qty: f.Quote_Qty, duration: f.License_Duration,
-            unit_price: f.Unit_Price, supply_price: f.Supply_Price,
-            tax_amount: f.Tax_Amount, final_value: f.Final_Contract_Value,
-            quote_date: f.Quote_Date, notes: f.Notes,
-            contact_phone: f.Contact_Phone, contact_email: f.Contact_Email,
-          };
-          onSuccess(mapped);
-          return;
-        }
       }
 
       setError('견적서를 찾을 수 없습니다. 번호를 다시 확인해 주세요.');

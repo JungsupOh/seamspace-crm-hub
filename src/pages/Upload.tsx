@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 import * as XLSX from 'xlsx';
 import { Upload as UploadIcon, FileSpreadsheet, ArrowRight, ChevronDown, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -33,8 +34,25 @@ const AIRTABLE_TABLES: Record<string, { label: string; fields: string[] }> = {
   },
 };
 
-const TOKEN   = import.meta.env.VITE_AIRTABLE_TOKEN || '';
-const BASE_ID = import.meta.env.VITE_AIRTABLE_BASE_ID || '';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+
+async function callProxy(body: Record<string, unknown>): Promise<unknown> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error('로그인이 필요합니다');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/airtable-proxy`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: SUPABASE_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `Proxy error: ${res.status}`);
+  return data;
+}
 
 // ── 유틸 ──────────────────────────────────────────
 function autoMatch(fileCol: string, airtableFields: string[]): string {
@@ -243,22 +261,16 @@ async function uploadBatch(
   for (let i = 0; i < records.length; i += 10) {
     const batch = records.slice(i, i + 10).map(fields => ({ fields }));
     try {
-      const res = await fetch(`https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(tableName)}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ records: batch }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        results.success += data.records.length;
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        const msg = errData?.error?.message || errData?.error?.type || `HTTP ${res.status}`;
-        if (!firstError) firstError = msg;
-        results.failed += batch.length;
-      }
+      const data = await callProxy({
+        action: 'createBatch',
+        table: tableName,
+        records: batch,
+      }) as { records: unknown[] };
+      results.success += data.records.length;
       await new Promise(r => setTimeout(r, 250)); // rate limit
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!firstError) firstError = msg;
       results.failed += batch.length;
     }
   }
@@ -286,24 +298,16 @@ function mergeNoteStrings(a: string, b: string): string {
 // Airtable 기존 연락처 phone_normalized 인덱스 조회
 async function fetchPhoneIndex(): Promise<Map<string, { id: string; notes: string }>> {
   const index = new Map<string, { id: string; notes: string }>();
-  let offset: string | undefined;
   try {
-    do {
-      const params = new URLSearchParams({ pageSize: '100' });
-      params.append('fields[]', 'phone_normalized');
-      params.append('fields[]', 'Notes');
-      if (offset) params.set('offset', offset);
-      const res = await fetch(
-        `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent('01_Contacts')}?${params}`,
-        { headers: { Authorization: `Bearer ${TOKEN}` } },
-      );
-      const data = await res.json();
-      for (const rec of data.records ?? []) {
-        const phone = String(rec.fields?.phone_normalized || '').trim();
-        if (phone) index.set(phone, { id: rec.id, notes: String(rec.fields?.Notes || '') });
-      }
-      offset = data.offset;
-    } while (offset);
+    const data = await callProxy({
+      action: 'fetchAll',
+      table: '01_Contacts',
+      params: { 'fields[]': 'phone_normalized,Notes' },
+    }) as { records: { id: string; fields: Record<string, unknown> }[] };
+    for (const rec of data.records ?? []) {
+      const phone = String(rec.fields?.phone_normalized || '').trim();
+      if (phone) index.set(phone, { id: rec.id, notes: String(rec.fields?.Notes || '') });
+    }
   } catch { /* 실패 시 전체 신규 생성으로 fallback */ }
   return index;
 }
@@ -314,20 +318,12 @@ async function batchUpdate(records: { id: string; fields: Record<string, unknown
   for (let i = 0; i < records.length; i += 10) {
     const batch = records.slice(i, i + 10);
     try {
-      const res = await fetch(
-        `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent('01_Contacts')}`,
-        {
-          method: 'PATCH',
-          headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ records: batch }),
-        },
-      );
-      if (res.ok) {
-        const data = await res.json();
-        results.success += data.records.length;
-      } else {
-        results.failed += batch.length;
-      }
+      await callProxy({
+        action: 'updateBatch',
+        table: '01_Contacts',
+        updates: batch,
+      });
+      results.success += batch.length;
       await new Promise(r => setTimeout(r, 250));
     } catch {
       results.failed += batch.length;

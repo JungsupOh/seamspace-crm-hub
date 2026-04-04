@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth, UserRole, UserStatus } from '@/contexts/AuthContext';
-import { supabase, supabaseAdmin } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -42,6 +41,9 @@ import {
 import { toast } from 'sonner';
 import { UserPlus, RefreshCw, Trash2, Copy, Check, UserCog, Mail, Ban, CheckCircle } from 'lucide-react';
 import { sendInviteEmail, sendPasswordResetEmail } from '@/lib/email';
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 interface UserProfileRow {
   id: string;
@@ -93,6 +95,23 @@ function formatDate(dateStr: string): string {
   });
 }
 
+async function adminAuthFetch(action: string, params: Record<string, unknown> = {}) {
+  const session = (await supabase.auth.getSession()).data.session;
+  if (!session) throw new Error('로그인이 필요합니다.');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-auth`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: SUPABASE_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ action, ...params }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Edge Function 호출 실패');
+  return data;
+}
+
 export default function Users() {
   const { isAdmin, currentUser } = useAuth();
   const navigate = useNavigate();
@@ -137,15 +156,17 @@ export default function Users() {
       return;
     }
 
-    // Fetch last_sign_in_at from auth.users via admin API
+    // Fetch last_sign_in_at from auth.users via Edge Function
     let authUsers: Record<string, string | null> = {};
-    if (supabaseAdmin) {
-      const { data: adminData } = await supabaseAdmin.auth.admin.listUsers();
-      if (adminData) {
+    try {
+      const result = await adminAuthFetch('listUsers');
+      if (result.users) {
         authUsers = Object.fromEntries(
-          adminData.users.map((u) => [u.id, u.last_sign_in_at ?? null])
+          result.users.map((u: { id: string; last_sign_in_at?: string | null }) => [u.id, u.last_sign_in_at ?? null])
         );
       }
+    } catch {
+      // If Edge Function fails, proceed without last_sign_in_at
     }
 
     const merged = (data as UserProfileRow[]).map((u) => ({
@@ -187,77 +208,52 @@ export default function Users() {
 
     setInviteLoading(true);
 
-    if (!supabaseAdmin) {
-      // No service key: just show the invite info without creating auth user
-      const { error } = await supabase.from('user_profiles').insert({
-        id: crypto.randomUUID(),
+    try {
+      // Use Edge Function to create auth user
+      const { user: authUser } = await adminAuthFetch('createUser', {
         email: inviteEmail.trim().toLowerCase(),
-        name: inviteName.trim() || null,
-        role: inviteRole,
-        is_first_login: true,
-        created_by: currentUser?.id ?? null,
+        password: inviteCode,
+        user_metadata: {
+          name: inviteName.trim() || null,
+          role: inviteRole,
+        },
       });
 
-      if (error) {
-        toast.error('사용자 정보 저장에 실패했습니다: ' + error.message);
-        setInviteLoading(false);
-        return;
+      // Send invite email first to determine status
+      let emailSent = false;
+      try {
+        await sendInviteEmail({
+          to: inviteEmail.trim().toLowerCase(),
+          name: inviteName.trim(),
+          inviteCode,
+          role: inviteRole,
+          invitedBy: currentUser?.email ?? '관리자',
+        });
+        emailSent = true;
+        toast.success('초대 이메일이 발송되었습니다.');
+      } catch (e) {
+        toast.warning('사용자는 생성됐지만 이메일 발송에 실패했습니다: ' + (e as Error).message);
+      }
+
+      // Upsert profile with correct status
+      if (authUser) {
+        await supabase.from('user_profiles').upsert({
+          id: authUser.id,
+          email: inviteEmail.trim().toLowerCase(),
+          name: inviteName.trim() || null,
+          role: inviteRole,
+          is_first_login: true,
+          status: emailSent ? 'invited' : 'invite_failed',
+          created_by: currentUser?.id ?? null,
+        });
       }
 
       setInviteResult({ code: inviteCode, email: inviteEmail.trim().toLowerCase() });
       await fetchUsers();
-      setInviteLoading(false);
-      return;
-    }
-
-    // Use admin API to create auth user
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email: inviteEmail.trim().toLowerCase(),
-      password: inviteCode,
-      email_confirm: true,
-      user_metadata: {
-        name: inviteName.trim() || null,
-        role: inviteRole,
-      },
-    });
-
-    if (authError) {
-      toast.error('사용자 생성 실패: ' + authError.message);
-      setInviteLoading(false);
-      return;
-    }
-
-    // Send invite email first to determine status
-    let emailSent = false;
-    try {
-      await sendInviteEmail({
-        to: inviteEmail.trim().toLowerCase(),
-        name: inviteName.trim(),
-        inviteCode,
-        role: inviteRole,
-        invitedBy: currentUser?.email ?? '관리자',
-      });
-      emailSent = true;
-      toast.success('초대 이메일이 발송되었습니다.');
     } catch (e) {
-      toast.warning('사용자는 생성됐지만 이메일 발송에 실패했습니다: ' + (e as Error).message);
+      toast.error('사용자 생성 실패: ' + (e as Error).message);
     }
 
-    // Upsert profile with correct status
-    if (authData.user) {
-      await supabase.from('user_profiles').upsert({
-        id: authData.user.id,
-        email: inviteEmail.trim().toLowerCase(),
-        name: inviteName.trim() || null,
-        role: inviteRole,
-        is_first_login: true,
-        status: emailSent ? 'invited' : 'invite_failed',
-        created_by: currentUser?.id ?? null,
-      });
-    }
-
-    setInviteResult({ code: inviteCode, email: inviteEmail.trim().toLowerCase() });
-    await fetchUsers();
     setInviteLoading(false);
   };
 
@@ -271,43 +267,28 @@ export default function Users() {
     if (!deleteTarget) return;
     setDeleteLoading(true);
 
-    if (supabaseAdmin) {
-      const { error } = await supabaseAdmin.auth.admin.deleteUser(deleteTarget.id);
-      if (error) {
-        toast.error('사용자 삭제 실패: ' + error.message);
-        setDeleteLoading(false);
-        setDeleteTarget(null);
-        return;
-      }
-    } else {
-      // Fallback: delete only profile row (auth user remains)
-      const { error } = await supabase.from('user_profiles').delete().eq('id', deleteTarget.id);
-      if (error) {
-        toast.error('사용자 삭제 실패: ' + error.message);
-        setDeleteLoading(false);
-        setDeleteTarget(null);
-        return;
-      }
+    try {
+      await adminAuthFetch('deleteUser', { userId: deleteTarget.id });
+      toast.success('사용자가 삭제되었습니다.');
+      await fetchUsers();
+    } catch (e) {
+      toast.error('사용자 삭제 실패: ' + (e as Error).message);
     }
 
-    toast.success('사용자가 삭제되었습니다.');
-    await fetchUsers();
     setDeleteLoading(false);
     setDeleteTarget(null);
   };
 
   // ----- Resend Invite Email -----
   const handleResendInvite = async () => {
-    if (!resendTarget || !supabaseAdmin) return;
+    if (!resendTarget) return;
     setResendLoading(true);
 
     const newCode = generateCode();
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(resendTarget.id, {
-      password: newCode,
-    });
-
-    if (error) {
-      toast.error('비밀번호 재발급 실패: ' + error.message);
+    try {
+      await adminAuthFetch('updateUser', { userId: resendTarget.id, password: newCode });
+    } catch (e) {
+      toast.error('비밀번호 재발급 실패: ' + (e as Error).message);
       setResendLoading(false);
       setResendTarget(null);
       return;
@@ -349,22 +330,16 @@ export default function Users() {
 
   // ----- Reset Password -----
   const handleResetPassword = async (user: UserProfileRow) => {
-    if (!supabaseAdmin) {
-      toast.error('서비스 롤 키가 필요합니다. .env에 VITE_SUPABASE_SERVICE_ROLE_KEY를 설정해 주세요.');
-      return;
-    }
     setResetTarget(user);
     setResetCode(null);
     setResetOpen(true);
     setResetLoading(true);
 
     const newCode = generateCode();
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
-      password: newCode,
-    });
-
-    if (error) {
-      toast.error('비밀번호 초기화 실패: ' + error.message);
+    try {
+      await adminAuthFetch('updateUser', { userId: user.id, password: newCode });
+    } catch (e) {
+      toast.error('비밀번호 초기화 실패: ' + (e as Error).message);
       setResetOpen(false);
       setResetLoading(false);
       return;
@@ -420,14 +395,6 @@ export default function Users() {
         </Button>
       </div>
 
-      {/* Service key warning */}
-      {!supabaseAdmin && (
-        <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
-          <span className="font-medium">주의:</span> VITE_SUPABASE_SERVICE_ROLE_KEY가 설정되지 않았습니다.
-          일부 기능(사용자 생성, 비밀번호 초기화, 삭제)이 제한됩니다.
-        </div>
-      )}
-
       {/* User table */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <Table>
@@ -478,35 +445,30 @@ export default function Users() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
-                      {/* 재발송: 초대/실패 상태이거나 status 미존재시 is_first_login 폴백 */}
                       {(user.status === 'invited' || user.status === 'invite_failed' || (!user.status && user.is_first_login)) && (
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-8 gap-1.5 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30"
                           onClick={() => setResendTarget(user)}
-                          disabled={!supabaseAdmin}
                           title="초대 메일 재발송 (비밀번호 새로 발급)"
                         >
                           <Mail className="h-3.5 w-3.5" />
                           재발송
                         </Button>
                       )}
-                      {/* 비밀번호 초기화: 관리자 계정 제외 */}
                       {user.role !== 'admin' && (
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-8 gap-1.5 text-xs"
                           onClick={() => handleResetPassword(user)}
-                          disabled={!supabaseAdmin}
-                          title={!supabaseAdmin ? '서비스 롤 키 필요' : '비밀번호 초기화'}
+                          title="비밀번호 초기화"
                         >
                           <RefreshCw className="h-3.5 w-3.5" />
                           초기화
                         </Button>
                       )}
-                      {/* 비활성화/활성화·삭제: 관리자 계정 및 본인 제외 */}
                       {user.role !== 'admin' && user.id !== currentUser?.id && (
                         <>
                           <Button
