@@ -3720,6 +3720,8 @@ export default function Deals() {
                                       finalValue: q.final_value ?? 0,
                                       supplyPrice: q.supply_price ?? 0,
                                       taxAmount: q.tax_amount ?? 0,
+                                      items: (q.items as import('@/lib/pricing').QuoteLineItem[] | undefined) ?? [],
+                                      discountAmount: q.discount_amount ?? 0,
                                       notes: q.notes,
                                     });
                                   } catch (e) {
