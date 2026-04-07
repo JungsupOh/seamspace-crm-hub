@@ -19,6 +19,7 @@ import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDea
 import type { PartnerDeal, PartnerDealBuyer } from '@/lib/partner-deals';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
+import { saveDealUsers } from '@/lib/deal-users';
 import { Users } from 'lucide-react';
 import { sendInviteEmail } from '@/lib/email';
 import { supabase } from '@/lib/supabase';
@@ -967,7 +968,7 @@ function PartnerDealsSection({
 
   const handleRegisterCrmDeal = async (deal: PartnerDeal) => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const dealBuyers = dealBuyersMap[deal.id] ?? [];
       const fields: Partial<import('@/types/airtable').DealFields> = {
         Deal_Name: `${deal.school_name ?? '파트너'} - ${partnerName}`,
         Deal_Stage: '견적',
@@ -982,6 +983,18 @@ function PartnerDealsSection({
       if (deal.payment_amount) fields.Final_Contract_Value = deal.payment_amount;
       if (deal.contract_date) fields.Contract_Date = deal.contract_date;
       const rec = await createCrmDeal.mutateAsync(fields);
+      // 구매자 → CRM 사용자 등록
+      if (dealBuyers.length > 0) {
+        await saveDealUsers(rec.id, dealBuyers.map((b, i) => ({
+          user_name: b.buyer_name ?? undefined,
+          user_phone: b.buyer_phone ?? undefined,
+          user_email: b.buyer_email ?? undefined,
+          student_count: b.student_count ?? undefined,
+          month_count: b.month_count ?? undefined,
+          plan_name: b.plan_name ?? undefined,
+          is_primary: i === 0,
+        }))).catch(e => console.warn('사용자 등록 실패:', e));
+      }
       await updatePartnerDeal(deal.id, { linked_deal_id: rec.id });
       setDeals(prev => prev.map(d => d.id === deal.id ? { ...d, linked_deal_id: rec.id } : d));
       toast.success('CRM 딜이 등록되었습니다');
