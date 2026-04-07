@@ -2629,13 +2629,26 @@ export default function Deals() {
   };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 딜 선택 시 파일 + 이용권 + 비교 견적 목록 fetch
-  useEffect(() => {
-    if (!selected) { setDealFiles([]); setDealLicenses([]); setDealQuotes([]); return; }
-    getDealFiles(selected.id).then(setDealFiles).catch(() => setDealFiles([]));
-    getDealLicenses(selected.id).then(setDealLicenses).catch(() => setDealLicenses([]));
-    getDealQuotes(selected.id).then(setDealQuotes).catch(() => setDealQuotes([]));
-  }, [selected?.id]);
+  // 딜 데이터 로드 후 편집 다이얼로그 오픈
+  const openDealEdit = async (deal: AirtableRecord<DealFields>) => {
+    setSelected(deal);
+    setEditMode('edit');
+    try {
+      const [files, licenses, quotes] = await Promise.all([
+        getDealFiles(deal.id).catch(() => [] as DealFileRecord[]),
+        getDealLicenses(deal.id).catch(() => [] as DealLicenseRecord[]),
+        getDealQuotes(deal.id).catch(() => [] as DealQuote[]),
+      ]);
+      setDealFiles(files);
+      setDealLicenses(licenses);
+      setDealQuotes(quotes);
+    } catch {
+      setDealFiles([]);
+      setDealLicenses([]);
+      setDealQuotes([]);
+    }
+    setDialogOpen(true);
+  };
 
   // ?id= 쿼리 파라미터로 특정 딜 자동 오픈
   useEffect(() => {
@@ -2645,9 +2658,7 @@ export default function Deals() {
     if (!id) return;
     const deal = deals.find(d => d.id === id);
     if (deal) {
-      setSelected(deal);
-      setEditMode('edit');
-      setDialogOpen(true);
+      openDealEdit(deal);
       // URL 정리 (히스토리 replace)
       window.history.replaceState(null, '', '/deals');
     }
@@ -3509,7 +3520,7 @@ export default function Deals() {
                 const isChecked = checkedIds.has(d.id);
                 return (
                   <tr key={d.id}
-                    onClick={() => { setSelected(d); setEditMode('edit'); setDialogOpen(true); }}
+                    onClick={() => openDealEdit(d)}
                     className={`border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer transition-colors ${isChecked ? 'bg-primary/5' : ''}`}>
                     {canEdit && (
                       <td className="px-3 py-2.5 bg-background" style={{ position: 'sticky', left: 0, zIndex: 1 }} onClick={e => e.stopPropagation()}>
@@ -3656,8 +3667,8 @@ export default function Deals() {
                       </div>
                     </div>
                     <div className="flex gap-1.5 flex-shrink-0">
-                      {canEdit && <Button size="sm" variant="outline" className="gap-1"
-                        onClick={() => { setEditMode('edit'); setDialogOpen(true); }}>
+                      {canEdit && selected && <Button size="sm" variant="outline" className="gap-1"
+                        onClick={() => openDealEdit(selected)}>
                         <Pencil className="h-3.5 w-3.5" />편집
                       </Button>}
                       {canEdit && confirmDelete ? (
