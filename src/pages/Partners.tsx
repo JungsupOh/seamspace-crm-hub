@@ -1142,7 +1142,7 @@ function PartnerDealsSection({
               </thead>
               <tbody className="divide-y divide-border">
                 {filteredByPeriod.map((d, idx) => (
-                    <tr key={d.id} className="hover:bg-muted/30">
+                    <tr key={d.id} className="hover:bg-muted/30 cursor-pointer" onClick={() => openEditDialog(d)}>
                       <td className="px-3 py-2.5 text-xs text-muted-foreground">{idx + 1}</td>
                       <td className="px-3 py-2.5 text-sm whitespace-nowrap">{d.contract_date || '-'}</td>
                       <td className="px-3 py-2.5 font-medium">{d.school_name || '-'}</td>
@@ -1158,15 +1158,11 @@ function PartnerDealsSection({
                       <td className="px-3 py-2.5 text-xs text-muted-foreground truncate max-w-[120px]">{d.remarks || '-'}</td>
                       <td className="px-3 py-2.5 text-center">{d.linked_deal_id
                         ? <Link2 className="h-3.5 w-3.5 text-teal-600 inline" />
-                        : d.school_name ? <button onClick={() => handleRegisterCrmDeal(d)} className="text-[10px] px-1.5 py-0.5 rounded border border-primary/50 text-primary hover:bg-primary/10">딜 등록</button> : <span className="text-muted-foreground/40">-</span>
+                        : <span className="text-muted-foreground/40">-</span>
                       }</td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex gap-1">
-                          <button onClick={() => openEditDialog(d)}
-                            className="p-1 rounded hover:bg-muted text-muted-foreground"><Pencil className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => handleDelete(d.id)}
-                            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
-                        </div>
+                      <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => handleDelete(d.id)}
+                          className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
                       </td>
                     </tr>
                   ))}
@@ -1185,7 +1181,7 @@ function PartnerDealsSection({
           <div className="space-y-3 pt-2 overflow-y-auto flex-1">
             <div>
               <Label className="text-xs">계약일</Label>
-              <Input type="date" value={df('contract_date')} onChange={e => setDialogForm(p => ({ ...p, contract_date: e.target.value }))} className="h-8 text-sm" />
+              <Input type="date" value={df('contract_date')} onChange={e => setDialogForm(p => ({ ...p, contract_date: e.target.value }))} className="h-9 text-sm w-full" />
             </div>
             <div ref={schoolRef} className="relative">
               <Label className="text-xs">학교명</Label>
@@ -1245,12 +1241,28 @@ function PartnerDealsSection({
             )}
             <div><Label className="text-xs">비고</Label><Input value={df('remarks')} onChange={e => setDialogForm(p => ({ ...p, remarks: e.target.value }))} className="h-8 text-sm" /></div>
           </div>
-          <div className="flex justify-end gap-2 pt-3 border-t">
-            <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)}>취소</Button>
-            <Button size="sm" onClick={handleDialogSubmit} disabled={saving}>
-              {saving && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
-              {dialogMode === 'add' ? '추가' : '저장'}
-            </Button>
+          <div className="flex items-center justify-between pt-3 border-t">
+            <div>
+              {dialogMode === 'edit' && dialogDealId && (() => {
+                const deal = deals.find(d => d.id === dialogDealId);
+                if (!deal || deal.linked_deal_id) return deal?.linked_deal_id
+                  ? <span className="text-xs text-teal-600 flex items-center gap-1"><Link2 className="h-3.5 w-3.5" />CRM 연결됨</span>
+                  : null;
+                return (
+                  <Button variant="outline" size="sm" onClick={async () => { await handleRegisterCrmDeal(deal); setDialogOpen(false); }}
+                    disabled={!deal.school_name}>
+                    <ExternalLink className="h-3.5 w-3.5 mr-1.5" />CRM 딜 등록
+                  </Button>
+                );
+              })()}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)}>취소</Button>
+              <Button size="sm" onClick={handleDialogSubmit} disabled={saving}>
+                {saving && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+                {dialogMode === 'add' ? '추가' : '저장'}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
