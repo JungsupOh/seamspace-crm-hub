@@ -15,7 +15,7 @@ import { Plus, Upload, Scan, FileText, Trash2, ExternalLink, Building2, Search, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDeals, useCreateDeal } from '@/hooks/use-airtable';
 import type { AirtableRecord, DealFields } from '@/types/airtable';
-import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals, createDealBuyers, getDealBuyers } from '@/lib/partner-deals';
+import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals, createDealBuyers, getDealBuyers, deleteDealBuyers } from '@/lib/partner-deals';
 import type { PartnerDeal, PartnerDealBuyer } from '@/lib/partner-deals';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
@@ -951,6 +951,7 @@ function PartnerDealsSection({
         }
       } else if (dialogDealId) {
         await updatePartnerDeal(dialogDealId, payload);
+        await deleteDealBuyers(dialogDealId);
         const createdBuyers = await createDealBuyers(dialogDealId, validBuyers.map(b => ({
           buyer_name: b.buyer_name || undefined, buyer_phone: b.buyer_phone || undefined, buyer_email: b.buyer_email || undefined,
           student_count: b.student_count, month_count: b.month_count === '' ? undefined : b.month_count, plan_name: b.plan_name || undefined, quantity: 1,
@@ -967,24 +968,28 @@ function PartnerDealsSection({
   const handleRegisterCrmDeal = async (deal: PartnerDeal) => {
     try {
       const today = new Date().toISOString().split('T')[0];
-      const rec = await createCrmDeal.mutateAsync({
+      const fields: Partial<import('@/types/airtable').DealFields> = {
         Deal_Name: `${deal.school_name ?? '파트너'} - ${partnerName}`,
         Deal_Stage: '견적',
         Deal_Type: 'New',
-        Org_Name: deal.school_name ?? '',
-        Contact_Name: deal.buyer_name ?? '',
-        Contact_Phone: deal.buyer_phone ?? '',
-        Quote_Plan: deal.plan_name ?? '',
-        Quote_Qty: deal.quantity ?? 0,
-        Final_Contract_Value: deal.payment_amount ?? 0,
         Lead_Source: partnerName,
-        Contract_Date: deal.contract_date ?? today,
         Created_Date: today,
-      });
+      };
+      if (deal.school_name) fields.Org_Name = deal.school_name;
+      if (deal.buyer_name) fields.Contact_Name = deal.buyer_name;
+      if (deal.buyer_phone) fields.Contact_Phone = deal.buyer_phone;
+      if (deal.plan_name) fields.Quote_Plan = deal.plan_name;
+      if (deal.quantity) fields.Quote_Qty = deal.quantity;
+      if (deal.payment_amount) fields.Final_Contract_Value = deal.payment_amount;
+      if (deal.contract_date) fields.Contract_Date = deal.contract_date;
+      const rec = await createCrmDeal.mutateAsync(fields);
       await updatePartnerDeal(deal.id, { linked_deal_id: rec.id });
       setDeals(prev => prev.map(d => d.id === deal.id ? { ...d, linked_deal_id: rec.id } : d));
       toast.success('CRM 딜이 등록되었습니다');
-    } catch { toast.error('CRM 딜 등록 실패'); }
+    } catch (e) {
+      console.error('CRM 딜 등록 실패:', e);
+      toast.error(e instanceof Error ? e.message : 'CRM 딜 등록 실패');
+    }
   };
 
   const updateBuyer = (idx: number, field: keyof BuyerInput, value: string | number) => {
