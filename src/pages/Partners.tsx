@@ -973,7 +973,6 @@ function PartnerDealsSection({
         Deal_Stage: '견적',
         Deal_Type: 'New',
         Lead_Source: partnerName,
-        Created_Date: today,
       };
       if (deal.school_name) fields.Org_Name = deal.school_name;
       if (deal.buyer_name) fields.Contact_Name = deal.buyer_name;
@@ -1183,17 +1182,17 @@ function PartnerDealsSection({
           <DialogHeader>
             <DialogTitle>{dialogMode === 'add' ? '새 딜 추가' : '딜 수정'}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 pt-2 overflow-y-auto flex-1">
-            <div>
+          <div className="space-y-4 pt-2 overflow-y-auto flex-1">
+            <div className="space-y-1.5">
               <Label className="text-xs">계약일</Label>
               <Input type="date" value={df('contract_date')} onChange={e => setDialogForm(p => ({ ...p, contract_date: e.target.value }))} className="h-9 text-sm w-full" />
             </div>
-            <div ref={schoolRef} className="relative">
+            <div ref={schoolRef} className="relative space-y-1.5">
               <Label className="text-xs">학교명</Label>
               <div className="relative">
                 <Input value={schoolQuery} onChange={e => handleSchoolSearch(e.target.value)}
                   onFocus={() => { if (schoolResults.length > 0) setShowSchoolDropdown(true); }}
-                  placeholder="학교명을 입력하세요" className="h-8 text-sm pr-8" />
+                  placeholder="학교명을 입력하세요" className="h-9 text-sm pr-8" />
                 <div className="absolute right-2 top-1/2 -translate-y-1/2">
                   {schoolSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : <Search className="h-3.5 w-3.5 text-muted-foreground" />}
                 </div>
@@ -1236,11 +1235,11 @@ function PartnerDealsSection({
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
+              <div className="space-y-1.5">
                 <Label className="text-xs">플랜</Label>
                 <Input value={df('plan_name')} onChange={e => setDialogForm(p => ({ ...p, plan_name: e.target.value }))} className="h-9 text-sm" />
               </div>
-              <div>
+              <div className="space-y-1.5">
                 <Label className="text-xs">결제금액</Label>
                 <Input type="number" value={dfn('payment_amount') ?? ''} onChange={e => setDialogForm(p => ({ ...p, payment_amount: parseInt(e.target.value) || 0 }))} className="h-9 text-sm" />
               </div>
@@ -1250,7 +1249,7 @@ function PartnerDealsSection({
                 수수료 {calcCommission(dfn('payment_amount') ?? 0, commissionRate).commission.toLocaleString()}원 / 정산 {calcCommission(dfn('payment_amount') ?? 0, commissionRate).settlement.toLocaleString()}원
               </div>
             )}
-            <div>
+            <div className="space-y-1.5">
               <Label className="text-xs">비고</Label>
               <Input value={df('remarks')} onChange={e => setDialogForm(p => ({ ...p, remarks: e.target.value }))} className="h-9 text-sm" />
             </div>
