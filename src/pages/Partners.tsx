@@ -1258,9 +1258,17 @@ function PartnerDealsSection({
             <div>
               {dialogMode === 'edit' && dialogDealId && (() => {
                 const deal = deals.find(d => d.id === dialogDealId);
-                if (!deal || deal.linked_deal_id) return deal?.linked_deal_id
-                  ? <span className="text-xs text-teal-600 flex items-center gap-1"><Link2 className="h-3.5 w-3.5" />CRM 연결됨</span>
-                  : null;
+                if (!deal) return null;
+                if (deal.linked_deal_id) return (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-teal-600 flex items-center gap-1"><Link2 className="h-3.5 w-3.5" />CRM 연결됨</span>
+                    <button onClick={async () => {
+                      await updatePartnerDeal(deal.id, { linked_deal_id: null as unknown as string });
+                      setDeals(prev => prev.map(d => d.id === deal.id ? { ...d, linked_deal_id: undefined } : d));
+                      toast.success('연결 해제됨');
+                    }} className="text-[10px] text-muted-foreground hover:text-destructive underline">해제</button>
+                  </div>
+                );
                 return (
                   <Button variant="outline" size="sm" onClick={async () => { await handleRegisterCrmDeal(deal); setDialogOpen(false); }}
                     disabled={!deal.school_name}>
