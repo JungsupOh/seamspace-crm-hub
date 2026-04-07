@@ -981,7 +981,6 @@ function PartnerDealsSection({
       if (deal.quantity) fields.Quote_Qty = deal.quantity;
       if (deal.payment_amount) fields.Final_Contract_Value = deal.payment_amount;
       if (deal.contract_date) fields.Contract_Date = deal.contract_date;
-      fields.Quote_Date = deal.contract_date || today;
       const rec = await createCrmDeal.mutateAsync(fields);
       await updatePartnerDeal(deal.id, { linked_deal_id: rec.id });
       setDeals(prev => prev.map(d => d.id === deal.id ? { ...d, linked_deal_id: rec.id } : d));

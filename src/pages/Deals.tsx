@@ -2583,7 +2583,7 @@ export default function Deals() {
   const [sheetOpen, setSheetOpen]       = useState(false);
   const [dialogOpen, setDialogOpen]     = useState(false);
   const [editMode, setEditMode]         = useState<'add' | 'edit'>('add');
-  const [sortField, setSortField]       = useState('Quote_Date');
+  const [sortField, setSortField]       = useState('Created');
   const [sortDir, setSortDir]           = useState<'asc' | 'desc'>('desc');
   const [uploading, setUploading]       = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -2719,6 +2719,7 @@ export default function Deals() {
   });
 
   const fieldKey: Record<string, (d: AirtableRecord<DealFields>) => string> = {
+    Created:              d => d.createdTime ?? '',
     Contact_Name:         d => d.fields.Contact_Name ?? '',
     Org_Name:             d => d.fields.Org_Name ?? '',
     Final_Contract_Value: d => String(d.fields.Final_Contract_Value ?? 0).padStart(12, '0'),
