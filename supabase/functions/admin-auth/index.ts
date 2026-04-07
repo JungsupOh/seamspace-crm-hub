@@ -50,7 +50,7 @@ serve(async (req) => {
       .single();
 
     const callerRole = profile?.role ?? caller.user_metadata?.role;
-    if (callerRole !== 'admin') {
+    if (callerRole !== 'admin' && callerRole !== 'sub_admin') {
       return jsonResponse({ error: 'Admin access required' }, 403);
     }
 
