@@ -2646,8 +2646,8 @@ export default function Deals() {
     const deal = deals.find(d => d.id === id);
     if (deal) {
       setSelected(deal);
-      setSheetOpen(true);
       setEditMode('edit');
+      setDialogOpen(true);
       // URL 정리 (히스토리 replace)
       window.history.replaceState(null, '', '/deals');
     }
@@ -3509,7 +3509,7 @@ export default function Deals() {
                 const isChecked = checkedIds.has(d.id);
                 return (
                   <tr key={d.id}
-                    onClick={() => { setSelected(d); setConfirmDelete(false); setSheetOpen(true); }}
+                    onClick={() => { setSelected(d); setEditMode('edit'); setDialogOpen(true); }}
                     className={`border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer transition-colors ${isChecked ? 'bg-primary/5' : ''}`}>
                     {canEdit && (
                       <td className="px-3 py-2.5 bg-background" style={{ position: 'sticky', left: 0, zIndex: 1 }} onClick={e => e.stopPropagation()}>
