@@ -13,10 +13,13 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { toast } from 'sonner';
 import { Plus, Upload, Scan, FileText, Trash2, ExternalLink, Building2, Search, TrendingUp, Pencil, Link2, X, Loader2, UserPlus } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useDeals } from '@/hooks/use-airtable';
+import { useDeals, useCreateDeal } from '@/hooks/use-airtable';
 import type { AirtableRecord, DealFields } from '@/types/airtable';
-import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals } from '@/lib/partner-deals';
-import type { PartnerDeal } from '@/lib/partner-deals';
+import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals, createDealBuyers, getDealBuyers } from '@/lib/partner-deals';
+import type { PartnerDeal, PartnerDealBuyer } from '@/lib/partner-deals';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { searchSchools, type SchoolInfo } from '@/lib/neis';
+import { Users } from 'lucide-react';
 import { sendInviteEmail } from '@/lib/email';
 import { supabase } from '@/lib/supabase';
 import { notifyPartnerDeal } from '@/lib/telegram';
@@ -804,18 +807,67 @@ function PartnerDealsSection({
   crmDeals: AirtableRecord<DealFields>[];
   allCrmDeals: AirtableRecord<DealFields>[];
 }) {
+  const createCrmDeal = useCreateDeal();
   const [deals, setDeals] = useState<PartnerDeal[]>([]);
+  const [dealBuyersMap, setDealBuyersMap] = useState<Record<string, PartnerDealBuyer[]>>({});
   const [loading, setLoading] = useState(true);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<Partial<PartnerDeal>>({});
-  const [adding, setAdding] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
+  const [dialogDealId, setDialogDealId] = useState<string | null>(null);
+  const [dialogForm, setDialogForm] = useState<Partial<PartnerDeal>>({});
+  const [saving, setSaving] = useState(false);
   const [linking, setLinking] = useState(false);
   const [deleteDealConfirmOpen, setDeleteDealConfirmOpen] = useState(false);
   const [deleteDealTargetId, setDeleteDealTargetId] = useState<string | null>(null);
 
+  // 구매자
+  type BuyerInput = { buyer_name: string; buyer_phone: string; buyer_email: string; student_count: number; month_count: number | ''; plan_name: string };
+  const emptyBuyer = (): BuyerInput => ({ buyer_name: '', buyer_phone: '', buyer_email: '', student_count: 0, month_count: '', plan_name: '' });
+  const [buyers, setBuyers] = useState<BuyerInput[]>([emptyBuyer()]);
+
+  // 학교 검색
+  const [schoolQuery, setSchoolQuery] = useState('');
+  const [schoolResults, setSchoolResults] = useState<SchoolInfo[]>([]);
+  const [schoolSearching, setSchoolSearching] = useState(false);
+  const [showSchoolDropdown, setShowSchoolDropdown] = useState(false);
+  const schoolRef = useRef<HTMLDivElement>(null);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSchoolSearch = useCallback((query: string) => {
+    setSchoolQuery(query);
+    setDialogForm(p => ({ ...p, school_name: query }));
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (query.trim().length < 2) { setSchoolResults([]); setShowSchoolDropdown(false); return; }
+    searchTimerRef.current = setTimeout(async () => {
+      setSchoolSearching(true);
+      try {
+        const results = await searchSchools(query);
+        setSchoolResults(results);
+        setShowSchoolDropdown(results.length > 0);
+      } catch { setSchoolResults([]); }
+      finally { setSchoolSearching(false); }
+    }, 300);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (schoolRef.current && !schoolRef.current.contains(e.target as Node)) setShowSchoolDropdown(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   useEffect(() => {
     setLoading(true);
-    getPartnerDeals(partnerId).then(setDeals).catch(() => setDeals([])).finally(() => setLoading(false));
+    getPartnerDeals(partnerId).then(async (dealList) => {
+      setDeals(dealList);
+      const bMap: Record<string, PartnerDealBuyer[]> = {};
+      await Promise.all(dealList.map(async d => {
+        const b = await getDealBuyers(d.id);
+        if (b.length > 0) bMap[d.id] = b;
+      }));
+      setDealBuyersMap(bMap);
+    }).catch(() => setDeals([])).finally(() => setLoading(false));
   }, [partnerId]);
 
   const [dealPeriod, setDealPeriod] = useState('all');
@@ -835,32 +887,111 @@ function PartnerDealsSection({
   const totalCommission = filteredByPeriod.reduce((s, d) => s + (d.commission_amount ?? 0), 0);
   const totalSettlement = filteredByPeriod.reduce((s, d) => s + (d.settlement_amount ?? 0), 0);
 
-  const handleAdd = async () => {
-    setAdding(true);
-    try {
-      const seq = deals.length + 1;
-      const created = await createPartnerDeal({ partner_id: partnerId, seq_number: seq });
-      setDeals(prev => [...prev, created]);
-      setEditingId(created.id);
-      setEditForm(created);
-    } catch (e) { toast.error('추가 실패'); }
-    finally { setAdding(false); }
+  const openAddDialog = () => {
+    setDialogMode('add');
+    setDialogDealId(null);
+    setDialogForm({ quantity: 1 });
+    setBuyers([emptyBuyer()]);
+    setSchoolQuery('');
+    setSchoolResults([]);
+    setShowSchoolDropdown(false);
+    setDialogOpen(true);
   };
 
-  const handleSave = async (id: string) => {
-    try {
-      const { commission, settlement } = calcCommission(editForm.payment_amount ?? 0, commissionRate);
-      const updates = { ...editForm, commission_amount: commission, settlement_amount: settlement };
-      await updatePartnerDeal(id, updates);
-      setDeals(prev => prev.map(d => d.id === id ? { ...d, ...updates } as PartnerDeal : d));
-      setEditingId(null);
-      // 학교명이나 결제금액이 있으면 알림
-      if (editForm.school_name || editForm.payment_amount) {
-        notifyPartnerDeal(partnerName, editForm.school_name ?? '', editForm.buyer_name ?? '', editForm.payment_amount as number);
-      }
-      toast.success('저장됨');
-    } catch { toast.error('저장 실패'); }
+  const openEditDialog = (deal: PartnerDeal) => {
+    setDialogMode('edit');
+    setDialogDealId(deal.id);
+    setDialogForm(deal);
+    setSchoolQuery(deal.school_name ?? '');
+    // 기존 구매자 로드
+    const existingBuyers = dealBuyersMap[deal.id];
+    if (existingBuyers && existingBuyers.length > 0) {
+      setBuyers(existingBuyers.map(b => ({
+        buyer_name: b.buyer_name ?? '', buyer_phone: b.buyer_phone ?? '', buyer_email: b.buyer_email ?? '',
+        student_count: b.student_count ?? 0, month_count: b.month_count ?? '', plan_name: b.plan_name ?? '',
+      })));
+    } else {
+      setBuyers([{ buyer_name: deal.buyer_name ?? '', buyer_phone: deal.buyer_phone ?? '', buyer_email: '', student_count: 0, month_count: '', plan_name: deal.plan_name ?? '' }]);
+    }
+    setDialogOpen(true);
   };
+
+  const handleDialogSubmit = async () => {
+    const validBuyers = buyers.filter(b => b.buyer_name.trim());
+    if (validBuyers.length === 0) { toast.error('구매자를 최소 1명 입력해주세요'); return; }
+    setSaving(true);
+    try {
+      const { commission, settlement } = calcCommission(dialogForm.payment_amount ?? 0, commissionRate);
+      const firstBuyer = validBuyers[0];
+      const payload = {
+        contract_date: dialogForm.contract_date || null,
+        school_name: dialogForm.school_name || null,
+        buyer_name: firstBuyer.buyer_name || null,
+        buyer_phone: firstBuyer.buyer_phone || null,
+        plan_name: dialogForm.plan_name || null,
+        quantity: validBuyers.length,
+        payment_amount: dialogForm.payment_amount ?? 0,
+        commission_amount: commission,
+        settlement_amount: settlement,
+        remarks: dialogForm.remarks || null,
+      };
+
+      if (dialogMode === 'add') {
+        const seq = deals.length + 1;
+        const created = await createPartnerDeal({ partner_id: partnerId, seq_number: seq, ...payload });
+        const createdBuyers = await createDealBuyers(created.id, validBuyers.map(b => ({
+          buyer_name: b.buyer_name || undefined, buyer_phone: b.buyer_phone || undefined, buyer_email: b.buyer_email || undefined,
+          student_count: b.student_count, month_count: b.month_count === '' ? undefined : b.month_count, plan_name: b.plan_name || undefined, quantity: 1,
+        })));
+        setDeals(prev => [...prev, created]);
+        setDealBuyersMap(prev => ({ ...prev, [created.id]: createdBuyers }));
+        toast.success('딜이 추가되었습니다');
+        if (payload.school_name || payload.payment_amount) {
+          notifyPartnerDeal(partnerName, payload.school_name ?? '', payload.buyer_name ?? '', payload.payment_amount as number);
+        }
+      } else if (dialogDealId) {
+        await updatePartnerDeal(dialogDealId, payload);
+        const createdBuyers = await createDealBuyers(dialogDealId, validBuyers.map(b => ({
+          buyer_name: b.buyer_name || undefined, buyer_phone: b.buyer_phone || undefined, buyer_email: b.buyer_email || undefined,
+          student_count: b.student_count, month_count: b.month_count === '' ? undefined : b.month_count, plan_name: b.plan_name || undefined, quantity: 1,
+        })));
+        setDeals(prev => prev.map(d => d.id === dialogDealId ? { ...d, ...payload } as PartnerDeal : d));
+        setDealBuyersMap(prev => ({ ...prev, [dialogDealId]: createdBuyers }));
+        toast.success('저장되었습니다');
+      }
+      setDialogOpen(false);
+    } catch { toast.error('저장 실패'); }
+    finally { setSaving(false); }
+  };
+
+  const handleRegisterCrmDeal = async (deal: PartnerDeal) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const rec = await createCrmDeal.mutateAsync({
+        Deal_Name: `${deal.school_name ?? '파트너'} - ${partnerName}`,
+        Deal_Stage: '견적',
+        Deal_Type: 'New',
+        Org_Name: deal.school_name ?? '',
+        Contact_Name: deal.buyer_name ?? '',
+        Contact_Phone: deal.buyer_phone ?? '',
+        Quote_Plan: deal.plan_name ?? '',
+        Quote_Qty: deal.quantity ?? 0,
+        Final_Contract_Value: deal.payment_amount ?? 0,
+        Lead_Source: partnerName,
+        Contract_Date: deal.contract_date ?? today,
+        Created_Date: today,
+      });
+      await updatePartnerDeal(deal.id, { linked_deal_id: rec.id });
+      setDeals(prev => prev.map(d => d.id === deal.id ? { ...d, linked_deal_id: rec.id } : d));
+      toast.success('CRM 딜이 등록되었습니다');
+    } catch { toast.error('CRM 딜 등록 실패'); }
+  };
+
+  const updateBuyer = (idx: number, field: keyof BuyerInput, value: string | number) => {
+    setBuyers(prev => prev.map((b, i) => i === idx ? { ...b, [field]: value } : b));
+  };
+  const addBuyer = () => setBuyers(prev => [...prev, emptyBuyer()]);
+  const removeBuyer = (idx: number) => setBuyers(prev => prev.filter((_, i) => i !== idx));
 
   const handleDelete = (id: string) => {
     setDeleteDealTargetId(id);
@@ -903,9 +1034,8 @@ function PartnerDealsSection({
     finally { setLinking(false); }
   };
 
-  const ef = (k: keyof PartnerDeal) => (editForm[k] as string) ?? '';
-  const efn = (k: keyof PartnerDeal) => editForm[k] as number | undefined;
-  const eset = (k: keyof PartnerDeal, v: unknown) => setEditForm(prev => ({ ...prev, [k]: v }));
+  const df = (k: keyof PartnerDeal) => (dialogForm[k] as string) ?? '';
+  const dfn = (k: keyof PartnerDeal) => dialogForm[k] as number | undefined;
 
   return (
     <section className="space-y-4">
@@ -929,7 +1059,7 @@ function PartnerDealsSection({
             {linking ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Link2 className="h-3.5 w-3.5 mr-1.5" />}
             CRM 자동연결
           </Button>
-          <Button size="sm" onClick={handleAdd} disabled={adding}>
+          <Button size="sm" onClick={openAddDialog}>
             <Plus className="h-3.5 w-3.5 mr-1.5" />딜 추가
           </Button>
         </div>
@@ -1011,35 +1141,7 @@ function PartnerDealsSection({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredByPeriod.map((d, idx) => {
-                  const isEditing = editingId === d.id;
-                  if (isEditing) {
-                    return (
-                      <tr key={d.id} className="bg-primary/5">
-                        <td className="px-3 py-2 text-xs text-muted-foreground">{idx + 1}</td>
-                        <td className="px-3 py-2"><input type="date" value={ef('contract_date')} onChange={e => eset('contract_date', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-32" /></td>
-                        <td className="px-3 py-2"><input value={ef('school_name')} onChange={e => eset('school_name', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-full" placeholder="학교명" /></td>
-                        <td className="px-3 py-2"><input value={ef('buyer_name')} onChange={e => eset('buyer_name', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-full" placeholder="구매자" /></td>
-                        <td className="px-3 py-2"><input value={ef('buyer_phone')} onChange={e => eset('buyer_phone', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-28" placeholder="연락처" /></td>
-                        <td className="px-3 py-2"><input value={ef('plan_name')} onChange={e => eset('plan_name', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-20" /></td>
-                        <td className="px-3 py-2"><input type="number" value={efn('quantity') ?? ''} onChange={e => eset('quantity', parseInt(e.target.value) || 1)} className="h-7 text-xs border rounded px-1.5 w-14 text-center" /></td>
-                        <td className="px-3 py-2"><input type="number" value={efn('payment_amount') ?? ''} onChange={e => eset('payment_amount', parseInt(e.target.value) || 0)} className="h-7 text-xs border rounded px-1.5 w-28 text-right" /></td>
-                        <td className="px-3 py-2 text-right text-xs text-muted-foreground tabular-nums">{calcCommission(efn('payment_amount') ?? 0, commissionRate).commission.toLocaleString()}</td>
-                        <td className="px-3 py-2 text-right text-xs text-muted-foreground tabular-nums">{calcCommission(efn('payment_amount') ?? 0, commissionRate).settlement.toLocaleString()}</td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">{d.license_issue_date || '-'}</td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">{d.deposit_date || '-'}</td>
-                        <td className="px-3 py-2"><input value={ef('remarks')} onChange={e => eset('remarks', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-full" /></td>
-                        <td className="px-3 py-2 text-center">{d.linked_deal_id ? <Link2 className="h-3.5 w-3.5 text-teal-600 inline" /> : <span className="text-muted-foreground/40">-</span>}</td>
-                        <td className="px-3 py-2">
-                          <div className="flex gap-1">
-                            <button onClick={() => handleSave(d.id)} className="text-[11px] px-2 py-1 rounded bg-primary text-primary-foreground">저장</button>
-                            <button onClick={() => setEditingId(null)} className="text-[11px] px-1.5 py-1 rounded border border-border">취소</button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  }
-                  return (
+                {filteredByPeriod.map((d, idx) => (
                     <tr key={d.id} className="hover:bg-muted/30">
                       <td className="px-3 py-2.5 text-xs text-muted-foreground">{idx + 1}</td>
                       <td className="px-3 py-2.5 text-sm whitespace-nowrap">{d.contract_date || '-'}</td>
@@ -1054,23 +1156,104 @@ function PartnerDealsSection({
                       <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.license_issue_date || '-'}</td>
                       <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.deposit_date || '-'}</td>
                       <td className="px-3 py-2.5 text-xs text-muted-foreground truncate max-w-[120px]">{d.remarks || '-'}</td>
-                      <td className="px-3 py-2.5 text-center">{d.linked_deal_id ? <Link2 className="h-3.5 w-3.5 text-teal-600 inline" /> : <span className="text-muted-foreground/40">-</span>}</td>
+                      <td className="px-3 py-2.5 text-center">{d.linked_deal_id
+                        ? <Link2 className="h-3.5 w-3.5 text-teal-600 inline" />
+                        : d.school_name ? <button onClick={() => handleRegisterCrmDeal(d)} className="text-[10px] px-1.5 py-0.5 rounded border border-primary/50 text-primary hover:bg-primary/10">딜 등록</button> : <span className="text-muted-foreground/40">-</span>
+                      }</td>
                       <td className="px-3 py-2.5">
                         <div className="flex gap-1">
-                          <button onClick={() => { setEditingId(d.id); setEditForm(d); }}
+                          <button onClick={() => openEditDialog(d)}
                             className="p-1 rounded hover:bg-muted text-muted-foreground"><Pencil className="h-3.5 w-3.5" /></button>
                           <button onClick={() => handleDelete(d.id)}
                             className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
                         </div>
                       </td>
                     </tr>
-                  );
-                })}
+                  ))}
               </tbody>
             </table>
           </div>
         </div>
       )}
+
+      {/* 딜 추가/수정 팝업 */}
+      <Dialog open={dialogOpen} onOpenChange={open => { if (!open) setDialogOpen(false); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{dialogMode === 'add' ? '새 딜 추가' : '딜 수정'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2 overflow-y-auto flex-1">
+            <div>
+              <Label className="text-xs">계약일</Label>
+              <Input type="date" value={df('contract_date')} onChange={e => setDialogForm(p => ({ ...p, contract_date: e.target.value }))} className="h-8 text-sm" />
+            </div>
+            <div ref={schoolRef} className="relative">
+              <Label className="text-xs">학교명</Label>
+              <div className="relative">
+                <Input value={schoolQuery} onChange={e => handleSchoolSearch(e.target.value)}
+                  onFocus={() => { if (schoolResults.length > 0) setShowSchoolDropdown(true); }}
+                  placeholder="학교명을 입력하세요" className="h-8 text-sm pr-8" />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                  {schoolSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : <Search className="h-3.5 w-3.5 text-muted-foreground" />}
+                </div>
+              </div>
+              {showSchoolDropdown && schoolResults.length > 0 && (
+                <div className="absolute z-50 mt-1 w-full bg-popover border border-border rounded-md shadow-lg max-h-48 overflow-y-auto">
+                  {schoolResults.map((s, i) => (
+                    <button key={i} onClick={() => { setSchoolQuery(s.name); setDialogForm(p => ({ ...p, school_name: s.name })); setShowSchoolDropdown(false); }}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors flex items-center justify-between">
+                      <span className="font-medium">{s.name}</span>
+                      <span className="text-xs text-muted-foreground ml-2">{s.kind} · {s.eduOffice}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-xs flex items-center gap-1"><Users className="h-3.5 w-3.5" />구매자 ({buyers.length}명)</Label>
+                <button onClick={addBuyer} className="text-xs text-primary hover:underline flex items-center gap-0.5"><Plus className="h-3 w-3" />추가</button>
+              </div>
+              <div className="space-y-2">
+                {buyers.map((b, idx) => (
+                  <div key={idx} className="border border-border rounded-md p-2.5 bg-muted/30 relative">
+                    {buyers.length > 1 && (
+                      <button onClick={() => removeBuyer(idx)} className="absolute top-1.5 right-1.5 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><X className="h-3 w-3" /></button>
+                    )}
+                    <div className="grid grid-cols-3 gap-2 mb-2">
+                      <div><span className="text-[10px] text-muted-foreground">이름 *</span><Input value={b.buyer_name} onChange={e => updateBuyer(idx, 'buyer_name', e.target.value)} placeholder="홍길동" className="h-7 text-xs" /></div>
+                      <div><span className="text-[10px] text-muted-foreground">연락처</span><Input value={b.buyer_phone} onChange={e => updateBuyer(idx, 'buyer_phone', formatPhone(e.target.value))} placeholder="010-0000-0000" className="h-7 text-xs" /></div>
+                      <div><span className="text-[10px] text-muted-foreground">이메일</span><Input value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" /></div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div><span className="text-[10px] text-muted-foreground">학생 수</span><Input type="number" value={b.student_count} onChange={e => updateBuyer(idx, 'student_count', parseInt(e.target.value) || 0)} className="h-7 text-xs" /></div>
+                      <div><span className="text-[10px] text-muted-foreground">개월 수</span><Input type="number" value={b.month_count} onChange={e => updateBuyer(idx, 'month_count', parseInt(e.target.value) || '')} placeholder="12" className="h-7 text-xs" /></div>
+                      <div><span className="text-[10px] text-muted-foreground">플랜</span><Input value={b.plan_name} onChange={e => updateBuyer(idx, 'plan_name', e.target.value)} className="h-7 text-xs" /></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">플랜</Label><Input value={df('plan_name')} onChange={e => setDialogForm(p => ({ ...p, plan_name: e.target.value }))} className="h-8 text-sm" /></div>
+              <div><Label className="text-xs">결제금액</Label><Input type="number" value={dfn('payment_amount') ?? ''} onChange={e => setDialogForm(p => ({ ...p, payment_amount: parseInt(e.target.value) || 0 }))} className="h-8 text-sm" /></div>
+            </div>
+            {(dfn('payment_amount') ?? 0) > 0 && (
+              <div className="text-xs text-muted-foreground bg-muted/50 rounded px-3 py-2">
+                수수료 {calcCommission(dfn('payment_amount') ?? 0, commissionRate).commission.toLocaleString()}원 / 정산 {calcCommission(dfn('payment_amount') ?? 0, commissionRate).settlement.toLocaleString()}원
+              </div>
+            )}
+            <div><Label className="text-xs">비고</Label><Input value={df('remarks')} onChange={e => setDialogForm(p => ({ ...p, remarks: e.target.value }))} className="h-8 text-sm" /></div>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t">
+            <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)}>취소</Button>
+            <Button size="sm" onClick={handleDialogSubmit} disabled={saving}>
+              {saving && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              {dialogMode === 'add' ? '추가' : '저장'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* 딜 삭제 확인 */}
       <AlertDialog open={deleteDealConfirmOpen} onOpenChange={setDeleteDealConfirmOpen}>
