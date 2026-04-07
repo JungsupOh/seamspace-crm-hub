@@ -34,25 +34,8 @@ const AIRTABLE_TABLES: Record<string, { label: string; fields: string[] }> = {
   },
 };
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-
-async function callProxy(body: Record<string, unknown>): Promise<unknown> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.access_token) throw new Error('로그인이 필요합니다');
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/airtable-proxy`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      apikey: SUPABASE_KEY,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || `Proxy error: ${res.status}`);
-  return data;
-}
+import { airtable } from '@/lib/airtable';
+import type { ContactFields } from '@/types/airtable';
 
 // ── 유틸 ──────────────────────────────────────────
 function autoMatch(fileCol: string, airtableFields: string[]): string {
@@ -258,16 +241,11 @@ async function uploadBatch(
 ) {
   const results = { success: 0, failed: 0 };
   let firstError = '';
-  for (let i = 0; i < records.length; i += 10) {
-    const batch = records.slice(i, i + 10).map(fields => ({ fields }));
+  for (let i = 0; i < records.length; i += 50) {
+    const batch = records.slice(i, i + 50);
     try {
-      const data = await callProxy({
-        action: 'createBatch',
-        table: tableName,
-        records: batch,
-      }) as { records: unknown[] };
-      results.success += data.records.length;
-      await new Promise(r => setTimeout(r, 250)); // rate limit
+      const created = await airtable.createBatch(tableName, batch);
+      results.success += created.length;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (!firstError) firstError = msg;
@@ -295,16 +273,14 @@ function mergeNoteStrings(a: string, b: string): string {
     .join('\n');
 }
 
-// Airtable 기존 연락처 phone_normalized 인덱스 조회
+// 기존 연락처 phone_normalized 인덱스 조회
 async function fetchPhoneIndex(): Promise<Map<string, { id: string; notes: string }>> {
   const index = new Map<string, { id: string; notes: string }>();
   try {
-    const data = await callProxy({
-      action: 'fetchAll',
-      table: '01_Contacts',
-      params: { 'fields[]': 'phone_normalized,Notes' },
-    }) as { records: { id: string; fields: Record<string, unknown> }[] };
-    for (const rec of data.records ?? []) {
+    const records = await airtable.fetchAll<ContactFields>('01_Contacts', {
+      'fields[]': 'phone_normalized,Notes',
+    });
+    for (const rec of records) {
       const phone = String(rec.fields?.phone_normalized || '').trim();
       if (phone) index.set(phone, { id: rec.id, notes: String(rec.fields?.Notes || '') });
     }
@@ -312,22 +288,14 @@ async function fetchPhoneIndex(): Promise<Map<string, { id: string; notes: strin
   return index;
 }
 
-// Airtable 배치 수정 (PATCH, 최대 10개씩)
+// 배치 수정
 async function batchUpdate(records: { id: string; fields: Record<string, unknown> }[]) {
   const results = { success: 0, failed: 0 };
-  for (let i = 0; i < records.length; i += 10) {
-    const batch = records.slice(i, i + 10);
-    try {
-      await callProxy({
-        action: 'updateBatch',
-        table: '01_Contacts',
-        updates: batch,
-      });
-      results.success += batch.length;
-      await new Promise(r => setTimeout(r, 250));
-    } catch {
-      results.failed += batch.length;
-    }
+  try {
+    await airtable.updateBatch('01_Contacts', records);
+    results.success = records.length;
+  } catch {
+    results.failed = records.length;
   }
   return results;
 }
