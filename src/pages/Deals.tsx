@@ -2611,14 +2611,14 @@ export default function Deals() {
   const [pdfGenerating, setPdfGenerating]   = useState<string | null>(null); // quote id
   const [periodFilter, setPeriodFilter]     = useState(String(new Date().getFullYear()));
   const { widths: colW, startResize } = useResizableColumns('deals_col_widths', {
-    견적일: 90, 견적번호: 120, 담당자: 130, '학교/기관': 140, 유형: 72, 스테이지: 80, 실결제금액: 100, 계약일: 90, 입금일: 90, 구매처: 90, '📎': 36,
+    등록일: 90, 견적번호: 120, 담당자: 130, '학교/기관': 140, 유형: 72, 스테이지: 80, 실결제금액: 100, 계약일: 90, 입금일: 90, 구매처: 90, '📎': 36,
   });
   // 고정 열 sticky left 오프셋 (체크박스 32px + 각 열 너비 누적)
   const CHECKBOX_W = 32;
   const stickyLeft = {
-    견적번호: canEdit ? CHECKBOX_W + (colW['견적일'] ?? 90) : (colW['견적일'] ?? 90),
-    담당자:   canEdit ? CHECKBOX_W + (colW['견적일'] ?? 90) + (colW['견적번호'] ?? 120) : (colW['견적일'] ?? 90) + (colW['견적번호'] ?? 120),
-    '학교/기관': canEdit ? CHECKBOX_W + (colW['견적일'] ?? 90) + (colW['견적번호'] ?? 120) + (colW['담당자'] ?? 130) : (colW['견적일'] ?? 90) + (colW['견적번호'] ?? 120) + (colW['담당자'] ?? 130),
+    견적번호: canEdit ? CHECKBOX_W + (colW['등록일'] ?? 90) : (colW['등록일'] ?? 90),
+    담당자:   canEdit ? CHECKBOX_W + (colW['등록일'] ?? 90) + (colW['견적번호'] ?? 120) : (colW['등록일'] ?? 90) + (colW['견적번호'] ?? 120),
+    '학교/기관': canEdit ? CHECKBOX_W + (colW['등록일'] ?? 90) + (colW['견적번호'] ?? 120) + (colW['담당자'] ?? 130) : (colW['등록일'] ?? 90) + (colW['견적번호'] ?? 120) + (colW['담당자'] ?? 130),
   };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -3460,7 +3460,7 @@ export default function Deals() {
                   </th>
                 )}
                 {([
-                  { label: '견적일',     field: 'Quote_Date'           },
+                  { label: '등록일',     field: 'Created'              },
                   { label: '견적번호',   field: 'Quote_Number'         },
                   { label: '담당자',     field: 'Contact_Name'         },
                   { label: '학교/기관',  field: 'Org_Name'             },
@@ -3522,7 +3522,7 @@ export default function Deals() {
                       </td>
                     )}
                     <td className="px-4 py-2.5 text-xs tabular-nums text-muted-foreground whitespace-nowrap">
-                      {d.fields.Quote_Date || '-'}
+                      {d.createdTime ? d.createdTime.slice(0, 10) : '-'}
                     </td>
                     <td className={`px-4 py-2.5 whitespace-nowrap ${isChecked ? 'bg-primary/5' : 'bg-background'}`}
                       style={{ position: 'sticky', left: stickyLeft['견적번호'], zIndex: 1 }}>
