@@ -950,12 +950,20 @@ function DealForm({
         discount_amount: q.discount_amount ?? 0,
       }));
     }
+    // 구형 딜: Airtable 필드에서 items 복원
+    const legacyItems: QuoteLineItem[] = [];
+    if (initial?.Quote_Plan && initial?.Unit_Price && initial?.License_Duration) {
+      const lq = initial?.Quote_Qty ? Math.ceil(initial.Quote_Qty / 40) : 1;
+      legacyItems.push(makeItem(initial.Quote_Plan, initial.License_Duration, lq));
+    }
     return [{
       quote_number: initial?.Quote_Number, quote_date: initial?.Quote_Date,
       plan: initial?.Quote_Plan, qty: initial?.Quote_Qty,
+      license_qty: initial?.Quote_Qty ? Math.ceil(initial.Quote_Qty / 40) : undefined,
       duration: initial?.License_Duration, unit_price: initial?.Unit_Price,
       final_value: initial?.Final_Contract_Value, supply_price: initial?.Supply_Price,
       tax_amount: initial?.Tax_Amount,
+      items: legacyItems.length > 0 ? legacyItems : undefined,
     }];
   });
   const [activeTabIdx, setActiveTabIdx] = useState(() => {
