@@ -13,8 +13,9 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { toast } from 'sonner';
 import { Plus, Upload, Scan, FileText, Trash2, ExternalLink, Building2, Search, TrendingUp, Pencil, Link2, X, Loader2, UserPlus } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useDeals, useCreateDeal } from '@/hooks/use-airtable';
-import type { AirtableRecord, DealFields } from '@/types/airtable';
+import { useDeals, useCreateDeal, useContacts } from '@/hooks/use-airtable';
+import type { AirtableRecord, DealFields, ContactFields } from '@/types/airtable';
+import { airtable } from '@/lib/airtable';
 import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals, createDealBuyers, getDealBuyers, deleteDealBuyers } from '@/lib/partner-deals';
 import type { PartnerDeal, PartnerDealBuyer } from '@/lib/partner-deals';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -978,6 +979,10 @@ function PartnerDealsSection({
       if (deal.school_name) fields.Org_Name = deal.school_name;
       if (deal.buyer_name) fields.Contact_Name = deal.buyer_name;
       if (deal.buyer_phone) fields.Contact_Phone = deal.buyer_phone;
+      // 대표 구매자 이메일
+      const primaryBuyer = dealBuyers[0];
+      if (primaryBuyer?.buyer_email) fields.Contact_Email = primaryBuyer.buyer_email;
+      else if (deal.buyer_email) fields.Contact_Email = deal.buyer_email;
       if (deal.plan_name) fields.Quote_Plan = deal.plan_name;
       if (deal.quantity) fields.Quote_Qty = deal.quantity;
       if (deal.payment_amount) fields.Final_Contract_Value = deal.payment_amount;
@@ -994,6 +999,33 @@ function PartnerDealsSection({
           plan_name: b.plan_name ?? undefined,
           is_primary: i === 0,
         }))).catch(e => console.warn('사용자 등록 실패:', e));
+      }
+      // 구매자 → 고객(Contacts) 등록 (기존 고객이면 스킵)
+      for (const b of dealBuyers) {
+        if (!b.buyer_name && !b.buyer_phone) continue;
+        try {
+          const phone = b.buyer_phone?.replace(/\D/g, '') ?? '';
+          let exists = false;
+          if (phone.length >= 9) {
+            const existing = await airtable.fetchAll<ContactFields>('01_Contacts', {
+              filterByFormula: `{phone_normalized}="${phone}"`,
+              maxRecords: '1',
+            });
+            exists = existing.length > 0;
+          }
+          if (!exists) {
+            await airtable.createRecord<ContactFields>('01_Contacts', {
+              Name: b.buyer_name ?? '',
+              Phone: b.buyer_phone ?? '',
+              phone_normalized: phone,
+              Email: b.buyer_email ?? '',
+              Org_Name: deal.school_name ?? '',
+              Lead_Stage: '구매',
+              Contact_Type: '구매고객',
+              Lead_Source: partnerName,
+            });
+          }
+        } catch (e) { console.warn('고객 등록 스킵:', b.buyer_name, e); }
       }
       await updatePartnerDeal(deal.id, { linked_deal_id: rec.id });
       setDeals(prev => prev.map(d => d.id === deal.id ? { ...d, linked_deal_id: rec.id } : d));
