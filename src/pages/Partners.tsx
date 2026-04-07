@@ -1236,15 +1236,24 @@ function PartnerDealsSection({
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">플랜</Label><Input value={df('plan_name')} onChange={e => setDialogForm(p => ({ ...p, plan_name: e.target.value }))} className="h-8 text-sm" /></div>
-              <div><Label className="text-xs">결제금액</Label><Input type="number" value={dfn('payment_amount') ?? ''} onChange={e => setDialogForm(p => ({ ...p, payment_amount: parseInt(e.target.value) || 0 }))} className="h-8 text-sm" /></div>
+              <div>
+                <Label className="text-xs">플랜</Label>
+                <Input value={df('plan_name')} onChange={e => setDialogForm(p => ({ ...p, plan_name: e.target.value }))} className="h-9 text-sm" />
+              </div>
+              <div>
+                <Label className="text-xs">결제금액</Label>
+                <Input type="number" value={dfn('payment_amount') ?? ''} onChange={e => setDialogForm(p => ({ ...p, payment_amount: parseInt(e.target.value) || 0 }))} className="h-9 text-sm" />
+              </div>
             </div>
             {(dfn('payment_amount') ?? 0) > 0 && (
               <div className="text-xs text-muted-foreground bg-muted/50 rounded px-3 py-2">
                 수수료 {calcCommission(dfn('payment_amount') ?? 0, commissionRate).commission.toLocaleString()}원 / 정산 {calcCommission(dfn('payment_amount') ?? 0, commissionRate).settlement.toLocaleString()}원
               </div>
             )}
-            <div><Label className="text-xs">비고</Label><Input value={df('remarks')} onChange={e => setDialogForm(p => ({ ...p, remarks: e.target.value }))} className="h-8 text-sm" /></div>
+            <div>
+              <Label className="text-xs">비고</Label>
+              <Input value={df('remarks')} onChange={e => setDialogForm(p => ({ ...p, remarks: e.target.value }))} className="h-9 text-sm" />
+            </div>
           </div>
           <div className="flex items-center justify-between pt-3 border-t">
             <div>
