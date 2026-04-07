@@ -17,7 +17,7 @@ import {
   Plus, Search, ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown,
   Paperclip, ExternalLink, Loader2, Upload, User, Building2, Phone, Mail,
   FileText, Receipt, Package, Pencil, Trash2, UserCheck, UserPlus, X, Users,
-  FileSpreadsheet, CheckCircle2, AlertCircle, FileDown,
+  FileSpreadsheet, CheckCircle2, AlertCircle, FileDown, Globe,
 } from 'lucide-react';
 import { airtable, AirtableRecord } from '@/lib/airtable';
 import { DealFields, ContactFields } from '@/types/airtable';
@@ -831,12 +831,13 @@ interface QuoteTab {
 }
 
 function DealForm({
-  initial, onSave, onCancel, saving, contacts, allDeals, initialContact, existingFiles, initialQuotes, draftKey,
+  initial, onSave, onCancel, saving, contacts, allDeals, initialContact, existingFiles, initialQuotes, initialLicenses, draftKey,
 }: {
   initial?: Partial<DealFields>;
   initialContact?: AirtableRecord<ContactFields>;
   existingFiles?: DealFileRecord[];
   initialQuotes?: DealQuote[];
+  initialLicenses?: DealLicenseRecord[];
   draftKey?: string;
   onSave: (fields: Partial<DealFields>, files: Record<string, File>, receiptFiles: File[], licenseFiles: File[], licenseContacts: LicenseContact[], contactToUpdate?: AirtableRecord<ContactFields>, removedFileIds?: string[], removedReceiptIds?: string[], removedLicenseIds?: string[], quoteTabs?: QuoteTab[], dealUsers?: DealUserInput[]) => void;
   onCancel: () => void;
@@ -902,7 +903,14 @@ function DealForm({
   const draftIsMeaningful = draft ? hasMeaningfulData(draft.fields ?? {}) : false;
   const [draftRestored, setDraftRestored] = useState(draftIsMeaningful);
 
-  const [f, setF] = useState<Partial<DealFields>>(draftIsMeaningful ? (draft?.fields ?? initial ?? {}) : (initial ?? {}));
+  const [f, setF] = useState<Partial<DealFields>>(() => {
+    const base = draftIsMeaningful ? (draft?.fields ?? initial ?? {}) : (initial ?? {});
+    // deal_licenses에서 이용권 필드 자동 채우기 (Airtable 필드가 비어있는 경우)
+    if (!base.License_Code_Count && initialLicenses && initialLicenses.length > 0) {
+      base.License_Code_Count = initialLicenses.length;
+    }
+    return base;
+  });
   const [phoneStatus, setPhoneStatus]       = useState<PhoneStatus | null>(null);
   const [showContactNotes, setShowContactNotes] = useState(false);
   const [pendingFiles, setPendingFiles]     = useState<Record<string, File>>({});
@@ -2006,6 +2014,39 @@ function DealForm({
               onRemoveStored={removeStoredLicenseFile}
             />
           </div>
+
+          {/* 기존 발급 이용권 */}
+          {initialLicenses && initialLicenses.length > 0 && (
+            <div className="col-span-2 rounded-lg border border-border overflow-hidden">
+              <div className="bg-teal-50 px-3 py-2 flex items-center gap-2 border-b border-border">
+                <Globe className="h-3.5 w-3.5 text-teal-600" />
+                <span className="text-xs font-medium text-teal-700">발급된 이용권 ({initialLicenses.length}건)</span>
+              </div>
+              <div className="max-h-40 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      {['코드', '담당자', '학교/기관', '전화번호', '기간', '상태'].map(h => (
+                        <th key={h} className="px-2.5 py-1.5 text-left font-medium text-muted-foreground">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {initialLicenses.map(lic => (
+                      <tr key={lic.id} className="border-t border-border">
+                        <td className="px-2.5 py-1.5 font-mono">{lic.coupon_code}</td>
+                        <td className="px-2.5 py-1.5">{lic.contact_name || '-'}</td>
+                        <td className="px-2.5 py-1.5">{lic.org_name || '-'}</td>
+                        <td className="px-2.5 py-1.5 text-muted-foreground">{lic.contact_phone || '-'}</td>
+                        <td className="px-2.5 py-1.5">{lic.duration}개월·{lic.user_count}명</td>
+                        <td className="px-2.5 py-1.5">{lic.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* 템플릿 파싱 결과 */}
           {parsingTemplate && (
@@ -3652,6 +3693,7 @@ export default function Deals() {
                 : undefined}
               existingFiles={editMode === 'edit' ? dealFiles : []}
               initialQuotes={editMode === 'edit' ? dealQuotes : []}
+              initialLicenses={editMode === 'edit' ? dealLicenses : []}
               draftKey={editMode === 'edit' ? `edit_${selected?.id}` : 'new'}
               onSave={handleSave}
               onCancel={handleCloseDialog}
