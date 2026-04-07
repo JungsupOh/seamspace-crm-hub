@@ -946,10 +946,15 @@ function DealForm({
     if (initialQuotes && initialQuotes.length > 0) {
       return initialQuotes.map(q => {
         let items = (q.items as QuoteLineItem[] | undefined) ?? [];
-        // items가 비어있으면 plan/duration에서 복원
+        // items가 비어있으면 저장된 단가로 복원 (표준 단가가 아닌 실제 단가 사용)
         if (items.length === 0 && q.plan && q.duration) {
           const lq = q.license_qty || (q.qty ? Math.ceil(q.qty / 40) : 1);
-          items = [makeItem(q.plan, q.duration, lq)];
+          const unitPrice = q.unit_price || 0;
+          items = [{
+            plan: q.plan, duration: q.duration, qty: lq,
+            unit_price: unitPrice, amount: unitPrice * lq,
+            s2b_number: getS2BNumber(q.plan, q.duration),
+          }];
         }
         return ({
         id: q.id, is_selected: q.is_selected,
@@ -962,11 +967,15 @@ function DealForm({
         discount_amount: q.discount_amount ?? 0,
       });});
     }
-    // 구형 딜: Airtable 필드에서 items 복원
+    // 구형 딜: Airtable 필드에서 items 복원 (실제 단가 사용)
     const legacyItems: QuoteLineItem[] = [];
     if (initial?.Quote_Plan && initial?.Unit_Price && initial?.License_Duration) {
       const lq = initial?.Quote_Qty ? Math.ceil(initial.Quote_Qty / 40) : 1;
-      legacyItems.push(makeItem(initial.Quote_Plan, initial.License_Duration, lq));
+      legacyItems.push({
+        plan: initial.Quote_Plan, duration: initial.License_Duration, qty: lq,
+        unit_price: initial.Unit_Price, amount: initial.Unit_Price * lq,
+        s2b_number: getS2BNumber(initial.Quote_Plan, initial.License_Duration),
+      });
     }
     return [{
       quote_number: initial?.Quote_Number, quote_date: initial?.Quote_Date,
