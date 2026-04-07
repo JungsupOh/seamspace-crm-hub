@@ -1047,28 +1047,35 @@ function DealForm({
     return `견적 ${idx + 1}`;
   };
 
-  // ── 사용자 로드 (편집 시 기존 사용자 / 추가 시 담당자로 초기화) ──
+  // ── 사용자 로드 (편집 시 DB에서 / 추가 시 담당자로 초기화) ──
   useEffect(() => {
     if (dealUsersLoaded) return;
-    if (initial && draftKey?.startsWith('edit_')) {
-      // 편집 모드: DB에서 사용자 로드
-      // draftKey가 edit_{id} 형태이므로 deal_id 추출 불가 - initial이 있으면 편집 모드
-      // 실제 deal_id는 부모에서 전달받을 수 없으므로, 별도 prop이 필요
-      // 여기서는 초기 담당자로 세팅하고 parent에서 로드하는 방식 사용
+    const dealId = draftKey?.startsWith('edit_') ? draftKey.slice(5) : null;
+    if (dealId) {
+      getDealUsers(dealId).then(users => {
+        if (users.length > 0) {
+          setDealUsers(users.map(u => ({
+            user_name: u.user_name, user_phone: u.user_phone, user_email: u.user_email,
+            student_count: u.student_count, month_count: u.month_count, plan_name: u.plan_name,
+            is_primary: u.is_primary,
+          })));
+        } else {
+          setDealUsers([{
+            user_name: initial?.Contact_Name, user_phone: initial?.Contact_Phone, user_email: initial?.Contact_Email,
+            student_count: 40, month_count: initial?.License_Duration, plan_name: initial?.Quote_Plan || '학급별', is_primary: true,
+          }]);
+        }
+        setDealUsersLoaded(true);
+      }).catch(() => setDealUsersLoaded(true));
+    } else {
+      if (dealUsers.length === 0) {
+        setDealUsers([{
+          user_name: initial?.Contact_Name, user_phone: initial?.Contact_Phone, user_email: initial?.Contact_Email,
+          student_count: 40, month_count: initial?.License_Duration, plan_name: initial?.Quote_Plan || '학급별', is_primary: true,
+        }]);
+      }
+      setDealUsersLoaded(true);
     }
-    // 담당자 기반 기본 사용자 세팅
-    if (dealUsers.length === 0) {
-      setDealUsers([{
-        user_name: initial?.Contact_Name,
-        user_phone: initial?.Contact_Phone,
-        user_email: initial?.Contact_Email,
-        student_count: 40,
-        month_count: initial?.License_Duration,
-        plan_name: initial?.Quote_Plan || '학급별',
-        is_primary: true,
-      }]);
-    }
-    setDealUsersLoaded(true);
   }, [initial, dealUsersLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 담당자 변경 시 primary 사용자 자동 업데이트
