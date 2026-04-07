@@ -803,7 +803,7 @@ async function parseLicenseTemplate(file: File): Promise<LicenseContact[]> {
 
 // ── 전화번호 조회 결과 ────────────────────────────
 interface PhoneStatus {
-  type: 'new' | 'existing';
+  type: 'new' | 'existing' | 'contact_only';
   name?: string;
   email?: string;
   dealCount: number;
@@ -1444,11 +1444,14 @@ function DealForm({
         const cn = c.fields.phone_normalized || normalizePhone(c.fields.Phone ?? '');
         return cn === norm;
       });
-      const dealCount = allDeals?.filter(d =>
-        normalizePhone(d.fields.Contact_Phone ?? '') === norm
-      ).length ?? 0;
+      // 현재 편집 중인 딜 제외하고 기존 딜 수 계산
+      const currentDealId = draftKey?.startsWith('edit_') ? draftKey.slice(5) : null;
+      const otherDeals = allDeals?.filter(d =>
+        normalizePhone(d.fields.Contact_Phone ?? '') === norm && d.id !== currentDealId
+      ) ?? [];
+      const dealCount = otherDeals.length;
       if (contactMatch || dealCount > 0) {
-        setPhoneStatus({ type: 'existing', name: contactMatch?.fields.Name, email: contactMatch?.fields.Email, dealCount, contactRecord: contactMatch });
+        setPhoneStatus({ type: dealCount > 0 ? 'existing' : 'contact_only', name: contactMatch?.fields.Name, email: contactMatch?.fields.Email, dealCount, contactRecord: contactMatch });
         if (!f.Contact_Name && contactMatch?.fields.Name) {
           setF(prev => ({
             ...prev,
@@ -1521,7 +1524,9 @@ function DealForm({
             <div className={`rounded-lg border text-xs overflow-hidden
               ${phoneStatus.type === 'existing'
                 ? 'bg-orange-50 border-orange-200 text-orange-700'
-                : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                : phoneStatus.type === 'contact_only'
+                  ? 'bg-blue-50 border-blue-200 text-blue-700'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
               <div className="flex items-center gap-2 px-3 py-2">
                 {phoneStatus.type === 'existing' ? (
                   <>
@@ -1529,7 +1534,7 @@ function DealForm({
                     <span className="flex-1">
                       <strong>재구매 고객</strong>
                       {phoneStatus.name && ` · ${phoneStatus.name}`}
-                      {phoneStatus.dealCount > 0 && ` · 기존 딜 ${phoneStatus.dealCount}건`}
+                      {` · 기존 딜 ${phoneStatus.dealCount}건`}
                     </span>
                     {phoneStatus.contactRecord?.fields.Notes && (
                       <button type="button"
@@ -1541,6 +1546,16 @@ function DealForm({
                     <button type="button" onClick={fillFromContact}
                       className="underline font-medium whitespace-nowrap hover:opacity-70">정보 불러오기</button>
                   </>
+                ) : phoneStatus.type === 'contact_only' ? (
+                  <>
+                    <UserCheck className="h-4 w-4 flex-shrink-0" />
+                    <span className="flex-1">
+                      <strong>등록 고객</strong>
+                      {phoneStatus.name && ` · ${phoneStatus.name}`}
+                    </span>
+                    <button type="button" onClick={fillFromContact}
+                      className="underline font-medium whitespace-nowrap hover:opacity-70">정보 불러오기</button>
+                  </>
                 ) : (
                   <>
                     <UserPlus className="h-4 w-4 flex-shrink-0" />
@@ -1549,7 +1564,7 @@ function DealForm({
                 )}
               </div>
               {/* 기존 고객 Notes 표시 */}
-              {phoneStatus.type === 'existing' && showContactNotes && phoneStatus.contactRecord?.fields.Notes && (
+              {(phoneStatus.type === 'existing' || phoneStatus.type === 'contact_only') && showContactNotes && phoneStatus.contactRecord?.fields.Notes && (
                 <div className="border-t border-orange-200 bg-orange-50/70 px-3 py-2 space-y-1 max-h-36 overflow-y-auto">
                   {phoneStatus.contactRecord.fields.Notes.split('\n').filter(Boolean).map((line, i) => {
                     const clean = line.replace(/\s*·rec\w+/, '');
