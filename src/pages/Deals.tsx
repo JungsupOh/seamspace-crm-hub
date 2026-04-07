@@ -845,16 +845,21 @@ function DealForm({
   allDeals?: AirtableRecord<DealFields>[];
 }) {
   // existingFiles(DB)로 슬롯별 파일 초기화 (receipt, license 제외)
-  // quote_tab_N 슬롯 → quote_file_{id}로 리매핑 (기존 저장분 호환)
+  // 구형 슬롯 → quote_file_{id}로 리매핑 (quote, quote_tab_N 호환)
   const initStoredFiles = (): Record<string, DealFileRecord> => {
     const result: Record<string, DealFileRecord> = {};
     for (const rec of existingFiles ?? []) {
       if (!rec.slot_key || rec.slot_key === 'receipt' || rec.slot_key === 'license') continue;
       let key = rec.slot_key;
+      // quote_tab_N → quote_file_{id}
       const tabMatch = key.match(/^quote_tab_(\d+)$/);
       if (tabMatch && initialQuotes) {
         const idx = Number(tabMatch[1]);
         if (initialQuotes[idx]?.id) key = `quote_file_${initialQuotes[idx].id}`;
+      }
+      // 구형 'quote' 슬롯 → 첫 번째 견적의 quote_file_{id}
+      if (key === 'quote' && initialQuotes?.[0]?.id) {
+        key = `quote_file_${initialQuotes[0].id}`;
       }
       result[key] = rec;
     }
@@ -939,16 +944,23 @@ function DealForm({
   const [localTabs, setLocalTabs] = useState<QuoteTab[]>(() => {
     if (draftIsMeaningful && draft?.tabs) return draft.tabs;
     if (initialQuotes && initialQuotes.length > 0) {
-      return initialQuotes.map(q => ({
+      return initialQuotes.map(q => {
+        let items = (q.items as QuoteLineItem[] | undefined) ?? [];
+        // items가 비어있으면 plan/duration에서 복원
+        if (items.length === 0 && q.plan && q.duration) {
+          const lq = q.license_qty || (q.qty ? Math.ceil(q.qty / 40) : 1);
+          items = [makeItem(q.plan, q.duration, lq)];
+        }
+        return ({
         id: q.id, is_selected: q.is_selected,
         quote_number: q.quote_number, quote_date: q.quote_date,
         plan: q.plan, qty: q.qty, license_qty: q.license_qty,
         duration: q.duration, unit_price: q.unit_price,
         final_value: q.final_value, supply_price: q.supply_price,
         tax_amount: q.tax_amount, notes: q.notes,
-        items: (q.items as QuoteLineItem[] | undefined) ?? [],
+        items,
         discount_amount: q.discount_amount ?? 0,
-      }));
+      });});
     }
     // 구형 딜: Airtable 필드에서 items 복원
     const legacyItems: QuoteLineItem[] = [];
