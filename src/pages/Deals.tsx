@@ -3293,20 +3293,27 @@ export default function Deals() {
         }
       }
 
-      // 재구매 고객 정보 업데이트 확인 다이얼로그 준비
+      // 고객 정보 업데이트 확인 다이얼로그 준비
       if (contactToUpdate) {
         const today = new Date().toISOString().split('T')[0];
         const planPart  = fields.Quote_Plan ?? '';
         const qtyPart   = fields.Quote_Qty ? `(${fields.Quote_Qty}명)` : '';
         const monthPart = fields.License_Duration ? ` ${fields.License_Duration}개월` : '';
-        const dealTag   = `·${dealId}`;
-        const newNoteLine = `[${today}] ${planPart}${qtyPart}${monthPart} 구매 ${dealTag}`.trim();
+        const newNoteLine = `[${today}] ${planPart}${qtyPart}${monthPart} 구매`.trim();
 
         const changes: { key: string; label: string; from: string; to: string; type: 'replace' | 'append' }[] = [];
 
-        if (contactToUpdate.fields.Lead_Stage !== '재구매') {
+        // 현재 딜 제외한 기존 딜 수로 재구매 판별
+        const contactPhone = normalizePhone(fields.Contact_Phone ?? '');
+        const otherDealCount = (allDeals ?? []).filter(d =>
+          normalizePhone(d.fields.Contact_Phone ?? '') === contactPhone && d.id !== dealId
+        ).length;
+        if (otherDealCount > 0 && contactToUpdate.fields.Lead_Stage !== '재구매') {
           changes.push({ key: 'Lead_Stage', label: '스테이지',
             from: contactToUpdate.fields.Lead_Stage ?? '(없음)', to: '재구매', type: 'replace' });
+        } else if (otherDealCount === 0 && contactToUpdate.fields.Lead_Stage !== '구매') {
+          changes.push({ key: 'Lead_Stage', label: '스테이지',
+            from: contactToUpdate.fields.Lead_Stage ?? '(없음)', to: '구매', type: 'replace' });
         }
         if (fields.Org_Name && fields.Org_Name !== contactToUpdate.fields.Org_Name) {
           changes.push({ key: 'Org_Name', label: '소속',
@@ -3318,7 +3325,7 @@ export default function Deals() {
         }
         // Notes는 항상 추가 (딜 라인)
         changes.push({ key: 'notes_append', label: '활동이력',
-          from: '(기존 이력 유지)', to: newNoteLine.replace(/\s*·rec\w+/, ''), type: 'append' });
+          from: '(기존 이력 유지)', to: newNoteLine, type: 'append' });
 
         if (changes.length > 0) {
           setPendingContactUpdate({
@@ -4184,10 +4191,7 @@ export default function Deals() {
             if (!pcu.selected.has(change.key)) continue;
             if (change.key === 'notes_append') {
               const prev = pcu.contact.fields.Notes ?? '';
-              const tag  = `·${pcu.dealId}`;
-              fieldsToUpdate.Notes = prev.includes(tag)
-                ? prev.split('\n').map(l => l.includes(tag) ? pcu.newNoteLine : l).join('\n')
-                : [pcu.newNoteLine, prev].filter(Boolean).join('\n');
+              fieldsToUpdate.Notes = [pcu.newNoteLine, prev].filter(Boolean).join('\n');
             } else {
               (fieldsToUpdate as Record<string, string>)[change.key] = change.to;
             }
