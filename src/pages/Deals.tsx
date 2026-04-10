@@ -3305,7 +3305,7 @@ export default function Deals() {
 
         // 현재 딜 제외한 기존 딜 수로 재구매 판별
         const contactPhone = normalizePhone(fields.Contact_Phone ?? '');
-        const otherDealCount = (allDeals ?? []).filter(d =>
+        const otherDealCount = (deals ?? []).filter(d =>
           normalizePhone(d.fields.Contact_Phone ?? '') === contactPhone && d.id !== dealId
         ).length;
         if (otherDealCount > 0 && contactToUpdate.fields.Lead_Stage !== '재구매') {
