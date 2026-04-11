@@ -44,6 +44,7 @@ export interface PartnerDeal {
   license_issue_date?: string;
   tax_invoice_date?: string;
   deposit_date?: string;
+  items?: Array<{ plan: string; duration: number; qty: number; unit_price: number; amount: number }>;
   remarks?: string;
   linked_deal_id?: string;
   created_at: string;
@@ -94,6 +95,22 @@ export async function updatePartnerDeal(
     body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
   });
   if (!res.ok) throw new Error(`파트너 딜 업데이트 실패: ${res.status}`);
+}
+
+/** CRM 딜 저장 시 연결된 파트너 딜의 이용권발급일·입금일 동기화 */
+export async function syncPartnerDealDates(
+  linkedDealId: string,
+  dates: { license_issue_date?: string; deposit_date?: string },
+): Promise<void> {
+  const updates: Record<string, string | undefined> = {};
+  if (dates.license_issue_date !== undefined) updates.license_issue_date = dates.license_issue_date || null as unknown as string;
+  if (dates.deposit_date !== undefined) updates.deposit_date = dates.deposit_date || null as unknown as string;
+  if (Object.keys(updates).length === 0) return;
+  await fetch(`${BASE_URL}?linked_deal_id=eq.${encodeURIComponent(linkedDealId)}`, {
+    method: 'PATCH',
+    headers: HEADERS,
+    body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
+  }).catch(() => {});
 }
 
 export async function deletePartnerDeal(id: string): Promise<void> {

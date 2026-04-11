@@ -28,6 +28,7 @@ import { generateQuotePdf, generateQuotePdfBlob } from '@/lib/generateQuotePdf';
 import { sendQuoteEmail } from '@/lib/email';
 import { QuoteLineItem, PLAN_LIST, DURATION_OPTIONS, makeItem, recommendItems, calcQuoteTotals, getS2BNumber } from '@/lib/pricing';
 import { notifyNewDeal } from '@/lib/telegram';
+import { syncPartnerDealDates } from '@/lib/partner-deals';
 import { getDealUsers, saveDealUsers, type DealUserInput } from '@/lib/deal-users';
 import { toast } from 'sonner';
 
@@ -3344,6 +3345,12 @@ export default function Deals() {
           await saveDealUsers(dealId, validUsers).catch(e => console.warn('사용자 저장 실패:', e));
         }
       }
+
+      // 연결된 파트너 딜에 이용권발급일·입금일 동기화
+      syncPartnerDealDates(dealId, {
+        license_issue_date: fields.License_Send_Date as string | undefined,
+        deposit_date: fields.Payment_Date as string | undefined,
+      });
 
       // 저장 성공 시 draft 삭제
       const dk = editMode === 'edit' ? `edit_${selected?.id}` : 'new';

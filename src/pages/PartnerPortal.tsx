@@ -8,10 +8,13 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Plus, Pencil, Trash2, Loader2, Search, X, Users } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Search, X, Users, Package } from 'lucide-react';
 import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, createDealBuyers, getDealBuyers } from '@/lib/partner-deals';
+import { notifyPartnerDeal } from '@/lib/telegram';
 import type { PartnerDeal, PartnerDealBuyer } from '@/lib/partner-deals';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
+import { PLAN_LIST, DURATION_OPTIONS, getUnitPrice } from '@/lib/pricing';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -30,12 +33,25 @@ interface BuyerInput {
   buyer_email: string;
   student_count: number;
   month_count: number | '';
-  plan_name: string;
 }
 
 const emptyBuyer = (): BuyerInput => ({
   buyer_name: '', buyer_phone: '', buyer_email: '',
-  student_count: 40, month_count: '', plan_name: '학급별',
+  student_count: 40, month_count: '',
+});
+
+interface ItemInput {
+  plan: string;
+  duration: number;
+  qty: number;
+  unit_price: number;
+  amount: number;
+}
+
+const emptyItem = (): ItemInput => ({
+  plan: '학급플랜', duration: 4, qty: 1,
+  unit_price: getUnitPrice('학급플랜', 4),
+  amount: getUnitPrice('학급플랜', 4),
 });
 
 export default function PartnerPortal() {
@@ -53,6 +69,7 @@ export default function PartnerPortal() {
   const [deleteDealTargetId, setDeleteDealTargetId] = useState<string | null>(null);
   const [addForm, setAddForm] = useState<Partial<PartnerDeal>>({});
   const [buyers, setBuyers] = useState<BuyerInput[]>([emptyBuyer()]);
+  const [items, setItems] = useState<ItemInput[]>([emptyItem()]);
   const [periodFilter, setPeriodFilter] = useState('this_month');
 
   // 학교 검색
@@ -161,10 +178,36 @@ export default function PartnerPortal() {
   const handleOpenAddDialog = () => {
     setAddForm({ quantity: 1 });
     setBuyers([emptyBuyer()]);
+    setItems([emptyItem()]);
     setSchoolQuery('');
     setSchoolResults([]);
     setShowSchoolDropdown(false);
     setAddDialogOpen(true);
+  };
+
+  // 품목 입력 핸들러
+  const itemsTotal = items.reduce((s, it) => s + it.amount, 0);
+  const updateItem = (idx: number, field: keyof ItemInput, value: string | number) => {
+    setItems(prev => prev.map((it, i) => {
+      if (i !== idx) return it;
+      const next = { ...it, [field]: value };
+      if (field === 'plan' || field === 'duration') {
+        next.unit_price = getUnitPrice(
+          field === 'plan' ? (value as string) : it.plan,
+          field === 'duration' ? (value as number) : it.duration,
+        );
+        next.amount = next.unit_price * next.qty;
+      }
+      if (field === 'qty') {
+        next.amount = next.unit_price * (value as number);
+      }
+      return next;
+    }));
+  };
+  const addItem = () => setItems(prev => [...prev, emptyItem()]);
+  const removeItem = (idx: number) => {
+    if (items.length <= 1) return;
+    setItems(prev => prev.filter((_, i) => i !== idx));
   };
 
   const handleAddSubmit = async () => {
@@ -178,9 +221,11 @@ export default function PartnerPortal() {
     setAdding(true);
     try {
       const seq = deals.length + 1;
-      const { commission, settlement } = calcCommission(addForm.payment_amount ?? 0, commissionRate);
-      // 첫 번째 구매자를 딜의 대표 구매자로 저장 (하위 호환)
+      const totalAmount = itemsTotal;
+      const { commission, settlement } = calcCommission(totalAmount, commissionRate);
       const firstBuyer = validBuyers[0];
+      // 품목에서 대표 플랜명 추출
+      const planSummary = items.map(it => it.plan).filter(Boolean).join(', ');
       const created = await createPartnerDeal({
         partner_id: partner.id,
         seq_number: seq,
@@ -189,11 +234,12 @@ export default function PartnerPortal() {
         buyer_name: firstBuyer.buyer_name || null,
         buyer_phone: firstBuyer.buyer_phone || null,
         buyer_email: firstBuyer.buyer_email || null,
-        plan_name: addForm.plan_name || null,
-        quantity: validBuyers.length,
-        payment_amount: addForm.payment_amount ?? 0,
+        plan_name: planSummary || null,
+        quantity: items.reduce((s, it) => s + it.qty, 0),
+        payment_amount: totalAmount,
         commission_amount: commission,
         settlement_amount: settlement,
+        items: items.map(it => ({ plan: it.plan, duration: it.duration, qty: it.qty, unit_price: it.unit_price, amount: it.amount })),
         remarks: addForm.remarks || null,
       });
       // 구매자 레코드 생성
@@ -203,13 +249,14 @@ export default function PartnerPortal() {
         buyer_email: b.buyer_email || undefined,
         student_count: b.student_count,
         month_count: b.month_count === '' ? undefined : b.month_count,
-        plan_name: b.plan_name || undefined,
         quantity: 1,
       })));
       setDeals(prev => [...prev, created]);
       setDealBuyersMap(prev => ({ ...prev, [created.id]: createdBuyers }));
       setAddDialogOpen(false);
       toast.success('딜이 추가되었습니다');
+      // 텔레그램 알림
+      notifyPartnerDeal(partner.name, addForm.school_name ?? '', firstBuyer.buyer_name ?? '', totalAmount);
     } catch { toast.error('추가 실패'); }
     finally { setAdding(false); }
   };
@@ -419,7 +466,7 @@ export default function PartnerPortal() {
           <DialogHeader>
             <DialogTitle>새 딜 추가</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 pt-2 overflow-y-auto flex-1">
+          <div className="space-y-4 pt-2 overflow-y-auto flex-1">
             {/* 계약일 */}
             <div>
               <Label className="text-xs">계약일</Label>
@@ -450,6 +497,71 @@ export default function PartnerPortal() {
                       <span className="text-xs text-muted-foreground ml-2">{s.kind} · {s.eduOffice}</span>
                     </button>
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* 품명 (상품 목록) */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-xs flex items-center gap-1">
+                  <Package className="h-3.5 w-3.5" />
+                  품명 ({items.length}건)
+                </Label>
+                <button onClick={addItem} className="text-xs text-primary hover:underline flex items-center gap-0.5">
+                  <Plus className="h-3 w-3" />추가
+                </button>
+              </div>
+              <div className="space-y-2">
+                {items.map((it, idx) => (
+                  <div key={idx} className="border border-border rounded-md p-2.5 bg-muted/30 relative">
+                    {items.length > 1 && (
+                      <button onClick={() => removeItem(idx)}
+                        className="absolute top-1.5 right-1.5 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive">
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                    <div className="grid grid-cols-[1fr_0.7fr_0.5fr_1fr] gap-2">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">구매플랜</span>
+                        <Select value={it.plan} onValueChange={v => updateItem(idx, 'plan', v)}>
+                          <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {PLAN_LIST.map(p => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">이용개월</span>
+                        <Select value={String(it.duration)} onValueChange={v => updateItem(idx, 'duration', Number(v))}>
+                          <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {DURATION_OPTIONS.map(d => <SelectItem key={d} value={String(d)} className="text-xs">{d}개월</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">수량</span>
+                        <Input type="number" min={1} value={it.qty} onChange={e => updateItem(idx, 'qty', parseInt(e.target.value) || 1)} className="h-7 text-xs text-center" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">금액</span>
+                        <div className="h-7 flex items-center text-xs font-medium tabular-nums text-right px-2 bg-muted rounded border border-border">
+                          {it.amount.toLocaleString()}원
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* 합계 */}
+              <div className="mt-2 flex items-center justify-between px-3 py-2 bg-primary/5 rounded-md border border-primary/20">
+                <span className="text-xs font-medium">결제금액 합계</span>
+                <span className="text-sm font-bold tabular-nums">{itemsTotal.toLocaleString()}원</span>
+              </div>
+              {itemsTotal > 0 && (
+                <div className="text-xs text-muted-foreground bg-muted/50 rounded px-3 py-1.5 mt-1">
+                  수수료 {calcCommission(itemsTotal, commissionRate).commission.toLocaleString()}원 / 정산 {calcCommission(itemsTotal, commissionRate).settlement.toLocaleString()}원
                 </div>
               )}
             </div>
@@ -488,18 +600,14 @@ export default function PartnerPortal() {
                         <Input value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" />
                       </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       <div>
                         <span className="text-[10px] text-muted-foreground">학생 수</span>
                         <Input type="number" value={b.student_count} onChange={e => updateBuyer(idx, 'student_count', parseInt(e.target.value) || 0)} className="h-7 text-xs" />
                       </div>
                       <div>
-                        <span className="text-[10px] text-muted-foreground">개월 수</span>
+                        <span className="text-[10px] text-muted-foreground">이용개월</span>
                         <Input type="number" value={b.month_count} onChange={e => updateBuyer(idx, 'month_count', parseInt(e.target.value) || '')} placeholder="12" className="h-7 text-xs" />
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-muted-foreground">플랜</span>
-                        <Input value={b.plan_name} onChange={e => updateBuyer(idx, 'plan_name', e.target.value)} className="h-7 text-xs" />
                       </div>
                     </div>
                   </div>
@@ -507,25 +615,10 @@ export default function PartnerPortal() {
               </div>
             </div>
 
-            {/* 결제 정보 */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">플랜</Label>
-                <Input value={(addForm.plan_name as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, plan_name: e.target.value }))} className="h-8 text-sm" />
-              </div>
-              <div>
-                <Label className="text-xs">결제금액</Label>
-                <Input type="number" value={addForm.payment_amount ?? ''} onChange={e => setAddForm(p => ({ ...p, payment_amount: parseInt(e.target.value) || 0 }))} className="h-8 text-sm" />
-              </div>
-            </div>
-            {(addForm.payment_amount ?? 0) > 0 && (
-              <div className="text-xs text-muted-foreground bg-muted/50 rounded px-3 py-2">
-                수수료 {calcCommission(addForm.payment_amount ?? 0, commissionRate).commission.toLocaleString()}원 / 정산 {calcCommission(addForm.payment_amount ?? 0, commissionRate).settlement.toLocaleString()}원
-              </div>
-            )}
+            {/* 비고 */}
             <div>
               <Label className="text-xs">비고</Label>
-              <Input value={(addForm.remarks as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, remarks: e.target.value }))} className="h-8 text-sm" />
+              <Input value={(addForm.remarks as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, remarks: e.target.value }))} className="h-8 text-sm" placeholder="특이사항 입력" />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t">
