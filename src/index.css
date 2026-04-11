@@ -113,6 +113,17 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
+  /* 텍스트 선택 색상 — 진한 파란색 대신 부드러운 톤 */
+  ::selection {
+    background: hsl(var(--primary) / 0.15);
+    color: hsl(var(--foreground));
+  }
+
+  /* date, select 등 네이티브 컨트롤 accent 색상 */
+  input, select {
+    accent-color: hsl(var(--primary));
+  }
 }
 
 @layer utilities {
