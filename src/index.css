@@ -124,6 +124,17 @@
   input, select {
     accent-color: hsl(var(--primary));
   }
+
+  /* date input 세그먼트(년/월/일) 포커스 시 부드러운 하이라이트 */
+  input[type="date"]::-webkit-datetime-edit-year-field:focus,
+  input[type="date"]::-webkit-datetime-edit-month-field:focus,
+  input[type="date"]::-webkit-datetime-edit-day-field:focus,
+  input[type="date"]::-webkit-datetime-edit-text:focus {
+    background: hsl(var(--primary) / 0.12);
+    color: hsl(var(--foreground));
+    border-radius: 2px;
+    outline: none;
+  }
 }
 
 @layer utilities {
