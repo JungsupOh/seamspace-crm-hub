@@ -462,7 +462,7 @@ export default function PartnerPortal() {
 
       {/* 딜 추가 모달 */}
       <Dialog open={addDialogOpen} onOpenChange={open => { if (!open) setAddDialogOpen(false); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col" onOpenAutoFocus={e => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>새 딜 추가</DialogTitle>
           </DialogHeader>
