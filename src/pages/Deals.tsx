@@ -1689,6 +1689,7 @@ function DealForm({
                   ${idx === activeTabIdx
                     ? 'bg-background border-border text-foreground font-medium -mb-px z-10'
                     : 'bg-transparent border-border/40 text-muted-foreground hover:bg-background/60'}`}>
+                {tab.is_selected && <span className="text-[9px] rounded-full px-1 py-0.5 bg-primary text-primary-foreground font-medium leading-none">확정</span>}
                 <span>{getTabLabel(tab, idx)}</span>
                 {localTabs.length > 1 && (
                   <span
@@ -1701,7 +1702,28 @@ function DealForm({
               className="px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground flex-shrink-0 mb-0.5">
               +
             </button>
-            <div className="ml-auto flex-shrink-0 mb-0.5 pr-1">
+            <div className="ml-auto flex-shrink-0 mb-0.5 pr-1 flex items-center gap-1.5">
+              {localTabs.length > 1 && !localTabs[activeTabIdx]?.is_selected && (
+                <button type="button" onClick={() => {
+                  setLocalTabs(prev => prev.map((t, i) => ({ ...t, is_selected: i === activeTabIdx })));
+                  // 확정된 견적의 금액을 딜 필드에 반영
+                  const tab = localTabs[activeTabIdx];
+                  if (tab?.final_value != null) {
+                    setF(prev => ({
+                      ...prev,
+                      Quote_Date: tab.quote_date, Quote_Plan: tab.plan,
+                      Quote_Qty: tab.qty, License_Duration: tab.duration,
+                      Unit_Price: tab.unit_price, Supply_Price: tab.supply_price,
+                      Tax_Amount: tab.tax_amount, Final_Contract_Value: tab.final_value,
+                      Quote_Number: tab.quote_number,
+                    }));
+                  }
+                  toast.success('이 견적을 딜 확정으로 선택했습니다');
+                }}
+                  className="text-[11px] px-2.5 py-1 rounded border border-primary/50 text-primary hover:bg-primary/10 transition-colors flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" />딜 확정
+                </button>
+              )}
               <button type="button" onClick={handleQuoteBatchPreview}
                 className="text-[11px] px-2.5 py-1 rounded border border-blue-400 text-blue-600 hover:bg-blue-50 transition-colors flex items-center gap-1">
                 <Mail className="h-3 w-3" />모두 발송
@@ -3290,6 +3312,16 @@ export default function Deals() {
           const newRows = licenseRows.filter(r => !existingCodes.has(r.coupon_code));
           if (newRows.length > 0) {
             await saveDealLicenses(newRows).catch(e => console.warn('deal_licenses 저장 실패:', e));
+            // 이용권 코드 발급 시 발급일 자동 설정 + 스테이지 변경
+            const autoUpdates: Partial<DealFields> = {};
+            if (!fields.License_Send_Date) autoUpdates.License_Send_Date = today;
+            if (!fields.Deal_Stage || !['입금대기', '입금완료'].includes(fields.Deal_Stage)) {
+              autoUpdates.Deal_Stage = '이용권 발송완료';
+            }
+            if (Object.keys(autoUpdates).length > 0) {
+              await updateDeal.mutateAsync({ id: dealId, fields: autoUpdates }).catch(() => {});
+              setSelected(prev => prev ? { ...prev, fields: { ...prev.fields, ...autoUpdates } } : null);
+            }
           }
         }
       }
