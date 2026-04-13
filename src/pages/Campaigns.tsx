@@ -478,6 +478,12 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
 }
 
 // ── 통합 리드 행 타입 (campaign_leads + orphan campaign_licenses) ──
+// customerTier: 이 참여자가 이번 캠페인에 들어오기 *이전* 상태
+//   'new'        — 처음 심스페이스를 접함
+//   'retrial'    — 다른 캠페인에서 체험권 받은 이력 있음
+//   'purchased'  — 실제 구매한 고객 (VIP)
+type CustomerTier = 'new' | 'retrial' | 'purchased';
+
 interface ParticipantRow {
   id: string;                             // lead id or license id
   origin: 'form' | 'manual';              // form = 공개 폼, manual = 수동 체험권 등록
@@ -492,7 +498,7 @@ interface ParticipantRow {
   source?: string;
   source_etc?: string;
   status: '신규' | '발송완료' | '실패' | '제외';
-  is_existing_customer?: boolean;
+  customerTier: CustomerTier;
   created_at: string;
   // 재발송용 — 이미 발송된 경우에만 존재
   coupon_code?: string;
@@ -515,6 +521,41 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     queryKey: ['campaign_licenses', campaign.id],
     queryFn: () => getCampaignLicenses(campaign.id),
   });
+  // 전체 캠페인별 라이선스 + 구매고객 contacts 로드 (이력 판별용)
+  //   phone(normalized) → { otherCampaignTrial: boolean, purchased: boolean }
+  //   otherCampaignTrial: 현재 캠페인 *외* 다른 캠페인에서 체험권 수령 이력 있는지
+  const { data: historyMap } = useQuery({
+    queryKey: ['campaign_history_phones', campaign.id],
+    queryFn: async (): Promise<Map<string, { otherCampaignTrial: boolean; purchased: boolean }>> => {
+      const map = new Map<string, { otherCampaignTrial: boolean; purchased: boolean }>();
+      const [allLicsRes, purchasedRes] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?select=contact_phone,campaign_id`, { headers: HEADERS }),
+        fetch(`${SUPABASE_URL}/rest/v1/contacts?contact_type=eq.${encodeURIComponent('구매고객')}&select=phone_normalized`, { headers: HEADERS }),
+      ]);
+      const allLics: { contact_phone?: string; campaign_id?: string }[] = allLicsRes.ok ? await allLicsRes.json() : [];
+      const purchased: { phone_normalized?: string }[] = purchasedRes.ok ? await purchasedRes.json() : [];
+      if (Array.isArray(allLics)) {
+        allLics.forEach(l => {
+          const p = (l.contact_phone ?? '').replace(/\D/g, '');
+          if (!p) return;
+          const entry = map.get(p) ?? { otherCampaignTrial: false, purchased: false };
+          if (l.campaign_id && l.campaign_id !== campaign.id) entry.otherCampaignTrial = true;
+          map.set(p, entry);
+        });
+      }
+      if (Array.isArray(purchased)) {
+        purchased.forEach(c => {
+          const p = c.phone_normalized ?? '';
+          if (!p) return;
+          const entry = map.get(p) ?? { otherCampaignTrial: false, purchased: false };
+          entry.purchased = true;
+          map.set(p, entry);
+        });
+      }
+      return map;
+    },
+    staleTime: 1000 * 60 * 2,
+  });
 
   const isLoading = leadsLoading || licensesLoading;
 
@@ -526,8 +567,19 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     (licenses ?? []).forEach(lic => {
       if (lic.lead_id) licensesByLeadId.set(lic.lead_id, lic);
     });
+    // 참여자별 customerTier 계산
+    //   purchased > retrial > new 우선순위
+    const tierOf = (phoneNorm: string): CustomerTier => {
+      if (!phoneNorm) return 'new';
+      const h = historyMap?.get(phoneNorm);
+      if (!h) return 'new';
+      if (h.purchased) return 'purchased';
+      if (h.otherCampaignTrial) return 'retrial';
+      return 'new';
+    };
     (leads ?? []).forEach(l => {
       const lic = licensesByLeadId.get(l.id);
+      const phoneNorm = l.phone_normalized || l.phone.replace(/\D/g, '');
       rows.push({
         id: `lead:${l.id}`,
         origin: 'form',
@@ -536,13 +588,13 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
         school_name: l.school_name,
         school_kind: l.school_kind,
         phone: l.phone,
-        phone_normalized: l.phone_normalized,
+        phone_normalized: phoneNorm,
         email: l.email,
         position: l.position,
         source: l.source,
         source_etc: l.source_etc,
         status: l.status,
-        is_existing_customer: l.is_existing_customer,
+        customerTier: tierOf(phoneNorm),
         created_at: l.created_at,
         coupon_code: lic?.coupon_code,
         duration: lic?.duration,
@@ -550,14 +602,16 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
       });
     });
     (licenses ?? []).filter(lic => !lic.lead_id).forEach(lic => {
+      const phoneNorm = (lic.contact_phone ?? '').replace(/\D/g, '');
       rows.push({
         id: `license:${lic.id}`,
         origin: 'manual',
         name: lic.contact_name ?? '-',
         school_name: lic.org_name,
         phone: lic.contact_phone ?? '',
-        phone_normalized: (lic.contact_phone ?? '').replace(/\D/g, ''),
+        phone_normalized: phoneNorm,
         status: '발송완료',
+        customerTier: tierOf(phoneNorm),
         created_at: lic.created_at,
         coupon_code: lic.coupon_code,
         duration: lic.duration,
@@ -578,7 +632,7 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
   };
 
   const toggleSelectAll = () => {
-    const selectable = participants.filter(p => p.origin === 'form' && p.status === '신규' && !p.is_existing_customer);
+    const selectable = participants.filter(p => p.origin === 'form' && p.status === '신규' && p.customerTier === 'new');
     if (selectedIds.size === selectable.length && selectable.length > 0) {
       setSelectedIds(new Set());
     } else {
@@ -687,10 +741,10 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
   const newCount = participants.filter(p => p.status === '신규').length;
   const sentCount = participants.filter(p => p.status === '발송완료').length;
   // 발송 가능: form 출처 + 신규 + 기존고객 아님
-  const selectableCount = participants.filter(p => p.origin === 'form' && p.status === '신규' && !p.is_existing_customer).length;
+  const selectableCount = participants.filter(p => p.origin === 'form' && p.status === '신규' && p.customerTier === 'new').length;
 
   const selectAllNew = () => {
-    const selectable = participants.filter(p => p.origin === 'form' && p.status === '신규' && !p.is_existing_customer);
+    const selectable = participants.filter(p => p.origin === 'form' && p.status === '신규' && p.customerTier === 'new');
     setSelectedIds(new Set(selectable.map(p => p.id)));
   };
 
@@ -777,7 +831,7 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
             </thead>
             <tbody className="divide-y divide-border">
               {participants.map(p => {
-                const canSelect = p.origin === 'form' && p.status === '신규' && !p.is_existing_customer;
+                const canSelect = p.origin === 'form' && p.status === '신규' && p.customerTier === 'new';
                 const statusColor = p.status === '발송완료' ? 'bg-teal-100 text-teal-700'
                   : p.status === '실패' ? 'bg-red-100 text-red-700'
                   : p.status === '제외' ? 'bg-slate-100 text-slate-500'
@@ -793,8 +847,12 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
                     </td>
                     <td className="p-2 font-medium">
                       {p.name}
-                      {p.is_existing_customer && (
-                        <span className="ml-1.5 inline-block bg-amber-100 text-amber-700 px-1 py-0.5 rounded text-[10px]">기존</span>
+                      {p.customerTier === 'purchased' ? (
+                        <span className="ml-1.5 inline-block bg-emerald-100 text-emerald-700 px-1 py-0.5 rounded text-[10px] font-semibold">구매고객</span>
+                      ) : p.customerTier === 'retrial' ? (
+                        <span className="ml-1.5 inline-block bg-amber-100 text-amber-700 px-1 py-0.5 rounded text-[10px]">재신청</span>
+                      ) : (
+                        <span className="ml-1.5 inline-block bg-blue-50 text-blue-700 px-1 py-0.5 rounded text-[10px]">신규</span>
                       )}
                     </td>
                     <td className="p-2">
