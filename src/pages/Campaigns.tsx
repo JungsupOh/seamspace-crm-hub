@@ -12,7 +12,9 @@ import { DataTableSkeleton } from '@/components/DataTableSkeleton';
 import {
   Plus, ChevronDown, ChevronRight, ArrowRight, ExternalLink,
   Calendar, Users, CheckCircle2, XCircle, Clock, Trash2, Upload,
+  Link2, Copy, QrCode, Image as ImageIcon, Loader2,
 } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 
@@ -198,12 +200,29 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
     name:        initial?.name        ?? '',
     title:       initial?.title       ?? '',
     description: initial?.description ?? '',
+    image_url:   initial?.image_url   ?? '',
     start_date:  initial?.start_date  ?? '',
     end_date:    initial?.end_date    ?? '',
     status:      (initial?.status     ?? 'active') as Campaign['status'],
   });
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const f = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }));
+
+  const handleImageUpload = async (file: File) => {
+    setUploading(true);
+    try {
+      const url = await uploadCampaignImage(file);
+      f('image_url', url);
+      toast.success('이미지 업로드됨');
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
 
   const save = useMutation({
     mutationFn: async () => {
@@ -233,6 +252,31 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
           <div className="space-y-1.5">
             <Label className="text-xs">공개 폼 제목 <span className="text-muted-foreground">(사용자 노출)</span></Label>
             <Input value={form.title} onChange={e => f('title', e.target.value)} placeholder="예: 2026 봄학기 심스페이스 체험 신청" className="h-9" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">공개 폼 이미지</Label>
+            <div className="flex items-start gap-2">
+              {form.image_url ? (
+                <div className="relative group">
+                  <img src={form.image_url} alt="캠페인 이미지" className="w-20 h-20 object-cover rounded border border-border" />
+                  <button type="button" onClick={() => f('image_url', '')}
+                    className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ) : (
+                <button type="button" disabled={uploading} onClick={() => fileRef.current?.click()}
+                  className="w-20 h-20 border-2 border-dashed border-border rounded flex items-center justify-center hover:border-primary/50 transition-colors disabled:opacity-50">
+                  {uploading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : <ImageIcon className="h-5 w-5 text-muted-foreground" />}
+                </button>
+              )}
+              <div className="flex-1 text-xs text-muted-foreground pt-1">
+                공개 폼 상단에 표시됩니다. 권장 크기: 600×600px 이상.<br />
+                JPG, PNG, WebP (5MB 이하)
+              </div>
+              <input ref={fileRef} type="file" accept="image/*" className="hidden"
+                onChange={e => { const file = e.target.files?.[0]; if (file) handleImageUpload(file); }} />
+            </div>
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">설명</Label>
@@ -271,6 +315,19 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
 // 공개 폼 slug 생성 — 8자리 랜덤 해시
 function generateSlug(): string {
   return Math.random().toString(36).slice(2, 10);
+}
+
+// 캠페인 이미지 업로드 (Supabase Storage)
+async function uploadCampaignImage(file: File): Promise<string> {
+  const ext = file.name.split('.').pop() || 'png';
+  const path = `${crypto.randomUUID()}.${ext}`;
+  const r = await fetch(`${SUPABASE_URL}/storage/v1/object/campaign-images/${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': file.type },
+    body: file,
+  });
+  if (!r.ok) throw new Error('이미지 업로드 실패');
+  return `${SUPABASE_URL}/storage/v1/object/public/campaign-images/${path}`;
 }
 
 // ── AddLicenseRow ─────────────────────────────────
@@ -587,8 +644,59 @@ function CampaignCard({ campaign, convertedPhones, onEdit, onDelete, canEdit }: 
 
       {/* 펼쳐진 수신자 목록 */}
       {expanded && (
-        <div className="border-t border-border px-4 pb-4 pt-2">
+        <div className="border-t border-border px-4 pb-4 pt-2 space-y-3">
+          {campaign.slug && <CampaignShareSection campaign={campaign} />}
           <CampaignDetail campaign={campaign} convertedPhones={convertedPhones} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 공개 폼 URL + QR 섹션
+function CampaignShareSection({ campaign }: { campaign: Campaign }) {
+  const [qrOpen, setQrOpen] = useState(false);
+  const formUrl = `${window.location.origin}/c/${campaign.slug}`;
+  const qrCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  const copyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(formUrl);
+      toast.success('URL 복사됨');
+    } catch { toast.error('복사 실패'); }
+  };
+
+  const downloadQR = () => {
+    const canvas = qrCanvasRef.current;
+    if (!canvas) return;
+    const link = document.createElement('a');
+    link.download = `campaign_qr_${campaign.slug}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  };
+
+  return (
+    <div className="rounded-lg bg-muted/20 border border-border px-3 py-2.5 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <Link2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="text-xs font-mono text-muted-foreground truncate">{formUrl}</span>
+        </div>
+        <div className="flex gap-1 shrink-0">
+          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={copyUrl}>
+            <Copy className="h-3 w-3 mr-1" />URL 복사
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setQrOpen(p => !p)}>
+            <QrCode className="h-3 w-3 mr-1" />QR {qrOpen ? '닫기' : '보기'}
+          </Button>
+        </div>
+      </div>
+      {qrOpen && (
+        <div className="flex flex-col items-center gap-2 py-3 bg-background rounded border border-border">
+          <QRCodeCanvas ref={qrCanvasRef} value={formUrl} size={180} level="M" includeMargin={true} />
+          <Button size="sm" variant="outline" className="h-7 px-3 text-xs" onClick={downloadQR}>
+            QR 이미지 다운로드
+          </Button>
         </div>
       )}
     </div>

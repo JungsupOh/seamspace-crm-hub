@@ -10,6 +10,7 @@ import Contacts from "./pages/Contacts";
 import Deals from "./pages/Deals";
 import Partners from "./pages/Partners";
 import Campaigns from "./pages/Campaigns";
+import CampaignForm from "./pages/CampaignForm";
 import Licenses from "./pages/Licenses";
 import PartnerPortal from "./pages/PartnerPortal";
 import Upload from "./pages/Upload";
@@ -122,6 +123,8 @@ function AppRoutes() {
     <Routes>
       {/* Public routes */}
       <Route path="/login" element={<Login />} />
+      {/* 공개 캠페인 신청 폼 — 로그인 불필요 */}
+      <Route path="/c/:slug" element={<CampaignForm />} />
       <Route path="/order" element={<Order />} />
       <Route path="/order/complete" element={<OrderComplete />} />
       <Route path="/order/fail" element={<OrderFail />} />
