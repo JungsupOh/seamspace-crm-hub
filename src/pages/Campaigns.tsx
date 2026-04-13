@@ -117,13 +117,21 @@ async function getCampaignLicenses(campaignId: string): Promise<CampaignLicense[
   return r.json();
 }
 
-async function addCampaignLicense(row: Omit<CampaignLicense, 'id' | 'created_at'>): Promise<void> {
+async function addCampaignLicense(row: Omit<CampaignLicense, 'id' | 'created_at'>): Promise<CampaignLicense> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
     method: 'POST',
-    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    headers: { ...HEADERS, Prefer: 'return=representation' },
     body: JSON.stringify(row),
   });
-  if (!r.ok) throw new Error('추가 실패');
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.message || `라이선스 저장 실패 (${r.status})`);
+  }
+  const inserted = await r.json();
+  if (!Array.isArray(inserted) || inserted.length === 0) {
+    throw new Error('라이선스 저장 응답이 비어있음 — INSERT 실패 가능성');
+  }
+  return inserted[0];
 }
 
 async function deleteCampaignLicense(id: string): Promise<void> {
