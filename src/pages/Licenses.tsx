@@ -344,16 +344,24 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
       // 3. 수신자 고객 자동 등록 (전화번호가 있고 발송 성공한 경우)
       if (updated[i].status === 'done' && updated[i].contact_phone) {
         try {
+          const normPhone = updated[i].contact_phone.replace(/\D/g, '');
+          // phone_normalized 기준으로 기존 연락처 조회 (고객 DB 검색과 동일한 키)
           const existing = await airtable.fetchAll<ContactFields>('01_Contacts', {
-            filterByFormula: `{Phone} = "${updated[i].contact_phone.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`,
+            filterByFormula: `{phone_normalized} = "${normPhone}"`,
             maxRecords: '1',
           });
           if (existing.length === 0) {
             await airtable.createRecord<ContactFields>('01_Contacts', {
-              Name:         updated[i].contact_name || undefined,
-              Phone:        updated[i].contact_phone,
-              Org_Name:     updated[i].org_name || undefined,
-              Lead_Source:  'mDiary 이용권',
+              Name:             updated[i].contact_name || undefined,
+              Phone:            updated[i].contact_phone,
+              phone_normalized: normPhone,
+              Org_Name:         updated[i].org_name || undefined,
+              Lead_Source:      'mDiary 이용권',
+            });
+          } else if (!existing[0].fields.phone_normalized) {
+            // 기존 레코드에 phone_normalized가 없으면 백필
+            await airtable.updateRecord<ContactFields>('01_Contacts', existing[0].id, {
+              phone_normalized: normPhone,
             });
           }
         } catch { /* 고객 등록 실패는 무시 */ }
