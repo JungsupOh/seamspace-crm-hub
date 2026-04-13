@@ -110,16 +110,16 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [sendType, setSendType] = useState<SendType>('buyer');
   const [selectedDealId, setSelectedDealId] = useState('');
-  const [selectedEventId, setSelectedEventId] = useState('');
+  const [selectedCampaignId, setSelectedCampaignId] = useState('');
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [running, setRunning] = useState(false);
   const [dealSearch, setDealSearch] = useState('');
   const [dealDropOpen, setDealDropOpen] = useState(false);
-  const [eventSearch, setEventSearch] = useState('');
+  const [campaignSearch, setCampaignSearch] = useState('');
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 체험권 중복 체크: 고객 DB + 이력 (Airtable + deal_licenses + event_licenses)
+  // 체험권 중복 체크: 고객 DB + 이력 (Airtable + deal_licenses + campaign_licenses)
   type ContactHistory = {
     name: string;
     lead_stage?: string;
@@ -129,17 +129,17 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
   const { data: contactHistoryMap } = useQuery({
     queryKey: ['contacts_history'],
     queryFn: async () => {
-      const [contacts, dealLics, eventLics, eventsRes] = await Promise.all([
+      const [contacts, dealLics, campaignLics, campaignsRes] = await Promise.all([
         airtable.fetchAll<ContactFields>('01_Contacts'),
         fetch(`${SUPABASE_URL}/rest/v1/deal_licenses?select=contact_phone,org_name,status,created_at`,
           { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }).then(r => r.json()) as Promise<{ contact_phone: string; org_name: string; status: string; created_at: string }[]>,
-        fetch(`${SUPABASE_URL}/rest/v1/event_licenses?select=contact_phone,org_name,status,created_at,event_id`,
-          { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }).then(r => r.json()) as Promise<{ contact_phone: string; org_name: string; status: string; created_at: string; event_id: string }[]>,
-        fetch(`${SUPABASE_URL}/rest/v1/events?select=id,name`,
+        fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?select=contact_phone,org_name,status,created_at,campaign_id`,
+          { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }).then(r => r.json()) as Promise<{ contact_phone: string; org_name: string; status: string; created_at: string; campaign_id: string }[]>,
+        fetch(`${SUPABASE_URL}/rest/v1/campaigns?select=id,name`,
           { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }).then(r => r.json()) as Promise<{ id: string; name: string }[]>,
       ]);
 
-      const eventNameMap = new Map(eventsRes.map(e => [e.id, e.name]));
+      const campaignNameMap = new Map(campaignsRes.map(c => [c.id, c.name]));
       const norm = (p: string) => p.replace(/\D/g, '');
 
       const map = new Map<string, ContactHistory>();
@@ -157,11 +157,11 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
         if (entry) entry.licenses.push({ type: '구매', label: l.org_name || '딜', date: l.created_at.slice(0, 10), status: l.status });
       });
 
-      eventLics.forEach(l => {
+      campaignLics.forEach(l => {
         if (!l.contact_phone) return;
         const key = norm(l.contact_phone);
         const entry = map.get(key);
-        if (entry) entry.licenses.push({ type: '체험', label: eventNameMap.get(l.event_id) || l.org_name || '이벤트', date: l.created_at.slice(0, 10), status: l.status });
+        if (entry) entry.licenses.push({ type: '체험', label: campaignNameMap.get(l.campaign_id) || l.org_name || '캠페인', date: l.created_at.slice(0, 10), status: l.status });
       });
 
       return map;
@@ -215,11 +215,11 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
     e.target.value = '';
   };
 
-  // 이벤트 목록
-  const { data: events } = useQuery({
-    queryKey: ['events'],
+  // 캠페인 목록
+  const { data: campaigns } = useQuery({
+    queryKey: ['campaigns'],
     queryFn: async () => {
-      const r = await fetch(`${SUPABASE_URL}/rest/v1/events?select=id,name,status,start_date,end_date,description&order=start_date.desc.nullslast`, {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?select=id,name,status,start_date,end_date,description&order=start_date.desc.nullslast`, {
         headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY },
       });
       return r.json() as Promise<{ id: string; name: string; status: string; start_date?: string; end_date?: string; description?: string }[]>;
@@ -227,7 +227,7 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
     enabled: open,
   });
 
-  const selectedEvent = events?.find(e => e.id === selectedEventId);
+  const selectedCampaign = campaigns?.find(c => c.id === selectedCampaignId);
 
   const selectedDeal = deals?.find(d => d.id === selectedDealId);
 
@@ -292,7 +292,7 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
     setRunning(true);
     const baseName = sendType === 'buyer'
       ? (selectedDeal?.fields.Org_Name || '')
-      : (selectedEvent?.name || '');
+      : (selectedCampaign?.name || '');
     const suffix = sendType === 'buyer' ? '구매이용권' : '체험이용권';
 
     const updated = [...recipients];
@@ -371,12 +371,12 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
       }
     }
 
-    // 3b. event_licenses 저장 (체험 타입이고 eventId 있을 때)
-    if (sendType === 'trial' && selectedEventId) {
+    // 3b. campaign_licenses 저장 (체험 타입이고 campaignId 있을 때)
+    if (sendType === 'trial' && selectedCampaignId) {
       const rows = updated
         .filter(r => r.status === 'done')
         .map(r => ({
-          event_id:      selectedEventId,
+          campaign_id:   selectedCampaignId,
           coupon_code:   r.coupon_code,
           contact_name:  r.contact_name,
           contact_phone: r.contact_phone,
@@ -386,7 +386,7 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
           status:        '대기',
         }));
       if (rows.length > 0) {
-        await fetch(`${SUPABASE_URL}/rest/v1/event_licenses`, {
+        await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${SUPABASE_KEY}`,
@@ -396,8 +396,8 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
           },
           body: JSON.stringify(rows),
         }).catch(() => {});
-        qc.invalidateQueries({ queryKey: ['event_licenses', selectedEventId] });
-        qc.invalidateQueries({ queryKey: ['events'] });
+        qc.invalidateQueries({ queryKey: ['campaign_licenses', selectedCampaignId] });
+        qc.invalidateQueries({ queryKey: ['campaigns'] });
       }
     }
 
@@ -408,11 +408,11 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
   const errorCount = recipients.filter(r => r.status === 'error').length;
   const fileName = sendType === 'buyer'
     ? `이용권발송_${selectedDeal?.fields.Org_Name || '딜'}`
-    : `체험권발송_${selectedEvent?.name || '이벤트'}`;
+    : `체험권발송_${selectedCampaign?.name || '캠페인'}`;
 
   const reset = () => {
     setStep(1); setSendType('buyer'); setSelectedDealId('');
-    setSelectedEventId(''); setRecipients([]); setRunning(false);
+    setSelectedCampaignId(''); setRecipients([]); setRunning(false);
     setDealSearch(''); setDealDropOpen(false);
   };
 
@@ -449,7 +449,7 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
                       ${sendType === t ? 'border-primary bg-primary/5' : 'border-border hover:border-border/80'}`}>
                     <p className="font-semibold">{t === 'buyer' ? '딜 발송' : '체험 발송'}</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {t === 'buyer' ? '딜과 연결된 구매이용권 발송 (TS_6206)' : '이벤트/무료체험 쿠폰 발송 (TS_6205)'}
+                      {t === 'buyer' ? '딜과 연결된 구매이용권 발송 (TS_6206)' : '캠페인/무료체험 쿠폰 발송 (TS_6205)'}
                     </p>
                   </button>
                 ))}
@@ -527,48 +527,48 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
               </div>
             ) : (
               <div className="space-y-2">
-                <Label className="text-xs">이벤트 선택</Label>
+                <Label className="text-xs">캠페인 선택</Label>
                 <div className="relative">
                     <Input
-                      value={eventSearch || (selectedEventId
-                        ? (events?.find(e => e.id === selectedEventId)?.name ?? '')
+                      value={campaignSearch || (selectedCampaignId
+                        ? (campaigns?.find(c => c.id === selectedCampaignId)?.name ?? '')
                         : '')}
-                      onChange={e => { setEventSearch(e.target.value); if (!e.target.value) setSelectedEventId(''); }}
-                      onFocus={() => { if (!eventSearch) setEventSearch(' '); }}
-                      onBlur={() => setTimeout(() => setEventSearch(''), 200)}
-                      placeholder="이벤트 검색..."
+                      onChange={e => { setCampaignSearch(e.target.value); if (!e.target.value) setSelectedCampaignId(''); }}
+                      onFocus={() => { if (!campaignSearch) setCampaignSearch(' '); }}
+                      onBlur={() => setTimeout(() => setCampaignSearch(''), 200)}
+                      placeholder="캠페인 검색..."
                       className="h-9 text-sm pr-8"
                     />
                     <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                    {eventSearch && (
+                    {campaignSearch && (
                       <div className="absolute z-[9999] top-full left-0 right-0 mt-1 rounded-lg border bg-background shadow-xl overflow-hidden">
                         <div className="max-h-64 overflow-y-auto divide-y divide-border">
                           {(() => {
-                            const q = eventSearch.trim().toLowerCase();
-                            const filtered = (events ?? [])
-                              .filter(e => !q || e.name.toLowerCase().includes(q) || (e.description ?? '').toLowerCase().includes(q))
+                            const q = campaignSearch.trim().toLowerCase();
+                            const filtered = (campaigns ?? [])
+                              .filter(c => !q || c.name.toLowerCase().includes(q) || (c.description ?? '').toLowerCase().includes(q))
                               .slice(0, 30);
                             if (filtered.length === 0) return (
                               <div className="px-3 py-3 text-xs text-muted-foreground text-center">검색 결과가 없습니다.</div>
                             );
-                            return filtered.map(e => (
-                              <button key={e.id} type="button"
+                            return filtered.map(c => (
+                              <button key={c.id} type="button"
                                 onMouseDown={ev => {
                                   ev.preventDefault(); // blur 방지
-                                  setSelectedEventId(e.id);
-                                  setEventSearch('');
+                                  setSelectedCampaignId(c.id);
+                                  setCampaignSearch('');
                                 }}
-                                className={`w-full text-left px-3 py-2.5 hover:bg-muted/60 transition-colors ${selectedEventId === e.id ? 'bg-primary/5' : ''}`}>
+                                className={`w-full text-left px-3 py-2.5 hover:bg-muted/60 transition-colors ${selectedCampaignId === c.id ? 'bg-primary/5' : ''}`}>
                                 <div className="flex items-center gap-2">
-                                  <span className="font-medium text-sm">{e.name}</span>
-                                  {e.status && (
-                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${e.status === 'active' ? 'bg-teal-100 text-teal-700' : 'bg-muted text-muted-foreground'}`}>{e.status}</span>
+                                  <span className="font-medium text-sm">{c.name}</span>
+                                  {c.status && (
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.status === 'active' ? 'bg-teal-100 text-teal-700' : 'bg-muted text-muted-foreground'}`}>{c.status}</span>
                                   )}
                                 </div>
-                                {(e.start_date || e.end_date || e.description) && (
+                                {(c.start_date || c.end_date || c.description) && (
                                   <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
-                                    {e.start_date && <span>{e.start_date.slice(0, 10)}{e.end_date ? ` ~ ${e.end_date.slice(0, 10)}` : ''}</span>}
-                                    {e.description && <span className="truncate max-w-[220px]">· {e.description}</span>}
+                                    {c.start_date && <span>{c.start_date.slice(0, 10)}{c.end_date ? ` ~ ${c.end_date.slice(0, 10)}` : ''}</span>}
+                                    {c.description && <span className="truncate max-w-[220px]">· {c.description}</span>}
                                   </div>
                                 )}
                               </button>
@@ -578,25 +578,25 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
                       </div>
                     )}
                   </div>
-                {selectedEventId && !eventSearch && (
+                {selectedCampaignId && !campaignSearch && (
                   <p className="text-xs text-teal-700 flex items-center gap-1.5">
                     <CheckCircle2 className="h-3.5 w-3.5" />
                     {(() => {
-                      const e = events?.find(x => x.id === selectedEventId);
-                      return <>이벤트 선택됨: {e?.name}{e?.start_date && <span className="text-muted-foreground ml-1">({e.start_date.slice(0, 10)})</span>}</>;
+                      const c = campaigns?.find(x => x.id === selectedCampaignId);
+                      return <>캠페인 선택됨: {c?.name}{c?.start_date && <span className="text-muted-foreground ml-1">({c.start_date.slice(0, 10)})</span>}</>;
                     })()}
                   </p>
                 )}
-                {(!events || events.length === 0) && (
+                {(!campaigns || campaigns.length === 0) && (
                   <p className="text-xs text-muted-foreground">
-                    이벤트가 없습니다. <a href="/trials" className="text-primary underline">이벤트 관리</a>에서 먼저 추가하세요.
+                    캠페인이 없습니다. <a href="/campaigns" className="text-primary underline">캠페인 관리</a>에서 먼저 추가하세요.
                   </p>
                 )}
               </div>
             )}
 
             <Button className="w-full"
-              disabled={sendType === 'buyer' ? !selectedDealId : !selectedEventId}
+              disabled={sendType === 'buyer' ? !selectedDealId : !selectedCampaignId}
               onClick={() => setStep(2)}>
               다음 — 수신자 확인
             </Button>

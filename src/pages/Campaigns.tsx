@@ -22,19 +22,23 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
 
 // ── Types ─────────────────────────────────────────
-interface Event {
+interface Campaign {
   id: string;
   name: string;
+  title?: string;
   description?: string;
+  image_url?: string;
+  slug?: string;
   start_date?: string;
   end_date?: string;
   status: 'active' | 'ended' | 'planned';
   created_at: string;
 }
 
-interface EventLicense {
+interface CampaignLicense {
   id: string;
-  event_id: string;
+  campaign_id: string;
+  lead_id?: string;
   coupon_code?: string;
   contact_name?: string;
   contact_phone?: string;
@@ -47,50 +51,50 @@ interface EventLicense {
 }
 
 // ── API ───────────────────────────────────────────
-async function getEvents(): Promise<Event[]> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/events?order=created_at.desc`, { headers: HEADERS });
-  if (!r.ok) throw new Error('이벤트 조회 실패');
+async function getCampaigns(): Promise<Campaign[]> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?order=created_at.desc`, { headers: HEADERS });
+  if (!r.ok) throw new Error('캠페인 조회 실패');
   return r.json();
 }
 
-async function createEvent(e: Omit<Event, 'id' | 'created_at'>): Promise<Event> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/events`, {
+async function createCampaign(c: Omit<Campaign, 'id' | 'created_at'>): Promise<Campaign> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns`, {
     method: 'POST',
     headers: { ...HEADERS, Prefer: 'return=representation' },
-    body: JSON.stringify(e),
+    body: JSON.stringify(c),
   });
-  if (!r.ok) throw new Error('이벤트 생성 실패');
+  if (!r.ok) throw new Error('캠페인 생성 실패');
   const data = await r.json();
   return data[0];
 }
 
-async function updateEvent(id: string, e: Partial<Event>): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/events?id=eq.${id}`, {
+async function updateCampaign(id: string, c: Partial<Campaign>): Promise<void> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${id}`, {
     method: 'PATCH',
     headers: HEADERS,
-    body: JSON.stringify(e),
+    body: JSON.stringify(c),
   });
-  if (!r.ok) throw new Error('이벤트 수정 실패');
+  if (!r.ok) throw new Error('캠페인 수정 실패');
 }
 
-async function deleteEvent(id: string): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/events?id=eq.${id}`, {
+async function deleteCampaign(id: string): Promise<void> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${id}`, {
     method: 'DELETE', headers: HEADERS,
   });
-  if (!r.ok) throw new Error('이벤트 삭제 실패');
+  if (!r.ok) throw new Error('캠페인 삭제 실패');
 }
 
-async function getEventLicenses(eventId: string): Promise<EventLicense[]> {
+async function getCampaignLicenses(campaignId: string): Promise<CampaignLicense[]> {
   const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/event_licenses?event_id=eq.${eventId}&order=created_at.asc`,
+    `${SUPABASE_URL}/rest/v1/campaign_licenses?campaign_id=eq.${campaignId}&order=created_at.asc`,
     { headers: HEADERS }
   );
-  if (!r.ok) throw new Error('이벤트 이용권 조회 실패');
+  if (!r.ok) throw new Error('캠페인 이용권 조회 실패');
   return r.json();
 }
 
-async function addEventLicense(row: Omit<EventLicense, 'id' | 'created_at'>): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/event_licenses`, {
+async function addCampaignLicense(row: Omit<CampaignLicense, 'id' | 'created_at'>): Promise<void> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
     method: 'POST',
     headers: { ...HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify(row),
@@ -98,22 +102,22 @@ async function addEventLicense(row: Omit<EventLicense, 'id' | 'created_at'>): Pr
   if (!r.ok) throw new Error('추가 실패');
 }
 
-async function deleteEventLicense(id: string): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/event_licenses?id=eq.${id}`, {
+async function deleteCampaignLicense(id: string): Promise<void> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?id=eq.${id}`, {
     method: 'DELETE', headers: HEADERS,
   });
   if (!r.ok) throw new Error('삭제 실패');
 }
 
-async function updateEventLicense(id: string, patch: Partial<EventLicense>): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/event_licenses?id=eq.${id}`, {
+async function updateCampaignLicense(id: string, patch: Partial<CampaignLicense>): Promise<void> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?id=eq.${id}`, {
     method: 'PATCH', headers: HEADERS, body: JSON.stringify(patch),
   });
   if (!r.ok) throw new Error('수정 실패');
 }
 
-async function bulkAddEventLicenses(rows: Omit<EventLicense, 'id' | 'created_at'>[]): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/event_licenses`, {
+async function bulkAddCampaignLicenses(rows: Omit<CampaignLicense, 'id' | 'created_at'>[]): Promise<void> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
     method: 'POST',
     headers: { ...HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify(rows),
@@ -125,7 +129,7 @@ async function bulkAddEventLicenses(rows: Omit<EventLicense, 'id' | 'created_at'
 interface ParsedRow {
   org_name?: string; contact_name?: string; contact_phone?: string;
   coupon_code?: string; duration?: string; user_count?: string;
-  service_expire_at?: string; status?: EventLicense['status'];
+  service_expire_at?: string; status?: CampaignLicense['status'];
 }
 
 function parseExcel(file: File): Promise<ParsedRow[]> {
@@ -144,7 +148,7 @@ function parseExcel(file: File): Promise<ParsedRow[]> {
           duration:          r['기간(개월)']  || '1',
           user_count:        r['인원']        || '10',
           service_expire_at: r['만료일']      || undefined,
-          status:            (['대기','사용중','만료'].includes(r['상태']) ? r['상태'] : '대기') as EventLicense['status'],
+          status:            (['대기','사용중','만료'].includes(r['상태']) ? r['상태'] : '대기') as CampaignLicense['status'],
         }));
         resolve(rows);
       } catch {
@@ -167,48 +171,49 @@ async function getConvertedPhones(): Promise<Set<string>> {
 }
 
 // ── Status badge ──────────────────────────────────
-const EVENT_STATUS: Record<Event['status'], { label: string; color: string }> = {
+const CAMPAIGN_STATUS: Record<Campaign['status'], { label: string; color: string }> = {
   active:  { label: '진행중', color: 'bg-teal-100 text-teal-700' },
   ended:   { label: '종료',   color: 'bg-slate-100 text-slate-500' },
   planned: { label: '예정',   color: 'bg-blue-100 text-blue-700' },
 };
 
-const LIC_STATUS: Record<EventLicense['status'], { label: string; color: string }> = {
+const LIC_STATUS: Record<CampaignLicense['status'], { label: string; color: string }> = {
   대기:   { label: '대기',   color: 'bg-slate-100 text-slate-600' },
   사용중: { label: '사용중', color: 'bg-teal-100 text-teal-700' },
   만료:   { label: '만료',   color: 'bg-orange-100 text-orange-700' },
 };
 
-// ── EventFormDialog ───────────────────────────────
-interface EventFormDialogProps {
+// ── CampaignFormDialog ────────────────────────────
+interface CampaignFormDialogProps {
   open: boolean;
   onClose: () => void;
-  initial?: Event;
+  initial?: Campaign;
 }
 
-function EventFormDialog({ open, onClose, initial }: EventFormDialogProps) {
+function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps) {
   const qc = useQueryClient();
   const isEdit = !!initial;
 
   const [form, setForm] = useState({
     name:        initial?.name        ?? '',
+    title:       initial?.title       ?? '',
     description: initial?.description ?? '',
     start_date:  initial?.start_date  ?? '',
     end_date:    initial?.end_date    ?? '',
-    status:      (initial?.status     ?? 'active') as Event['status'],
+    status:      (initial?.status     ?? 'active') as Campaign['status'],
   });
 
   const f = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }));
 
   const save = useMutation({
     mutationFn: async () => {
-      const body = { ...form, status: form.status as Event['status'] };
-      if (isEdit) await updateEvent(initial!.id, body);
-      else        await createEvent(body);
+      const body = { ...form, status: form.status as Campaign['status'] };
+      if (isEdit) await updateCampaign(initial!.id, body);
+      else        await createCampaign({ ...body, slug: generateSlug() });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['events'] });
-      toast.success(isEdit ? '이벤트 수정됨' : '이벤트 생성됨');
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+      toast.success(isEdit ? '캠페인 수정됨' : '캠페인 생성됨');
       onClose();
     },
     onError: (e) => toast.error(String(e)),
@@ -218,12 +223,16 @@ function EventFormDialog({ open, onClose, initial }: EventFormDialogProps) {
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEdit ? '이벤트 수정' : '이벤트 추가'}</DialogTitle>
+          <DialogTitle>{isEdit ? '캠페인 수정' : '캠페인 추가'}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <Label className="text-xs">이벤트명 *</Label>
+            <Label className="text-xs">캠페인명 * <span className="text-muted-foreground">(내부 관리용)</span></Label>
             <Input value={form.name} onChange={e => f('name', e.target.value)} placeholder="예: 2026 봄학기 체험" className="h-9" />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">공개 폼 제목 <span className="text-muted-foreground">(사용자 노출)</span></Label>
+            <Input value={form.title} onChange={e => f('title', e.target.value)} placeholder="예: 2026 봄학기 심스페이스 체험 신청" className="h-9" />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">설명</Label>
@@ -251,7 +260,7 @@ function EventFormDialog({ open, onClose, initial }: EventFormDialogProps) {
             </Select>
           </div>
           <Button className="w-full" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? '저장 중...' : (isEdit ? '수정 저장' : '이벤트 추가')}
+            {save.isPending ? '저장 중...' : (isEdit ? '수정 저장' : '캠페인 추가')}
           </Button>
         </div>
       </DialogContent>
@@ -259,21 +268,26 @@ function EventFormDialog({ open, onClose, initial }: EventFormDialogProps) {
   );
 }
 
+// 공개 폼 slug 생성 — 8자리 랜덤 해시
+function generateSlug(): string {
+  return Math.random().toString(36).slice(2, 10);
+}
+
 // ── AddLicenseRow ─────────────────────────────────
-const EMPTY_ROW = { org_name: '', contact_name: '', contact_phone: '', coupon_code: '', duration: '1', user_count: '10', status: '대기' as EventLicense['status'], service_expire_at: '' };
+const EMPTY_ROW = { org_name: '', contact_name: '', contact_phone: '', coupon_code: '', duration: '1', user_count: '10', status: '대기' as CampaignLicense['status'], service_expire_at: '' };
 
 interface AddLicenseRowProps {
-  eventId: string;
+  campaignId: string;
   onDone: () => void;
 }
-function AddLicenseRow({ eventId, onDone }: AddLicenseRowProps) {
+function AddLicenseRow({ campaignId, onDone }: AddLicenseRowProps) {
   const qc = useQueryClient();
   const [row, setRow] = useState({ ...EMPTY_ROW });
   const r = (k: keyof typeof row, v: string) => setRow(p => ({ ...p, [k]: v }));
 
   const save = useMutation({
-    mutationFn: () => addEventLicense({
-      event_id: eventId,
+    mutationFn: () => addCampaignLicense({
+      campaign_id: campaignId,
       org_name: row.org_name || undefined,
       contact_name: row.contact_name || undefined,
       contact_phone: row.contact_phone || undefined,
@@ -284,8 +298,8 @@ function AddLicenseRow({ eventId, onDone }: AddLicenseRowProps) {
       service_expire_at: row.service_expire_at || undefined,
     }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['event_licenses', eventId] });
-      qc.invalidateQueries({ queryKey: ['events'] });
+      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaignId] });
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
       toast.success('추가됨');
       onDone();
     },
@@ -313,17 +327,17 @@ function AddLicenseRow({ eventId, onDone }: AddLicenseRowProps) {
   );
 }
 
-// ── EventDetail ───────────────────────────────────
-interface EventDetailProps {
-  event: Event;
+// ── CampaignDetail ────────────────────────────────
+interface CampaignDetailProps {
+  campaign: Campaign;
   convertedPhones: Set<string>;
 }
 
-function EventDetail({ event, convertedPhones }: EventDetailProps) {
+function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editRow, setEditRow] = useState<Partial<EventLicense>>({});
+  const [editRow, setEditRow] = useState<Partial<CampaignLicense>>({});
   const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -332,9 +346,9 @@ function EventDetail({ event, convertedPhones }: EventDetailProps) {
     try {
       const rows = await parseExcel(file);
       if (rows.length === 0) { toast.error('데이터가 없습니다'); return; }
-      await bulkAddEventLicenses(rows.map(r => ({ ...r, event_id: event.id, status: r.status ?? '대기' })));
-      qc.invalidateQueries({ queryKey: ['event_licenses', event.id] });
-      qc.invalidateQueries({ queryKey: ['events'] });
+      await bulkAddCampaignLicenses(rows.map(r => ({ ...r, campaign_id: campaign.id, status: r.status ?? '대기' })));
+      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
       toast.success(`${rows.length}건 가져오기 완료`);
     } catch (e) {
       toast.error(String(e));
@@ -345,27 +359,27 @@ function EventDetail({ event, convertedPhones }: EventDetailProps) {
   };
 
   const { data: licenses, isLoading } = useQuery({
-    queryKey: ['event_licenses', event.id],
-    queryFn: () => getEventLicenses(event.id),
+    queryKey: ['campaign_licenses', campaign.id],
+    queryFn: () => getCampaignLicenses(campaign.id),
   });
 
   const normalize = (p?: string) => (p ?? '').replace(/\D/g, '');
   const isConverted = (phone?: string) => phone ? convertedPhones.has(normalize(phone)) : false;
 
   const delMut = useMutation({
-    mutationFn: deleteEventLicense,
+    mutationFn: deleteCampaignLicense,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['event_licenses', event.id] });
-      qc.invalidateQueries({ queryKey: ['events'] });
+      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
       toast.success('삭제됨');
     },
     onError: () => toast.error('삭제 실패'),
   });
 
   const editMut = useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: Partial<EventLicense> }) => updateEventLicense(id, patch),
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<CampaignLicense> }) => updateCampaignLicense(id, patch),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['event_licenses', event.id] });
+      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
       setEditingId(null);
       toast.success('수정됨');
     },
@@ -396,13 +410,13 @@ function EventDetail({ event, convertedPhones }: EventDetailProps) {
       </div>
 
       {/* 추가 폼 */}
-      {adding && <AddLicenseRow eventId={event.id} onDone={() => setAdding(false)} />}
+      {adding && <AddLicenseRow campaignId={campaign.id} onDone={() => setAdding(false)} />}
 
       {/* 목록 */}
       {(!licenses || licenses.length === 0) && !adding ? (
         <div className="py-6 text-center text-sm text-muted-foreground">
           발송된 체험권이 없습니다.<br />
-          <span className="text-xs">위 "수신자 추가" 버튼으로 기존 발송 내역을 등록하거나,<br />이용권 관리 → 이용권 발송 → 체험 발송에서 이 이벤트로 발송하세요.</span>
+          <span className="text-xs">위 "수신자 추가" 버튼으로 기존 발송 내역을 등록하거나,<br />이용권 관리 → 이용권 발송 → 체험 발송에서 이 캠페인으로 발송하세요.</span>
         </div>
       ) : licenses?.map(lic => {
         const converted = isConverted(lic.contact_phone);
@@ -412,7 +426,7 @@ function EventDetail({ event, convertedPhones }: EventDetailProps) {
         const isEditing = editingId === lic.id;
 
         if (isEditing) {
-          const er = (k: keyof EventLicense, v: string) => setEditRow(p => ({ ...p, [k]: v }));
+          const er = (k: keyof CampaignLicense, v: string) => setEditRow(p => ({ ...p, [k]: v }));
           return (
             <div key={lic.id} className="grid grid-cols-12 gap-1.5 items-center px-2 py-2 rounded-lg border-2 border-dashed border-amber-400/50 bg-amber-50/30">
               <Input defaultValue={lic.org_name} onChange={e => er('org_name', e.target.value)}
@@ -498,21 +512,21 @@ function EventDetail({ event, convertedPhones }: EventDetailProps) {
   );
 }
 
-// ── EventCard ─────────────────────────────────────
-interface EventCardProps {
-  event: Event;
+// ── CampaignCard ──────────────────────────────────
+interface CampaignCardProps {
+  campaign: Campaign;
   convertedPhones: Set<string>;
-  onEdit: (e: Event) => void;
+  onEdit: (c: Campaign) => void;
   onDelete: (id: string) => void;
   canEdit: boolean;
 }
 
-function EventCard({ event, convertedPhones, onEdit, onDelete, canEdit }: EventCardProps) {
+function CampaignCard({ campaign, convertedPhones, onEdit, onDelete, canEdit }: CampaignCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   const { data: licenses } = useQuery({
-    queryKey: ['event_licenses', event.id],
-    queryFn: () => getEventLicenses(event.id),
+    queryKey: ['campaign_licenses', campaign.id],
+    queryFn: () => getCampaignLicenses(campaign.id),
   });
 
   const normalize = (p?: string) => (p ?? '').replace(/\D/g, '');
@@ -522,7 +536,7 @@ function EventCard({ event, convertedPhones, onEdit, onDelete, canEdit }: EventC
   const converted  = licenses?.filter(l => convertedPhones.has(normalize(l.contact_phone))).length ?? 0;
   const convRate   = total > 0 ? Math.round((converted / total) * 100) : 0;
 
-  const statusMeta = EVENT_STATUS[event.status];
+  const statusMeta = CAMPAIGN_STATUS[campaign.status];
 
   return (
     <div className="surface-card ring-container overflow-hidden">
@@ -537,19 +551,19 @@ function EventCard({ event, convertedPhones, onEdit, onDelete, canEdit }: EventC
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold">{event.name}</span>
+            <span className="font-semibold">{campaign.name}</span>
             <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${statusMeta.color}`}>
               {statusMeta.label}
             </span>
           </div>
-          {(event.start_date || event.end_date) && (
+          {(campaign.start_date || campaign.end_date) && (
             <div className="flex items-center gap-1 mt-0.5 text-xs text-muted-foreground">
               <Calendar className="h-3 w-3" />
-              {event.start_date ?? '?'} ~ {event.end_date ?? '?'}
+              {campaign.start_date ?? '?'} ~ {campaign.end_date ?? '?'}
             </div>
           )}
-          {event.description && (
-            <p className="text-xs text-muted-foreground mt-0.5">{event.description}</p>
+          {campaign.description && (
+            <p className="text-xs text-muted-foreground mt-0.5">{campaign.description}</p>
           )}
         </div>
 
@@ -564,9 +578,9 @@ function EventCard({ event, convertedPhones, onEdit, onDelete, canEdit }: EventC
         {/* 수정/삭제 */}
         {canEdit && (
           <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => onEdit(event)}>수정</Button>
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => onEdit(campaign)}>수정</Button>
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-red-500 hover:text-red-600 hover:bg-red-50"
-              onClick={() => onDelete(event.id)}>삭제</Button>
+              onClick={() => onDelete(campaign.id)}>삭제</Button>
           </div>
         )}
       </div>
@@ -574,7 +588,7 @@ function EventCard({ event, convertedPhones, onEdit, onDelete, canEdit }: EventC
       {/* 펼쳐진 수신자 목록 */}
       {expanded && (
         <div className="border-t border-border px-4 pb-4 pt-2">
-          <EventDetail event={event} convertedPhones={convertedPhones} />
+          <CampaignDetail campaign={campaign} convertedPhones={convertedPhones} />
         </div>
       )}
     </div>
@@ -600,17 +614,17 @@ function Stat({ icon, label, value, accent }: {
 }
 
 // ── Main ──────────────────────────────────────────
-export default function Trials() {
+export default function Campaigns() {
   const { canEdit } = useAuth();
   const qc = useQueryClient();
   const [formOpen, setFormOpen]   = useState(false);
-  const [editTarget, setEditTarget] = useState<Event | undefined>();
+  const [editTarget, setEditTarget] = useState<Campaign | undefined>();
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
-  const { data: events, isLoading } = useQuery({
-    queryKey: ['events'],
-    queryFn: getEvents,
+  const { data: campaigns, isLoading } = useQuery({
+    queryKey: ['campaigns'],
+    queryFn: getCampaigns,
   });
 
   const { data: convertedPhones = new Set<string>() } = useQuery({
@@ -620,10 +634,10 @@ export default function Trials() {
   });
 
   const del = useMutation({
-    mutationFn: deleteEvent,
+    mutationFn: deleteCampaign,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['events'] });
-      toast.success('이벤트 삭제됨');
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+      toast.success('캠페인 삭제됨');
     },
     onError: () => toast.error('삭제 실패'),
   });
@@ -639,12 +653,12 @@ export default function Trials() {
     setDeleteTargetId(null);
   };
 
-  const activeCount  = events?.filter(e => e.status === 'active').length ?? 0;
-  const plannedCount = events?.filter(e => e.status === 'planned').length ?? 0;
+  const activeCount  = campaigns?.filter(c => c.status === 'active').length ?? 0;
+  const plannedCount = campaigns?.filter(c => c.status === 'planned').length ?? 0;
 
   if (isLoading) return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">이벤트(무료체험) 관리</h1>
+      <h1 className="text-2xl font-semibold">캠페인</h1>
       <DataTableSkeleton columns={4} />
     </div>
   );
@@ -654,16 +668,16 @@ export default function Trials() {
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">이벤트(무료체험) 관리</h1>
+          <h1 className="text-2xl font-semibold">캠페인</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            전체 {events?.length ?? 0}개
+            전체 {campaigns?.length ?? 0}개
             {activeCount > 0   && <span className="ml-2 text-teal-600">· 진행중 {activeCount}개</span>}
             {plannedCount > 0  && <span className="ml-2 text-blue-600">· 예정 {plannedCount}개</span>}
           </p>
         </div>
         {canEdit && (
           <Button size="sm" onClick={() => { setEditTarget(undefined); setFormOpen(true); }}>
-            <Plus className="h-4 w-4 mr-1.5" />이벤트 추가
+            <Plus className="h-4 w-4 mr-1.5" />캠페인 추가
           </Button>
         )}
       </div>
@@ -671,22 +685,22 @@ export default function Trials() {
       {/* 안내 */}
       <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-700">
         체험권 발송은 <strong>이용권 관리 → 이용권 발송 → 체험 발송</strong>에서 진행합니다.
-        여기서는 이벤트별 현황 및 전환 추적을 확인하세요.
+        여기서는 캠페인별 현황 및 전환 추적을 확인하세요.
       </div>
 
-      {/* 이벤트 목록 */}
-      {(!events || events.length === 0) ? (
+      {/* 캠페인 목록 */}
+      {(!campaigns || campaigns.length === 0) ? (
         <div className="surface-card ring-container py-16 text-center text-muted-foreground text-sm">
-          등록된 이벤트가 없습니다. 이벤트 추가 버튼으로 새 이벤트를 만드세요.
+          등록된 캠페인이 없습니다. 캠페인 추가 버튼으로 새 캠페인을 만드세요.
         </div>
       ) : (
         <div className="space-y-3">
-          {events.map(ev => (
-            <EventCard
-              key={ev.id}
-              event={ev}
+          {campaigns.map(c => (
+            <CampaignCard
+              key={c.id}
+              campaign={c}
               convertedPhones={convertedPhones}
-              onEdit={e => { setEditTarget(e); setFormOpen(true); }}
+              onEdit={camp => { setEditTarget(camp); setFormOpen(true); }}
               onDelete={handleDelete}
               canEdit={canEdit}
             />
@@ -694,19 +708,19 @@ export default function Trials() {
         </div>
       )}
 
-      {/* 이벤트 생성/수정 다이얼로그 */}
-      <EventFormDialog
+      {/* 캠페인 생성/수정 다이얼로그 */}
+      <CampaignFormDialog
         open={formOpen}
         onClose={() => { setFormOpen(false); setEditTarget(undefined); }}
         initial={editTarget}
       />
 
-      {/* 이벤트 삭제 확인 */}
+      {/* 캠페인 삭제 확인 */}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>이벤트 삭제</AlertDialogTitle>
-            <AlertDialogDescription>이벤트와 모든 체험권 기록이 삭제됩니다. 계속할까요?</AlertDialogDescription>
+            <AlertDialogTitle>캠페인 삭제</AlertDialogTitle>
+            <AlertDialogDescription>캠페인과 모든 체험권 기록이 삭제됩니다. 계속할까요?</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>취소</AlertDialogCancel>

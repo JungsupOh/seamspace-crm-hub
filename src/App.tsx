@@ -9,7 +9,7 @@ import Index from "./pages/Index";
 import Contacts from "./pages/Contacts";
 import Deals from "./pages/Deals";
 import Partners from "./pages/Partners";
-import Trials from "./pages/Trials";
+import Campaigns from "./pages/Campaigns";
 import Licenses from "./pages/Licenses";
 import PartnerPortal from "./pages/PartnerPortal";
 import Upload from "./pages/Upload";
@@ -178,15 +178,17 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/trials"
+        path="/campaigns"
         element={
           <RequireAuth>
             <AppLayout>
-              <Trials />
+              <Campaigns />
             </AppLayout>
           </RequireAuth>
         }
       />
+      {/* 레거시 경로 redirect */}
+      <Route path="/trials" element={<Navigate to="/campaigns" replace />} />
       <Route
         path="/partner"
         element={

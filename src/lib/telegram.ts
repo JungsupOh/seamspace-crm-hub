@@ -42,3 +42,25 @@ export function notifyPartnerDeal(partnerName: string, schoolName: string, buyer
     `👤 ${buyerName || '(미입력)'}${amountStr}`
   );
 }
+
+// ── 캠페인 리드 유입 알림 ──────────────────────────────
+export function notifyCampaignLead(params: {
+  campaignName: string;
+  schoolName?: string;
+  name: string;
+  phone: string;
+  position?: string;
+  source?: string;
+  isExistingCustomer?: boolean;
+}): void {
+  const { campaignName, schoolName, name, phone, position, source, isExistingCustomer } = params;
+  const existingTag = isExistingCustomer ? `\n⚠️ 기존 고객` : '';
+  const positionStr = position ? `\n💼 ${position}` : '';
+  const sourceStr = source ? `\n📍 경로: ${source}` : '';
+  sendTelegramNotification(
+    `🎯 <b>캠페인 리드 유입</b>\n\n` +
+    `📋 ${campaignName}\n` +
+    `🏫 ${schoolName || '(미입력)'}\n` +
+    `👤 ${name} / ${phone}${positionStr}${sourceStr}${existingTag}`
+  );
+}
