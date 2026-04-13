@@ -477,17 +477,80 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   );
 }
 
-// ── 리드 탭 ──────────────────────────────────────
+// ── 통합 리드 행 타입 (campaign_leads + orphan campaign_licenses) ──
+interface ParticipantRow {
+  id: string;                             // lead id or license id
+  origin: 'form' | 'manual';              // form = 공개 폼, manual = 수동 체험권 등록
+  leadRef?: CampaignLead;                 // origin=form인 경우 원본
+  name: string;
+  school_name?: string;
+  school_kind?: string;
+  phone: string;
+  phone_normalized?: string;
+  email?: string;
+  position?: string;
+  source?: string;
+  source_etc?: string;
+  status: '신규' | '발송완료' | '실패' | '제외';
+  is_existing_customer?: boolean;
+  created_at: string;
+}
+
+// ── 리드 탭 — 캠페인 참여자 통합 뷰 ───────────────────
 function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
   const qc = useQueryClient();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
   const [sendProgress, setSendProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
 
-  const { data: leads, isLoading } = useQuery({
+  const { data: leads, isLoading: leadsLoading } = useQuery({
     queryKey: ['campaign_leads', campaign.id],
     queryFn: () => getCampaignLeads(campaign.id),
   });
+  const { data: licenses, isLoading: licensesLoading } = useQuery({
+    queryKey: ['campaign_licenses', campaign.id],
+    queryFn: () => getCampaignLicenses(campaign.id),
+  });
+
+  const isLoading = leadsLoading || licensesLoading;
+
+  // campaign_leads + orphan campaign_licenses(lead_id 없음) 병합
+  const participants: ParticipantRow[] = (() => {
+    const rows: ParticipantRow[] = [];
+    (leads ?? []).forEach(l => {
+      rows.push({
+        id: `lead:${l.id}`,
+        origin: 'form',
+        leadRef: l,
+        name: l.name,
+        school_name: l.school_name,
+        school_kind: l.school_kind,
+        phone: l.phone,
+        phone_normalized: l.phone_normalized,
+        email: l.email,
+        position: l.position,
+        source: l.source,
+        source_etc: l.source_etc,
+        status: l.status,
+        is_existing_customer: l.is_existing_customer,
+        created_at: l.created_at,
+      });
+    });
+    (licenses ?? []).filter(lic => !lic.lead_id).forEach(lic => {
+      rows.push({
+        id: `license:${lic.id}`,
+        origin: 'manual',
+        name: lic.contact_name ?? '-',
+        school_name: lic.org_name,
+        phone: lic.contact_phone ?? '',
+        phone_normalized: (lic.contact_phone ?? '').replace(/\D/g, ''),
+        status: '발송완료',
+        created_at: lic.created_at,
+      });
+    });
+    // 최신순
+    return rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  })();
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -499,16 +562,17 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
   };
 
   const toggleSelectAll = () => {
-    const selectable = (leads ?? []).filter(l => l.status === '신규' && !l.is_existing_customer);
+    const selectable = participants.filter(p => p.origin === 'form' && p.status === '신규' && !p.is_existing_customer);
     if (selectedIds.size === selectable.length && selectable.length > 0) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(selectable.map(l => l.id)));
+      setSelectedIds(new Set(selectable.map(p => p.id)));
     }
   };
 
   const handleSend = async () => {
-    const targets = (leads ?? []).filter(l => selectedIds.has(l.id));
+    // 선택된 id는 "lead:{leadId}" 형식 — form origin만 발송 대상
+    const targets = (leads ?? []).filter(l => selectedIds.has(`lead:${l.id}`));
     if (targets.length === 0) { toast.error('발송할 리드를 선택하세요'); return; }
 
     setSending(true);
@@ -604,14 +668,14 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
 
   if (isLoading) return <div className="py-6 text-center text-sm text-muted-foreground">로딩 중...</div>;
 
-  const sortedLeads = leads ?? [];
-  const newCount = sortedLeads.filter(l => l.status === '신규').length;
-  const sentCount = sortedLeads.filter(l => l.status === '발송완료').length;
-  const selectableCount = sortedLeads.filter(l => l.status === '신규' && !l.is_existing_customer).length;
+  const newCount = participants.filter(p => p.status === '신규').length;
+  const sentCount = participants.filter(p => p.status === '발송완료').length;
+  // 발송 가능: form 출처 + 신규 + 기존고객 아님
+  const selectableCount = participants.filter(p => p.origin === 'form' && p.status === '신규' && !p.is_existing_customer).length;
 
   const selectAllNew = () => {
-    const selectable = sortedLeads.filter(l => l.status === '신규' && !l.is_existing_customer);
-    setSelectedIds(new Set(selectable.map(l => l.id)));
+    const selectable = participants.filter(p => p.origin === 'form' && p.status === '신규' && !p.is_existing_customer);
+    setSelectedIds(new Set(selectable.map(p => p.id)));
   };
 
   return (
@@ -619,7 +683,7 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
       {/* 툴바 */}
       <div className="flex items-center justify-between px-1 flex-wrap gap-2">
         <div className="text-xs text-muted-foreground">
-          총 {sortedLeads.length}건 · 신규 <span className="text-primary font-medium">{newCount}</span> · 발송완료 <span className="text-teal-600 font-medium">{sentCount}</span>
+          총 {participants.length}건 · 신규 <span className="text-primary font-medium">{newCount}</span> · 발송완료 <span className="text-teal-600 font-medium">{sentCount}</span>
           {selectableCount > 0 && <span className="ml-2 text-muted-foreground">(발송 가능: {selectableCount}명)</span>}
         </div>
         <div className="flex items-center gap-1.5">
@@ -641,10 +705,10 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
       </div>
 
       {/* 목록 */}
-      {sortedLeads.length === 0 ? (
+      {participants.length === 0 ? (
         <div className="py-8 text-center text-sm text-muted-foreground">
           아직 수집된 리드가 없습니다.<br />
-          <span className="text-xs">공개 폼 URL을 공유해서 리드를 받으세요.</span>
+          <span className="text-xs">공개 폼 URL을 공유해서 리드를 받거나, "발송된 체험권" 탭에서 수동 등록하세요.</span>
         </div>
       ) : (
         <div className="border border-border rounded-lg overflow-hidden">
@@ -663,45 +727,51 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
                 <th className="p-2 text-left">연락처</th>
                 <th className="p-2 text-left">담당</th>
                 <th className="p-2 text-left">경로</th>
+                <th className="p-2 text-left">출처</th>
                 <th className="p-2 text-left">상태</th>
                 <th className="p-2 text-left">등록일</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {sortedLeads.map(l => {
-                const canSelect = l.status === '신규' && !l.is_existing_customer;
-                const statusColor = l.status === '발송완료' ? 'bg-teal-100 text-teal-700'
-                  : l.status === '실패' ? 'bg-red-100 text-red-700'
-                  : l.status === '제외' ? 'bg-slate-100 text-slate-500'
+              {participants.map(p => {
+                const canSelect = p.origin === 'form' && p.status === '신규' && !p.is_existing_customer;
+                const statusColor = p.status === '발송완료' ? 'bg-teal-100 text-teal-700'
+                  : p.status === '실패' ? 'bg-red-100 text-red-700'
+                  : p.status === '제외' ? 'bg-slate-100 text-slate-500'
                   : 'bg-blue-100 text-blue-700';
                 return (
-                  <tr key={l.id} className={`hover:bg-muted/20 ${!canSelect ? 'opacity-60' : ''}`}>
+                  <tr key={p.id} className={`hover:bg-muted/20 ${!canSelect && p.status === '신규' ? 'opacity-60' : ''}`}>
                     <td className="p-2 text-center">
                       <input type="checkbox"
-                        checked={selectedIds.has(l.id)}
-                        onChange={() => toggleSelect(l.id)}
+                        checked={selectedIds.has(p.id)}
+                        onChange={() => toggleSelect(p.id)}
                         disabled={!canSelect}
                         className="accent-primary" />
                     </td>
                     <td className="p-2 font-medium">
-                      {l.name}
-                      {l.is_existing_customer && (
+                      {p.name}
+                      {p.is_existing_customer && (
                         <span className="ml-1.5 inline-block bg-amber-100 text-amber-700 px-1 py-0.5 rounded text-[10px]">기존</span>
                       )}
                     </td>
                     <td className="p-2">
-                      {l.school_name || '-'}
-                      {l.school_kind && <span className="text-muted-foreground ml-1">({l.school_kind})</span>}
+                      {p.school_name || '-'}
+                      {p.school_kind && <span className="text-muted-foreground ml-1">({p.school_kind})</span>}
                     </td>
-                    <td className="p-2 font-mono">{l.phone || '-'}</td>
-                    <td className="p-2">{l.position || '-'}</td>
-                    <td className="p-2">{l.source === '기타' ? (l.source_etc || '기타') : (l.source || '-')}</td>
+                    <td className="p-2 font-mono">{p.phone || '-'}</td>
+                    <td className="p-2">{p.position || '-'}</td>
+                    <td className="p-2">{p.source === '기타' ? (p.source_etc || '기타') : (p.source || '-')}</td>
                     <td className="p-2">
-                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${statusColor}`}>
-                        {l.status}
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${p.origin === 'form' ? 'bg-purple-50 text-purple-700' : 'bg-slate-100 text-slate-600'}`}>
+                        {p.origin === 'form' ? '폼' : '수동'}
                       </span>
                     </td>
-                    <td className="p-2 text-muted-foreground">{l.created_at.slice(0, 10)}</td>
+                    <td className="p-2">
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${statusColor}`}>
+                        {p.status}
+                      </span>
+                    </td>
+                    <td className="p-2 text-muted-foreground">{p.created_at.slice(0, 10)}</td>
                   </tr>
                 );
               })}
