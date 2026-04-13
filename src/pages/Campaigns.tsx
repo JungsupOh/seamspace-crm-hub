@@ -494,6 +494,10 @@ interface ParticipantRow {
   status: '신규' | '발송완료' | '실패' | '제외';
   is_existing_customer?: boolean;
   created_at: string;
+  // 재발송용 — 이미 발송된 경우에만 존재
+  coupon_code?: string;
+  duration?: string;
+  user_count?: string;
 }
 
 // ── 리드 탭 — 캠페인 참여자 통합 뷰 ───────────────────
@@ -517,7 +521,13 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
   // campaign_leads + orphan campaign_licenses(lead_id 없음) 병합
   const participants: ParticipantRow[] = (() => {
     const rows: ParticipantRow[] = [];
+    // 리드별 대응 라이선스 매핑 (재발송용 쿠폰정보 조회)
+    const licensesByLeadId = new Map<string, CampaignLicense>();
+    (licenses ?? []).forEach(lic => {
+      if (lic.lead_id) licensesByLeadId.set(lic.lead_id, lic);
+    });
     (leads ?? []).forEach(l => {
+      const lic = licensesByLeadId.get(l.id);
       rows.push({
         id: `lead:${l.id}`,
         origin: 'form',
@@ -534,6 +544,9 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
         status: l.status,
         is_existing_customer: l.is_existing_customer,
         created_at: l.created_at,
+        coupon_code: lic?.coupon_code,
+        duration: lic?.duration,
+        user_count: lic?.user_count,
       });
     });
     (licenses ?? []).filter(lic => !lic.lead_id).forEach(lic => {
@@ -546,6 +559,9 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
         phone_normalized: (lic.contact_phone ?? '').replace(/\D/g, ''),
         status: '발송완료',
         created_at: lic.created_at,
+        coupon_code: lic.coupon_code,
+        duration: lic.duration,
+        user_count: lic.user_count,
       });
     });
     // 최신순
@@ -678,6 +694,31 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     setSelectedIds(new Set(selectable.map(p => p.id)));
   };
 
+  // 동일한 쿠폰코드로 알림톡 재발송
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const handleResend = async (p: ParticipantRow) => {
+    if (!p.coupon_code || !p.phone) {
+      toast.error('쿠폰코드 또는 연락처가 없어 재발송할 수 없습니다');
+      return;
+    }
+    setResendingId(p.id);
+    try {
+      await apiSendCoupon({
+        first_name: p.name,
+        phone: p.phone,
+        coupon_code: p.coupon_code,
+        user_limit: p.user_count || '40',
+        duration: p.duration || '1',
+        send_type: 'trial',
+      });
+      toast.success(`${p.name}님에게 재발송 완료 (코드 ${p.coupon_code})`);
+    } catch (e) {
+      toast.error(`재발송 실패: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setResendingId(null);
+    }
+  };
+
   return (
     <div className="space-y-2">
       {/* 툴바 */}
@@ -728,8 +769,10 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
                 <th className="p-2 text-left">담당</th>
                 <th className="p-2 text-left">경로</th>
                 <th className="p-2 text-left">출처</th>
+                <th className="p-2 text-left">쿠폰</th>
                 <th className="p-2 text-left">상태</th>
                 <th className="p-2 text-left">등록일</th>
+                <th className="p-2 w-16"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -767,11 +810,28 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
                       </span>
                     </td>
                     <td className="p-2">
+                      {p.coupon_code ? (
+                        <span className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded">{p.coupon_code}</span>
+                      ) : <span className="text-muted-foreground">-</span>}
+                    </td>
+                    <td className="p-2">
                       <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${statusColor}`}>
                         {p.status}
                       </span>
                     </td>
                     <td className="p-2 text-muted-foreground">{p.created_at.slice(0, 10)}</td>
+                    <td className="p-2">
+                      {p.coupon_code && p.phone && (
+                        <button onClick={() => handleResend(p)}
+                          disabled={resendingId === p.id}
+                          title="같은 쿠폰코드로 알림톡 재발송"
+                          className="text-[10px] text-primary hover:underline disabled:opacity-50 flex items-center gap-1">
+                          {resendingId === p.id
+                            ? <><Loader2 className="h-3 w-3 animate-spin" />재발송</>
+                            : <><Send className="h-3 w-3" />재발송</>}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
