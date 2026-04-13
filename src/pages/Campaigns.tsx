@@ -175,6 +175,13 @@ async function updateCampaignLead(id: string, patch: Partial<CampaignLead>): Pro
   if (!r.ok) throw new Error('리드 업데이트 실패');
 }
 
+async function deleteCampaignLead(id: string): Promise<void> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${id}`, {
+    method: 'DELETE', headers: HEADERS,
+  });
+  if (!r.ok) throw new Error('리드 삭제 실패');
+}
+
 // 비동기 함수 재시도 헬퍼 — 지수 백오프
 async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3, baseDelayMs = 500): Promise<T> {
   let lastErr: unknown;
@@ -791,6 +798,34 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     setSelectedIds(new Set(selectable.map(p => p.id)));
   };
 
+  // 리드 삭제
+  const [deleteTarget, setDeleteTarget] = useState<ParticipantRow | null>(null);
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      if (deleteTarget.origin === 'form') {
+        const leadId = deleteTarget.id.replace(/^lead:/, '');
+        // 연결된 licenses도 함께 삭제 (FK ON DELETE SET NULL이면 lead_id만 끊김 — 여기선 함께 제거)
+        const licsRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/campaign_licenses?lead_id=eq.${leadId}`,
+          { method: 'DELETE', headers: HEADERS }
+        ).catch(() => null);
+        await deleteCampaignLead(leadId);
+      } else {
+        const licId = deleteTarget.id.replace(/^license:/, '');
+        await deleteCampaignLicense(licId);
+      }
+      toast.success(`${deleteTarget.name} 리드 삭제됨`);
+      qc.invalidateQueries({ queryKey: ['campaign_leads', campaign.id] });
+      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+    } catch (e) {
+      toast.error(`삭제 실패: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDeleteTarget(null);
+    }
+  };
+
   // 동일한 쿠폰코드로 알림톡 재발송
   const [resendingId, setResendingId] = useState<string | null>(null);
   const handleResend = async (p: ParticipantRow) => {
@@ -922,16 +957,23 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
                     </td>
                     <td className="p-2 text-muted-foreground">{p.created_at.slice(0, 10)}</td>
                     <td className="p-2">
-                      {p.coupon_code && p.phone && (
-                        <button onClick={() => handleResend(p)}
-                          disabled={resendingId === p.id}
-                          title="같은 쿠폰코드로 알림톡 재발송"
-                          className="text-[10px] text-primary hover:underline disabled:opacity-50 flex items-center gap-1">
-                          {resendingId === p.id
-                            ? <><Loader2 className="h-3 w-3 animate-spin" />재발송</>
-                            : <><Send className="h-3 w-3" />재발송</>}
+                      <div className="flex items-center gap-2">
+                        {p.coupon_code && p.phone && (
+                          <button onClick={() => handleResend(p)}
+                            disabled={resendingId === p.id}
+                            title="같은 쿠폰코드로 알림톡 재발송"
+                            className="text-[10px] text-primary hover:underline disabled:opacity-50 flex items-center gap-1">
+                            {resendingId === p.id
+                              ? <><Loader2 className="h-3 w-3 animate-spin" />재발송</>
+                              : <><Send className="h-3 w-3" />재발송</>}
+                          </button>
+                        )}
+                        <button onClick={() => setDeleteTarget(p)}
+                          title="리드 삭제"
+                          className="text-muted-foreground hover:text-destructive">
+                          <Trash2 className="h-3 w-3" />
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -940,6 +982,29 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
           </table>
         </div>
       )}
+
+      {/* 리드 삭제 확인 */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>리드 삭제</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{deleteTarget?.name}</strong> ({deleteTarget?.phone}) 리드를 삭제할까요?
+              {deleteTarget?.origin === 'form' && deleteTarget?.coupon_code && (
+                <span className="block mt-2 text-amber-600">
+                  ⚠️ 발송된 쿠폰({deleteTarget.coupon_code}) 기록도 함께 삭제됩니다.
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              삭제
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
