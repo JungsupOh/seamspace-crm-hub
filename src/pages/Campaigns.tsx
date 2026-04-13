@@ -582,16 +582,16 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     for (let i = 0; i < targets.length; i++) {
       const lead = targets[i];
       try {
-        // 1. 쿠폰 생성
+        // 1. 쿠폰 생성 (학급플랜 40명 / 1개월 기본)
         const description = `${campaign.name} ${lead.school_name ?? ''} ${lead.name} 체험이용권`.trim();
-        const code = await apiCreateCoupon(description, '1', '10');
+        const code = await apiCreateCoupon(description, '1', '40');
 
         // 2. 알림톡 발송
         await apiSendCoupon({
           first_name: lead.name,
           phone: lead.phone,
           coupon_code: code,
-          user_limit: '10',
+          user_limit: '40',
           duration: '1',
           send_type: 'trial',
         });
@@ -605,7 +605,7 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
           contact_phone: lead.phone,
           org_name:      lead.school_name,
           duration:      '1',
-          user_count:    '10',
+          user_count:    '40',
           status:        '대기',
         });
 
