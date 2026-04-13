@@ -175,6 +175,19 @@ async function updateCampaignLead(id: string, patch: Partial<CampaignLead>): Pro
   if (!r.ok) throw new Error('리드 업데이트 실패');
 }
 
+// 비동기 함수 재시도 헬퍼 — 지수 백오프
+async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3, baseDelayMs = 500): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < maxAttempts; i++) {
+    try { return await fn(); }
+    catch (e) {
+      lastErr = e;
+      if (i < maxAttempts - 1) await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, i)));
+    }
+  }
+  throw lastErr;
+}
+
 // 엑셀 파싱
 interface ParsedRow {
   org_name?: string; contact_name?: string; contact_phone?: string;
@@ -685,12 +698,13 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
         continue;
       }
 
-      // ─── Phase 2: DB 저장 (실패해도 이미 알림톡은 갔으므로 '발송완료' 유지) ───
+      // ─── Phase 2: DB 저장 (실패 시 자동 재시도 3회까지) ───
       let licenseSaved = false;
       let contactId: string | null = null;
+
+      // 3. campaign_licenses 저장 (재시도)
       try {
-        // 3. campaign_licenses 저장
-        await addCampaignLicense({
+        await withRetry(() => addCampaignLicense({
           campaign_id:   campaign.id,
           lead_id:       lead.id,
           coupon_code:   code,
@@ -700,23 +714,25 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
           duration:      '1',
           user_count:    '40',
           status:        '대기',
-        });
+        }));
         licenseSaved = true;
       } catch (e) {
-        console.warn(`[campaign_licenses 저장 실패] ${lead.name} (코드: ${code}):`, e);
+        console.warn(`[campaign_licenses 3회 재시도 모두 실패] ${lead.name} (코드: ${code}):`, e);
         toast.error(`${lead.name}: 알림톡 발송됨, DB 저장 실패. 쿠폰 코드: ${code} (수동 등록 필요)`, { duration: 12000 });
       }
 
+      // 4. contacts upsert — phone_normalized 기준 (재시도)
       try {
-        // 4. contacts upsert — phone_normalized 기준
         const phoneNorm = (lead.phone_normalized || lead.phone.replace(/\D/g, ''));
-        const existingRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${encodeURIComponent(phoneNorm)}&select=id`,
-          { headers: HEADERS }
-        );
-        const existing = existingRes.ok ? await existingRes.json() : [];
+        contactId = await withRetry(async (): Promise<string | null> => {
+          const existingRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${encodeURIComponent(phoneNorm)}&select=id`,
+            { headers: HEADERS }
+          );
+          if (!existingRes.ok) throw new Error('contacts 조회 실패');
+          const existing = await existingRes.json();
+          if (Array.isArray(existing) && existing.length > 0) return existing[0].id;
 
-        if (Array.isArray(existing) && existing.length === 0) {
           const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/contacts`, {
             method: 'POST',
             headers: { ...HEADERS, Prefer: 'return=representation' },
@@ -731,15 +747,12 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
               notes:            `[${new Date().toISOString().slice(0,10)}] 캠페인 "${campaign.name}" 체험이용권 발송 (코드: ${code})`,
             }),
           });
-          if (insertRes.ok) {
-            const [row] = await insertRes.json();
-            contactId = row?.id ?? null;
-          }
-        } else {
-          contactId = existing[0].id;
-        }
+          if (!insertRes.ok) throw new Error('contacts 생성 실패');
+          const data = await insertRes.json();
+          return Array.isArray(data) && data[0] ? data[0].id : null;
+        });
       } catch (e) {
-        console.warn(`[contacts upsert 실패] ${lead.name}:`, e);
+        console.warn(`[contacts upsert 3회 재시도 모두 실패] ${lead.name}:`, e);
       }
 
       // 5. 리드 상태 업데이트 → '발송완료' (알림톡 발송 사실이 가장 중요)
