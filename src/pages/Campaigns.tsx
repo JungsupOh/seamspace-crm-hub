@@ -240,7 +240,7 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? '캠페인 수정' : '캠페인 추가'}</DialogTitle>
         </DialogHeader>
@@ -306,6 +306,13 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
           <Button className="w-full" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()}>
             {save.isPending ? '저장 중...' : (isEdit ? '수정 저장' : '캠페인 추가')}
           </Button>
+
+          {/* 수정 모드에서만 공개 URL + QR 노출 */}
+          {isEdit && initial?.slug && (
+            <div className="pt-3 border-t border-border">
+              <CampaignShareSection campaign={initial} />
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -319,14 +326,24 @@ function generateSlug(): string {
 
 // 캠페인 이미지 업로드 (Supabase Storage)
 async function uploadCampaignImage(file: File): Promise<string> {
-  const ext = file.name.split('.').pop() || 'png';
-  const path = `${crypto.randomUUID()}.${ext}`;
+  const ts = Date.now();
+  const dotIdx = file.name.lastIndexOf('.');
+  const rawExt = dotIdx >= 0 ? file.name.slice(dotIdx + 1) : 'png';
+  const ext = rawExt.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'png';
+  const path = `${ts}-${crypto.randomUUID()}.${ext}`;
   const r = await fetch(`${SUPABASE_URL}/storage/v1/object/campaign-images/${path}`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': file.type },
+    headers: {
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': file.type || 'application/octet-stream',
+      'x-upsert': 'true',
+    },
     body: file,
   });
-  if (!r.ok) throw new Error('이미지 업로드 실패');
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.message || `이미지 업로드 실패 (${r.status})`);
+  }
   return `${SUPABASE_URL}/storage/v1/object/public/campaign-images/${path}`;
 }
 
@@ -816,8 +833,9 @@ export default function Campaigns() {
         </div>
       )}
 
-      {/* 캠페인 생성/수정 다이얼로그 */}
+      {/* 캠페인 생성/수정 다이얼로그 — key 부여해 initial 변경 시 폼 상태 리셋 */}
       <CampaignFormDialog
+        key={editTarget?.id ?? 'new'}
         open={formOpen}
         onClose={() => { setFormOpen(false); setEditTarget(undefined); }}
         initial={editTarget}
