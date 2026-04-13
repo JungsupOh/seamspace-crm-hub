@@ -609,21 +609,35 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
   const sentCount = sortedLeads.filter(l => l.status === '발송완료').length;
   const selectableCount = sortedLeads.filter(l => l.status === '신규' && !l.is_existing_customer).length;
 
+  const selectAllNew = () => {
+    const selectable = sortedLeads.filter(l => l.status === '신규' && !l.is_existing_customer);
+    setSelectedIds(new Set(selectable.map(l => l.id)));
+  };
+
   return (
     <div className="space-y-2">
       {/* 툴바 */}
-      <div className="flex items-center justify-between px-1">
+      <div className="flex items-center justify-between px-1 flex-wrap gap-2">
         <div className="text-xs text-muted-foreground">
           총 {sortedLeads.length}건 · 신규 <span className="text-primary font-medium">{newCount}</span> · 발송완료 <span className="text-teal-600 font-medium">{sentCount}</span>
+          {selectableCount > 0 && <span className="ml-2 text-muted-foreground">(발송 가능: {selectableCount}명)</span>}
         </div>
-        <Button size="sm"
-          disabled={selectedIds.size === 0 || sending}
-          onClick={handleSend}
-          className="h-7 text-xs px-3">
-          {sending
-            ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" />발송 중 {sendProgress.done}/{sendProgress.total}</>
-            : <><Send className="h-3 w-3 mr-1" />선택한 {selectedIds.size}명 이용권 발송</>}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          {selectableCount > 0 && !sending && (
+            <Button size="sm" variant="outline" onClick={selectAllNew}
+              className="h-7 text-xs px-2.5">
+              신규 전체 선택 ({selectableCount})
+            </Button>
+          )}
+          <Button size="sm"
+            disabled={selectedIds.size === 0 || sending}
+            onClick={handleSend}
+            className="h-7 text-xs px-3">
+            {sending
+              ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" />발송 중 {sendProgress.done}/{sendProgress.total}</>
+              : <><Send className="h-3 w-3 mr-1" />선택한 {selectedIds.size}명 이용권 발송</>}
+          </Button>
+        </div>
       </div>
 
       {/* 목록 */}
@@ -895,8 +909,13 @@ function CampaignCard({ campaign, convertedPhones, onEdit, onDelete, canEdit }: 
     queryKey: ['campaign_licenses', campaign.id],
     queryFn: () => getCampaignLicenses(campaign.id),
   });
+  const { data: leads } = useQuery({
+    queryKey: ['campaign_leads', campaign.id],
+    queryFn: () => getCampaignLeads(campaign.id),
+  });
 
   const normalize = (p?: string) => (p ?? '').replace(/\D/g, '');
+  const newLeads   = leads?.filter(l => l.status === '신규').length ?? 0;
   const total      = licenses?.length ?? 0;
   const active     = licenses?.filter(l => l.status === '사용중').length ?? 0;
   const expired    = licenses?.filter(l => l.status === '만료').length ?? 0;
@@ -936,6 +955,7 @@ function CampaignCard({ campaign, convertedPhones, onEdit, onDelete, canEdit }: 
 
         {/* 통계 */}
         <div className="flex items-center gap-5 shrink-0">
+          <Stat icon={<Inbox className="h-3.5 w-3.5" />} label="신규" value={newLeads} accent="purple" />
           <Stat icon={<Users className="h-3.5 w-3.5" />} label="발송" value={total} />
           <Stat icon={<Clock className="h-3.5 w-3.5" />} label="사용중" value={active} accent="teal" />
           <Stat icon={<XCircle className="h-3.5 w-3.5" />} label="만료" value={expired} accent="orange" />
@@ -1019,6 +1039,7 @@ function Stat({ icon, label, value, accent }: {
   const color = accent === 'teal'   ? 'text-teal-600'
               : accent === 'orange' ? 'text-orange-500'
               : accent === 'blue'   ? 'text-blue-600'
+              : accent === 'purple' ? 'text-purple-600'
               : 'text-foreground';
   return (
     <div className="flex flex-col items-center gap-0.5 min-w-[52px]">
