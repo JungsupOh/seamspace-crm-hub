@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { getAllLicenses, updateLicenseStatus, updateLicenseDeal, attachCouponToDeal, deleteDealLicense, hideMdiaryCoupon, DealLicenseRecord, LicenseStatus, saveDealLicenses } from '@/lib/storage';
 import { toast } from 'sonner';
 import { useDeals } from '@/hooks/use-airtable';
-import { airtable } from '@/lib/airtable';
+import { airtable, AirtableRecord } from '@/lib/airtable';
 import { ContactFields } from '@/types/airtable';
 import * as XLSX from 'xlsx';
 
@@ -129,14 +129,24 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
   const { data: contactHistoryMap } = useQuery({
     queryKey: ['contacts_history'],
     queryFn: async () => {
+      // Supabase가 에러 반환 시 배열이 아닌 객체를 돌려주는 경우 대비 — Array.isArray 방어
+      const safeJson = async <T,>(url: string): Promise<T[]> => {
+        try {
+          const r = await fetch(url, { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } });
+          if (!r.ok) return [];
+          const data = await r.json();
+          return Array.isArray(data) ? data : [];
+        } catch { return []; }
+      };
+
       const [contacts, dealLics, campaignLics, campaignsRes] = await Promise.all([
-        airtable.fetchAll<ContactFields>('01_Contacts'),
-        fetch(`${SUPABASE_URL}/rest/v1/deal_licenses?select=contact_phone,org_name,status,created_at`,
-          { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }).then(r => r.json()) as Promise<{ contact_phone: string; org_name: string; status: string; created_at: string }[]>,
-        fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?select=contact_phone,org_name,status,created_at,campaign_id`,
-          { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }).then(r => r.json()) as Promise<{ contact_phone: string; org_name: string; status: string; created_at: string; campaign_id: string }[]>,
-        fetch(`${SUPABASE_URL}/rest/v1/campaigns?select=id,name`,
-          { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }).then(r => r.json()) as Promise<{ id: string; name: string }[]>,
+        airtable.fetchAll<ContactFields>('01_Contacts').catch(() => [] as AirtableRecord<ContactFields>[]),
+        safeJson<{ contact_phone: string; org_name: string; status: string; created_at: string }>(
+          `${SUPABASE_URL}/rest/v1/deal_licenses?select=contact_phone,org_name,status,created_at`),
+        safeJson<{ contact_phone: string; org_name: string; status: string; created_at: string; campaign_id: string }>(
+          `${SUPABASE_URL}/rest/v1/campaign_licenses?select=contact_phone,org_name,status,created_at,campaign_id`),
+        safeJson<{ id: string; name: string }>(
+          `${SUPABASE_URL}/rest/v1/campaigns?select=id,name`),
       ]);
 
       const campaignNameMap = new Map(campaignsRes.map(c => [c.id, c.name]));
