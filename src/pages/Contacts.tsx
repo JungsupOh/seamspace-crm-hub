@@ -315,7 +315,7 @@ function ContactEditForm({ contact, onCancel, onSaved }: ContactEditFormProps) {
   const updateContact = useUpdateContact();
   const [f, setF] = useState<Partial<ContactFields>>({
     Name:         contact.fields.Name ?? '',
-    Phone:        contact.fields.phone_normalized ?? contact.fields.Phone ?? '',
+    Phone:        contact.fields.Phone ?? contact.fields.phone_normalized ?? '',
     Email:        contact.fields.Email ?? '',
     Org_Name:     contact.fields.Org_Name ?? '',
     Role:         contact.fields.Role ?? '',
@@ -838,7 +838,7 @@ export default function Contacts() {
                   <td className="px-3 py-1.5 font-medium text-xs truncate overflow-hidden">{c.fields.Name}</td>
                   <td className="px-3 py-1.5 text-muted-foreground text-xs truncate overflow-hidden">{c.fields.Education_Office}</td>
                   <td className="px-3 py-1.5 text-muted-foreground text-xs truncate overflow-hidden">{c.fields.Org_Name}</td>
-                  <td className="px-3 py-1.5 tabular-nums text-xs truncate overflow-hidden">{c.fields.phone_normalized || c.fields.Phone}</td>
+                  <td className="px-3 py-1.5 tabular-nums text-xs truncate overflow-hidden">{c.fields.Phone || c.fields.phone_normalized}</td>
                   <td className="px-3 py-1.5 text-muted-foreground text-xs truncate overflow-hidden">{c.fields.Email}</td>
                   <td className="px-3 py-1.5"><TypeBadge type={c.fields.Contact_Type} /></td>
                   <td className="px-3 py-1.5"><StageBadge stage={c.fields.Lead_Stage} /></td>
@@ -918,15 +918,15 @@ export default function Contacts() {
                 <div className="mt-4 space-y-5">
 
                   {/* 연락처 */}
-                  {(selected.fields.phone_normalized || selected.fields.Phone || selected.fields.Email) && (
+                  {(selected.fields.Phone || selected.fields.phone_normalized || selected.fields.Email) && (
                     <section className="space-y-1.5">
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">연락처</p>
                       <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5 space-y-1.5">
-                        {(selected.fields.phone_normalized || selected.fields.Phone) && (
+                        {(selected.fields.Phone || selected.fields.phone_normalized) && (
                           <a href={`tel:${selected.fields.phone_normalized || selected.fields.Phone}`}
                             className="flex items-center gap-2 text-sm hover:text-primary">
                             <span className="text-xs text-muted-foreground w-14 flex-shrink-0">전화</span>
-                            {selected.fields.phone_normalized || selected.fields.Phone}
+                            {selected.fields.Phone || selected.fields.phone_normalized}
                           </a>
                         )}
                         {selected.fields.Email && (
