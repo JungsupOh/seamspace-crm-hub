@@ -12,9 +12,11 @@ import { DataTableSkeleton } from '@/components/DataTableSkeleton';
 import {
   Plus, ChevronDown, ChevronRight, ArrowRight, ExternalLink,
   Calendar, Users, CheckCircle2, XCircle, Clock, Trash2, Upload,
-  Link2, Copy, QrCode, Image as ImageIcon, Loader2,
+  Link2, Copy, QrCode, Image as ImageIcon, Loader2, Send, UserPlus,
+  Inbox, Ticket,
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
+import { apiCreateCoupon, apiSendCoupon } from '@/lib/coupons';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 
@@ -49,6 +51,26 @@ interface CampaignLicense {
   user_count?: string;
   status: '대기' | '사용중' | '만료';
   service_expire_at?: string;
+  created_at: string;
+}
+
+interface CampaignLead {
+  id: string;
+  campaign_id: string;
+  school_name?: string;
+  school_kind?: string;
+  position?: string;
+  name: string;
+  phone: string;
+  phone_normalized?: string;
+  email?: string;
+  source?: string;
+  source_etc?: string;
+  marketing_consent?: boolean;
+  status: '신규' | '발송완료' | '실패' | '제외';
+  is_existing_customer?: boolean;
+  converted_contact_id?: string;
+  sent_at?: string;
   created_at: string;
 }
 
@@ -125,6 +147,24 @@ async function bulkAddCampaignLicenses(rows: Omit<CampaignLicense, 'id' | 'creat
     body: JSON.stringify(rows),
   });
   if (!r.ok) throw new Error('일괄 추가 실패');
+}
+
+// ── 리드 API ──────────────────────────────────────
+async function getCampaignLeads(campaignId: string): Promise<CampaignLead[]> {
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/campaign_leads?campaign_id=eq.${campaignId}&order=created_at.desc`,
+    { headers: HEADERS }
+  );
+  if (!r.ok) return [];
+  const data = await r.json();
+  return Array.isArray(data) ? data : [];
+}
+
+async function updateCampaignLead(id: string, patch: Partial<CampaignLead>): Promise<void> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${id}`, {
+    method: 'PATCH', headers: HEADERS, body: JSON.stringify(patch),
+  });
+  if (!r.ok) throw new Error('리드 업데이트 실패');
 }
 
 // 엑셀 파싱
@@ -413,6 +453,254 @@ interface CampaignDetailProps {
 }
 
 function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
+  const [activeTab, setActiveTab] = useState<'leads' | 'licenses'>('leads');
+  return (
+    <div>
+      <div className="flex border-b border-border mb-3">
+        <button onClick={() => setActiveTab('leads')}
+          className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5
+            ${activeTab === 'leads' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+          <Inbox className="h-3.5 w-3.5" />리드
+        </button>
+        <button onClick={() => setActiveTab('licenses')}
+          className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5
+            ${activeTab === 'licenses' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+          <Ticket className="h-3.5 w-3.5" />발송된 체험권
+        </button>
+      </div>
+      {activeTab === 'leads' ? (
+        <CampaignLeadsTab campaign={campaign} />
+      ) : (
+        <CampaignLicensesTab campaign={campaign} convertedPhones={convertedPhones} />
+      )}
+    </div>
+  );
+}
+
+// ── 리드 탭 ──────────────────────────────────────
+function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
+  const qc = useQueryClient();
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sending, setSending] = useState(false);
+  const [sendProgress, setSendProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+
+  const { data: leads, isLoading } = useQuery({
+    queryKey: ['campaign_leads', campaign.id],
+    queryFn: () => getCampaignLeads(campaign.id),
+  });
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    const selectable = (leads ?? []).filter(l => l.status === '신규' && !l.is_existing_customer);
+    if (selectedIds.size === selectable.length && selectable.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(selectable.map(l => l.id)));
+    }
+  };
+
+  const handleSend = async () => {
+    const targets = (leads ?? []).filter(l => selectedIds.has(l.id));
+    if (targets.length === 0) { toast.error('발송할 리드를 선택하세요'); return; }
+
+    setSending(true);
+    setSendProgress({ done: 0, total: targets.length });
+
+    let successCount = 0;
+    for (let i = 0; i < targets.length; i++) {
+      const lead = targets[i];
+      try {
+        // 1. 쿠폰 생성
+        const description = `${campaign.name} ${lead.school_name ?? ''} ${lead.name} 체험이용권`.trim();
+        const code = await apiCreateCoupon(description, '1', '10');
+
+        // 2. 알림톡 발송
+        await apiSendCoupon({
+          first_name: lead.name,
+          phone: lead.phone,
+          coupon_code: code,
+          user_limit: '10',
+          duration: '1',
+          send_type: 'trial',
+        });
+
+        // 3. campaign_licenses 저장
+        await addCampaignLicense({
+          campaign_id:   campaign.id,
+          lead_id:       lead.id,
+          coupon_code:   code,
+          contact_name:  lead.name,
+          contact_phone: lead.phone,
+          org_name:      lead.school_name,
+          duration:      '1',
+          user_count:    '10',
+          status:        '대기',
+        });
+
+        // 4. 01_Contacts(contacts) upsert — phone_normalized 기준
+        const phoneNorm = (lead.phone_normalized || lead.phone.replace(/\D/g, ''));
+        const existingRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${encodeURIComponent(phoneNorm)}&select=id`,
+          { headers: HEADERS }
+        );
+        const existing = existingRes.ok ? await existingRes.json() : [];
+        let contactId: string | null = null;
+
+        if (Array.isArray(existing) && existing.length === 0) {
+          // 신규 생성
+          const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/contacts`, {
+            method: 'POST',
+            headers: { ...HEADERS, Prefer: 'return=representation' },
+            body: JSON.stringify({
+              name:             lead.name,
+              phone:            lead.phone,
+              phone_normalized: phoneNorm,
+              email:            lead.email ?? null,
+              org_name:         lead.school_name ?? null,
+              lead_source:      campaign.name,
+              lead_stage:       '관심',
+              notes:            `[${new Date().toISOString().slice(0,10)}] 캠페인 "${campaign.name}" 체험이용권 발송 (코드: ${code})`,
+            }),
+          });
+          if (insertRes.ok) {
+            const [row] = await insertRes.json();
+            contactId = row?.id ?? null;
+          }
+        } else {
+          contactId = existing[0].id;
+        }
+
+        // 5. 리드 상태 업데이트 → '발송완료'
+        await updateCampaignLead(lead.id, {
+          status: '발송완료',
+          converted_contact_id: contactId ?? undefined,
+          sent_at: new Date().toISOString(),
+        });
+
+        successCount++;
+      } catch (e) {
+        // 실패 시 리드 상태 '실패'
+        await updateCampaignLead(lead.id, { status: '실패' }).catch(() => {});
+        console.warn(`[리드 발송 실패] ${lead.name}:`, e);
+      }
+      setSendProgress({ done: i + 1, total: targets.length });
+    }
+
+    setSending(false);
+    setSelectedIds(new Set());
+    qc.invalidateQueries({ queryKey: ['campaign_leads', campaign.id] });
+    qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+    qc.invalidateQueries({ queryKey: ['campaigns'] });
+    toast.success(`${successCount}/${targets.length}건 발송 완료`);
+  };
+
+  if (isLoading) return <div className="py-6 text-center text-sm text-muted-foreground">로딩 중...</div>;
+
+  const sortedLeads = leads ?? [];
+  const newCount = sortedLeads.filter(l => l.status === '신규').length;
+  const sentCount = sortedLeads.filter(l => l.status === '발송완료').length;
+  const selectableCount = sortedLeads.filter(l => l.status === '신규' && !l.is_existing_customer).length;
+
+  return (
+    <div className="space-y-2">
+      {/* 툴바 */}
+      <div className="flex items-center justify-between px-1">
+        <div className="text-xs text-muted-foreground">
+          총 {sortedLeads.length}건 · 신규 <span className="text-primary font-medium">{newCount}</span> · 발송완료 <span className="text-teal-600 font-medium">{sentCount}</span>
+        </div>
+        <Button size="sm"
+          disabled={selectedIds.size === 0 || sending}
+          onClick={handleSend}
+          className="h-7 text-xs px-3">
+          {sending
+            ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" />발송 중 {sendProgress.done}/{sendProgress.total}</>
+            : <><Send className="h-3 w-3 mr-1" />선택한 {selectedIds.size}명 이용권 발송</>}
+        </Button>
+      </div>
+
+      {/* 목록 */}
+      {sortedLeads.length === 0 ? (
+        <div className="py-8 text-center text-sm text-muted-foreground">
+          아직 수집된 리드가 없습니다.<br />
+          <span className="text-xs">공개 폼 URL을 공유해서 리드를 받으세요.</span>
+        </div>
+      ) : (
+        <div className="border border-border rounded-lg overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="p-2 w-8">
+                  <input type="checkbox"
+                    checked={selectableCount > 0 && selectedIds.size === selectableCount}
+                    onChange={toggleSelectAll}
+                    disabled={selectableCount === 0}
+                    className="accent-primary" />
+                </th>
+                <th className="p-2 text-left">이름</th>
+                <th className="p-2 text-left">학교</th>
+                <th className="p-2 text-left">연락처</th>
+                <th className="p-2 text-left">담당</th>
+                <th className="p-2 text-left">경로</th>
+                <th className="p-2 text-left">상태</th>
+                <th className="p-2 text-left">등록일</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {sortedLeads.map(l => {
+                const canSelect = l.status === '신규' && !l.is_existing_customer;
+                const statusColor = l.status === '발송완료' ? 'bg-teal-100 text-teal-700'
+                  : l.status === '실패' ? 'bg-red-100 text-red-700'
+                  : l.status === '제외' ? 'bg-slate-100 text-slate-500'
+                  : 'bg-blue-100 text-blue-700';
+                return (
+                  <tr key={l.id} className={`hover:bg-muted/20 ${!canSelect ? 'opacity-60' : ''}`}>
+                    <td className="p-2 text-center">
+                      <input type="checkbox"
+                        checked={selectedIds.has(l.id)}
+                        onChange={() => toggleSelect(l.id)}
+                        disabled={!canSelect}
+                        className="accent-primary" />
+                    </td>
+                    <td className="p-2 font-medium">
+                      {l.name}
+                      {l.is_existing_customer && (
+                        <span className="ml-1.5 inline-block bg-amber-100 text-amber-700 px-1 py-0.5 rounded text-[10px]">기존</span>
+                      )}
+                    </td>
+                    <td className="p-2">
+                      {l.school_name || '-'}
+                      {l.school_kind && <span className="text-muted-foreground ml-1">({l.school_kind})</span>}
+                    </td>
+                    <td className="p-2 font-mono">{l.phone || '-'}</td>
+                    <td className="p-2">{l.position || '-'}</td>
+                    <td className="p-2">{l.source === '기타' ? (l.source_etc || '기타') : (l.source || '-')}</td>
+                    <td className="p-2">
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${statusColor}`}>
+                        {l.status}
+                      </span>
+                    </td>
+                    <td className="p-2 text-muted-foreground">{l.created_at.slice(0, 10)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 체험권 탭 (기존 목록) ──────────────────────────
+function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign; convertedPhones: Set<string> }) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
