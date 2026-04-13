@@ -1193,8 +1193,8 @@ export default function Campaigns() {
 
       {/* 안내 */}
       <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-700">
-        체험권 발송은 <strong>이용권 관리 → 이용권 발송 → 체험 발송</strong>에서 진행합니다.
-        여기서는 캠페인별 현황 및 전환 추적을 확인하세요.
+        캠페인 공개 폼 URL/QR을 공유해 리드를 수집하고, <strong>리드 탭에서 선택 → 이용권 발송</strong>하면 자동으로 고객 DB로 전환됩니다.
+        캠페인별 참여자와 전환 현황을 한눈에 확인하세요.
       </div>
 
       {/* 캠페인 목록 */}
