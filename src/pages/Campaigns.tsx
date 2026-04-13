@@ -226,9 +226,14 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
 
   const save = useMutation({
     mutationFn: async () => {
-      const body = { ...form, status: form.status as Campaign['status'] };
-      if (isEdit) await updateCampaign(initial!.id, body);
-      else        await createCampaign({ ...body, slug: generateSlug() });
+      const body: Partial<Campaign> = { ...form, status: form.status as Campaign['status'] };
+      if (isEdit) {
+        // 기존 캠페인에 slug 없으면 자동 생성 (구 events에서 마이그레이션된 경우 대응)
+        if (!initial!.slug) body.slug = generateSlug();
+        await updateCampaign(initial!.id, body);
+      } else {
+        await createCampaign({ ...(body as Omit<Campaign, 'id' | 'created_at'>), slug: generateSlug() });
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['campaigns'] });
