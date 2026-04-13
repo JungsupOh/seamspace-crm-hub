@@ -657,14 +657,18 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     setSendProgress({ done: 0, total: targets.length });
 
     let successCount = 0;
+    let partialCount = 0; // 알림톡은 갔으나 DB 일부 누락
     for (let i = 0; i < targets.length; i++) {
       const lead = targets[i];
-      try {
-        // 1. 쿠폰 생성 (학급플랜 40명 / 1개월 기본)
-        const description = `${campaign.name} ${lead.school_name ?? ''} ${lead.name} 체험이용권`.trim();
-        const code = await apiCreateCoupon(description, '1', '40');
 
-        // 2. 알림톡 발송
+      // ─── Phase 1: 알림톡 발송까지 (실패 시 사용자에게 안 감 → '실패') ───
+      let code: string;
+      try {
+        // 1. 쿠폰 생성
+        const description = `${campaign.name} ${lead.school_name ?? ''} ${lead.name} 체험이용권`.trim();
+        code = await apiCreateCoupon(description, '1', '40');
+
+        // 2. 알림톡 발송 — 이 단계까지 통과하면 사용자에게 메시지가 이미 전송됨
         await apiSendCoupon({
           first_name: lead.name,
           phone: lead.phone,
@@ -673,7 +677,18 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
           duration: '1',
           send_type: 'trial',
         });
+      } catch (e) {
+        // 알림톡 발송 전 실패 → 사용자에게 메시지 안 갔으므로 안전하게 '실패' 처리 후 재시도 가능
+        await updateCampaignLead(lead.id, { status: '실패' }).catch(() => {});
+        console.warn(`[알림톡 발송 실패] ${lead.name}:`, e);
+        setSendProgress({ done: i + 1, total: targets.length });
+        continue;
+      }
 
+      // ─── Phase 2: DB 저장 (실패해도 이미 알림톡은 갔으므로 '발송완료' 유지) ───
+      let licenseSaved = false;
+      let contactId: string | null = null;
+      try {
         // 3. campaign_licenses 저장
         await addCampaignLicense({
           campaign_id:   campaign.id,
@@ -686,18 +701,22 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
           user_count:    '40',
           status:        '대기',
         });
+        licenseSaved = true;
+      } catch (e) {
+        console.warn(`[campaign_licenses 저장 실패] ${lead.name} (코드: ${code}):`, e);
+        toast.error(`${lead.name}: 알림톡 발송됨, DB 저장 실패. 쿠폰 코드: ${code} (수동 등록 필요)`, { duration: 12000 });
+      }
 
-        // 4. 01_Contacts(contacts) upsert — phone_normalized 기준
+      try {
+        // 4. contacts upsert — phone_normalized 기준
         const phoneNorm = (lead.phone_normalized || lead.phone.replace(/\D/g, ''));
         const existingRes = await fetch(
           `${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${encodeURIComponent(phoneNorm)}&select=id`,
           { headers: HEADERS }
         );
         const existing = existingRes.ok ? await existingRes.json() : [];
-        let contactId: string | null = null;
 
         if (Array.isArray(existing) && existing.length === 0) {
-          // 신규 생성
           const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/contacts`, {
             method: 'POST',
             headers: { ...HEADERS, Prefer: 'return=representation' },
@@ -719,20 +738,19 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
         } else {
           contactId = existing[0].id;
         }
-
-        // 5. 리드 상태 업데이트 → '발송완료'
-        await updateCampaignLead(lead.id, {
-          status: '발송완료',
-          converted_contact_id: contactId ?? undefined,
-          sent_at: new Date().toISOString(),
-        });
-
-        successCount++;
       } catch (e) {
-        // 실패 시 리드 상태 '실패'
-        await updateCampaignLead(lead.id, { status: '실패' }).catch(() => {});
-        console.warn(`[리드 발송 실패] ${lead.name}:`, e);
+        console.warn(`[contacts upsert 실패] ${lead.name}:`, e);
       }
+
+      // 5. 리드 상태 업데이트 → '발송완료' (알림톡 발송 사실이 가장 중요)
+      await updateCampaignLead(lead.id, {
+        status: '발송완료',
+        converted_contact_id: contactId ?? undefined,
+        sent_at: new Date().toISOString(),
+      }).catch(() => {});
+
+      if (licenseSaved && contactId) successCount++;
+      else partialCount++;
       setSendProgress({ done: i + 1, total: targets.length });
     }
 
@@ -741,7 +759,11 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     qc.invalidateQueries({ queryKey: ['campaign_leads', campaign.id] });
     qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
     qc.invalidateQueries({ queryKey: ['campaigns'] });
-    toast.success(`${successCount}/${targets.length}건 발송 완료`);
+    if (partialCount > 0) {
+      toast.warning(`${targets.length}건 알림톡 발송 완료 — 그중 ${partialCount}건은 DB 저장 일부 누락 (콘솔 확인)`);
+    } else {
+      toast.success(`${successCount}/${targets.length}건 발송 완료`);
+    }
   };
 
   if (isLoading) return <div className="py-6 text-center text-sm text-muted-foreground">로딩 중...</div>;
