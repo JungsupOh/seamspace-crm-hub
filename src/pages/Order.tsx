@@ -15,7 +15,7 @@ export default function Order() {
         </p>
         <div className="rounded-lg bg-muted/40 px-4 py-3 text-xs text-muted-foreground space-y-1">
           <p className="font-medium text-foreground">문의처</p>
-          <p>이메일: <a href="mailto:contact@seamspace.co.kr" className="text-primary hover:underline">contact@seamspace.co.kr</a></p>
+          <p>이메일: <a href="mailto:sales@tebahsoft.com" className="text-primary hover:underline">sales@tebahsoft.com</a></p>
         </div>
         <p className="text-[11px] text-muted-foreground mt-6">
           빠른 시일 내에 정식 오픈하겠습니다. 양해 부탁드립니다.
