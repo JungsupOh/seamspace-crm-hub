@@ -230,7 +230,7 @@ export default function CampaignForm() {
             <br />잠시만 기다려주세요!
           </p>
           <p className="text-xs text-muted-foreground">
-            문의: contact@seamspace.co.kr
+            문의: sales@tebahsoft.com
           </p>
         </div>
       </div>
