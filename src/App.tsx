@@ -17,6 +17,7 @@ import Upload from "./pages/Upload";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import Order from "./pages/Order";
+import OrderTest from "./pages/OrderTest";
 import OrderComplete from "./pages/OrderComplete";
 import OrderFail from "./pages/OrderFail";
 import ChangePassword from "./pages/ChangePassword";
@@ -125,9 +126,14 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       {/* 공개 캠페인 신청 폼 — 로그인 불필요 */}
       <Route path="/c/:slug" element={<CampaignForm />} />
+      {/* /order는 일반 사용자용 — 정식 오픈 전까지 '준비중' 페이지 */}
       <Route path="/order" element={<Order />} />
       <Route path="/order/complete" element={<OrderComplete />} />
       <Route path="/order/fail" element={<OrderFail />} />
+      {/* /order-test는 내부 결제 테스트용 — 실제 Toss 결제 흐름 */}
+      <Route path="/order-test" element={<OrderTest />} />
+      <Route path="/order-test/complete" element={<OrderComplete />} />
+      <Route path="/order-test/fail" element={<OrderFail />} />
 
       {/* Change password - requires auth but not full layout */}
       <Route
