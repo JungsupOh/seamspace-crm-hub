@@ -364,7 +364,7 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
               phone_normalized: normPhone,
             });
           }
-        } catch { /* 고객 등록 실패는 무시 */ }
+        } catch (err) { console.warn('고객 자동 등록 실패:', updated[i].contact_phone, err); }
       }
     }
 
@@ -895,20 +895,34 @@ export default function Licenses() {
           const usedCoupon = coupons.find(c => c.is_used);
           if (!usedCoupon) { skipped_unused += coupons.length; continue; }
 
-          // Airtable 신규 고객 생성
-          const newContact = await airtable.createRecord<ContactFields>('01_Contacts', {
-            Name: name,
-            Org_Name: usedCoupon.group_name || usedCoupon.descript || undefined,
-            Lead_Stage: '체험',
-            Notes: `[mDiary 체험권] 코드: ${usedCoupon.coupon_code} | 발급: ${usedCoupon.created_at.slice(0, 10)}${usedCoupon.edu_office_name ? ` | ${usedCoupon.edu_office_name}` : ''}`,
+          // phone_normalized 기준 중복 체크 (쿠폰에 전화번호 없으므로 이름 기반으로 Airtable 재확인)
+          // 동일 이름의 연락처가 이미 존재하는지 한 번 더 확인 (nameMap 생성 후 다른 경로에서 추가됐을 수 있음)
+          const existingByName = await airtable.fetchAll<ContactFields>('01_Contacts', {
+            filterByFormula: `{Name} = "${name.replace(/"/g, '\\"')}"`,
+            maxRecords: '1',
           });
-          created++;
+          let newContactId: string;
+          if (existingByName.length > 0) {
+            // 이미 존재하면 생성하지 않고 기존 연락처 사용
+            newContactId = existingByName[0].id;
+            linked += coupons.length;
+          } else {
+            // Airtable 신규 고객 생성
+            const newContact = await airtable.createRecord<ContactFields>('01_Contacts', {
+              Name: name,
+              Org_Name: usedCoupon.group_name || usedCoupon.descript || undefined,
+              Lead_Stage: '체험',
+              Notes: `[mDiary 체험권] 코드: ${usedCoupon.coupon_code} | 발급: ${usedCoupon.created_at.slice(0, 10)}${usedCoupon.edu_office_name ? ` | ${usedCoupon.edu_office_name}` : ''}`,
+            });
+            newContactId = newContact.id;
+            created++;
+          }
 
           // 같은 이름의 모든 쿠폰 연결
           await Promise.all(coupons.map(c =>
             fetch(`${SUPABASE_URL}/rest/v1/mdiary_coupons?id=eq.${c.id}`, {
               method: 'PATCH', headers,
-              body: JSON.stringify({ link_confirmed: true, linked_contact_id: newContact.id }),
+              body: JSON.stringify({ link_confirmed: true, linked_contact_id: newContactId }),
             })
           ));
 

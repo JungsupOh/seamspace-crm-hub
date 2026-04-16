@@ -225,7 +225,23 @@ function AddContactDialog({ open, onClose }: { open: boolean; onClose: () => voi
 
   const handleSave = async () => {
     if (!f.Name?.trim()) { toast.error('이름을 입력하세요'); return; }
-    await createContact.mutateAsync(f);
+    // phone_normalized 자동 설정 + 중복 체크
+    const fields = { ...f };
+    if (fields.Phone) {
+      const normPhone = fields.Phone.replace(/\D/g, '');
+      fields.phone_normalized = normPhone;
+      if (normPhone.length >= 7) {
+        const existing = await airtable.fetchAll<ContactFields>('01_Contacts', {
+          filterByFormula: `{phone_normalized} = "${normPhone}"`,
+          maxRecords: '1',
+        });
+        if (existing.length > 0) {
+          toast.error('이미 등록된 전화번호입니다');
+          return;
+        }
+      }
+    }
+    await createContact.mutateAsync(fields);
     // mDiary 쿠폰 이력 자동 매칭 확인
     const coupons = await getMDiaryCouponsByName(f.Name.trim()).catch(() => []);
     if (coupons.length > 0) {

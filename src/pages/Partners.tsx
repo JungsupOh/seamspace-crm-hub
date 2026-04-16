@@ -1006,7 +1006,7 @@ function PartnerDealsSection({
         try {
           const phone = b.buyer_phone?.replace(/\D/g, '') ?? '';
           let exists = false;
-          if (phone.length >= 9) {
+          if (phone.length >= 7) {
             const existing = await airtable.fetchAll<ContactFields>('01_Contacts', {
               filterByFormula: `{phone_normalized}="${phone}"`,
               maxRecords: '1',
