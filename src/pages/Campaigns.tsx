@@ -676,11 +676,10 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
   };
 
   const toggleSelectAll = () => {
-    const selectable = filtered.filter(p => p.origin === 'form' && !['체험발송', '전환', '스팸', '이탈'].includes(p.status));
-    if (selectedIds.size === selectable.length && selectable.length > 0) {
+    if (selectedIds.size === filtered.length && filtered.length > 0) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(selectable.map(p => p.id)));
+      setSelectedIds(new Set(filtered.map(p => p.id)));
     }
   };
 
@@ -859,8 +858,8 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
   const statusCounts = new Map<string, number>();
   participants.forEach(p => statusCounts.set(p.status, (statusCounts.get(p.status) ?? 0) + 1));
 
-  // 발송 가능: form 출처 + 신규 + 기존고객 아님
-  const selectableCount = filtered.filter(p => p.origin === 'form' && p.status === '신규' && p.customerTier === 'new').length;
+  // 이용권 발송 가능 수 (form 출처 + 신규 + 기존고객 아님)
+  const sendableCount = filtered.filter(p => p.origin === 'form' && p.status === '신규' && p.customerTier === 'new').length;
 
   const selectAllNew = () => {
     const selectable = filtered.filter(p => p.origin === 'form' && p.status === '신규' && p.customerTier === 'new');
@@ -958,10 +957,10 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          {selectableCount > 0 && !sending && (
+          {sendableCount > 0 && !sending && (
             <Button size="sm" variant="outline" onClick={selectAllNew}
               className="h-7 text-xs px-2.5">
-              신규 전체 선택 ({selectableCount})
+              신규 전체 선택 ({sendableCount})
             </Button>
           )}
           <Button size="sm"
@@ -992,9 +991,9 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
               <tr>
                 <th className="p-2 w-8">
                   <input type="checkbox"
-                    checked={selectableCount > 0 && selectedIds.size === selectableCount}
+                    checked={filtered.length > 0 && selectedIds.size === filtered.length}
                     onChange={toggleSelectAll}
-                    disabled={selectableCount === 0}
+                    disabled={filtered.length === 0}
                     className="accent-primary" />
                 </th>
                 <th className="p-2 text-left">이름</th>
@@ -1011,15 +1010,13 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
             </thead>
             <tbody className="divide-y divide-border">
               {filtered.map(p => {
-                const canSelect = p.origin === 'form' && !['체험발송', '전환', '스팸', '이탈'].includes(p.status);
                 const statusColor = LEAD_STATUS_META[p.status as LeadStatus]?.color ?? 'bg-slate-100 text-slate-600';
                 return (
-                  <tr key={p.id} className={`hover:bg-muted/20 ${!canSelect && p.status === '신규' ? 'opacity-60' : ''}`}>
+                  <tr key={p.id} className="hover:bg-muted/20">
                     <td className="p-2 text-center">
                       <input type="checkbox"
                         checked={selectedIds.has(p.id)}
                         onChange={() => toggleSelect(p.id)}
-                        disabled={!canSelect}
                         className="accent-primary" />
                     </td>
                     <td className="p-2 font-medium">
