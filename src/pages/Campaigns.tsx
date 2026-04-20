@@ -500,7 +500,9 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<'leads' | 'licenses'>('leads');
 
-  // 캠페인 펼칠 때 즉시 mDiary 쿠폰 상태 동기화 (대기/사용중만 — 부하 최소)
+  // 캠페인 펼칠 때 즉시 쿠폰 상태 동기화
+  // 1. Edge Function으로 mDiary → mdiary_coupons 동기화
+  // 2. mdiary_coupons에서 상태 읽어와 campaign_licenses 직접 업데이트 (프론트에서)
   const { data: syncDone } = useQuery({
     queryKey: ['campaign_license_sync', campaign.id],
     queryFn: async () => {
@@ -509,14 +511,37 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
         .filter(l => l.coupon_code && (l.status === '대기' || l.status === '사용중'))
         .map(l => l.coupon_code!);
       if (pendingCodes.length === 0) return true;
-      const r = await fetch(`${SUPABASE_URL}/functions/v1/get-coupon-status`, {
+
+      // Step 1: Edge Function → mDiary MySQL 조회 → mdiary_coupons 업데이트
+      await fetch(`${SUPABASE_URL}/functions/v1/get-coupon-status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_KEY}` },
         body: JSON.stringify({ codes: pendingCodes, limit: pendingCodes.length }),
-      });
-      if (r.ok) {
-        qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
-      }
+      }).catch(() => {});
+
+      // Step 2: mdiary_coupons에서 최신 상태 읽기
+      const mdiaryRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/mdiary_coupons?coupon_code=in.(${pendingCodes.map(c => `"${c}"`).join(',')})&select=coupon_code,is_used,service_expire_at`,
+        { headers: HEADERS }
+      );
+      if (!mdiaryRes.ok) return true;
+      const mdiaryData: { coupon_code: string; is_used: boolean; service_expire_at?: string }[] = await mdiaryRes.json();
+      if (!Array.isArray(mdiaryData) || mdiaryData.length === 0) return true;
+
+      // Step 3: campaign_licenses 직접 업데이트 (프론트에서)
+      const today = new Date().toISOString().slice(0, 10);
+      await Promise.all(mdiaryData.map(m => {
+        const status = !m.is_used ? '대기'
+          : (m.service_expire_at && m.service_expire_at < today) ? '만료'
+          : '사용중';
+        return fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?coupon_code=eq.${encodeURIComponent(m.coupon_code)}`, {
+          method: 'PATCH',
+          headers: HEADERS,
+          body: JSON.stringify({ status, service_expire_at: m.service_expire_at ?? null }),
+        }).catch(() => {});
+      }));
+
+      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
       return true;
     },
     staleTime: 1000 * 60 * 5,
