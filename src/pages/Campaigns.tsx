@@ -33,11 +33,27 @@ interface Campaign {
   description?: string;
   image_url?: string;
   slug?: string;
+  type?: 'trial' | 'coldmail' | 'event' | 'inquiry';
   start_date?: string;
   end_date?: string;
   status: 'active' | 'ended' | 'planned';
   created_at: string;
 }
+
+// 리드 상태 정의
+const LEAD_STATUSES = ['신규', '1차발송', '응답', '2차발송', '체험발송', '전환', '보류', '이탈', '스팸'] as const;
+type LeadStatus = typeof LEAD_STATUSES[number];
+const LEAD_STATUS_META: Record<LeadStatus, { color: string }> = {
+  '신규':     { color: 'bg-blue-100 text-blue-700' },
+  '1차발송':  { color: 'bg-indigo-100 text-indigo-700' },
+  '응답':     { color: 'bg-purple-100 text-purple-700' },
+  '2차발송':  { color: 'bg-violet-100 text-violet-700' },
+  '체험발송':  { color: 'bg-teal-100 text-teal-700' },
+  '전환':     { color: 'bg-emerald-100 text-emerald-700' },
+  '보류':     { color: 'bg-amber-100 text-amber-700' },
+  '이탈':     { color: 'bg-slate-100 text-slate-500' },
+  '스팸':     { color: 'bg-red-100 text-red-600' },
+};
 
 interface CampaignLicense {
   id: string;
@@ -67,7 +83,7 @@ interface CampaignLead {
   source?: string;
   source_etc?: string;
   marketing_consent?: boolean;
-  status: '신규' | '발송완료' | '실패' | '제외';
+  status: string;
   is_existing_customer?: boolean;
   converted_contact_id?: string;
   sent_at?: string;
@@ -525,7 +541,7 @@ interface ParticipantRow {
   position?: string;
   source?: string;
   source_etc?: string;
-  status: '신규' | '발송완료' | '실패' | '제외';
+  status: string;
   customerTier: CustomerTier;
   created_at: string;
   // 재발송용 — 이미 발송된 경우에만 존재
@@ -660,7 +676,7 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
   };
 
   const toggleSelectAll = () => {
-    const selectable = participants.filter(p => p.origin === 'form' && p.status === '신규' && p.customerTier === 'new');
+    const selectable = filtered.filter(p => p.origin === 'form' && !['체험발송', '전환', '스팸', '이탈'].includes(p.status));
     if (selectedIds.size === selectable.length && selectable.length > 0) {
       setSelectedIds(new Set());
     } else {
@@ -762,9 +778,9 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
         console.warn(`[contacts upsert 3회 재시도 모두 실패] ${lead.name}:`, e);
       }
 
-      // 5. 리드 상태 업데이트 → '발송완료' (알림톡 발송 사실이 가장 중요)
+      // 5. 리드 상태 업데이트 → '체험발송' (알림톡 발송 사실이 가장 중요)
       await updateCampaignLead(lead.id, {
-        status: '발송완료',
+        status: '체험발송',
         converted_contact_id: contactId ?? undefined,
         sent_at: new Date().toISOString(),
       }).catch(() => {});
@@ -786,15 +802,68 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     }
   };
 
+  // 일괄 상태 변경
+  const [bulkStatus, setBulkStatus] = useState<string>('');
+  const handleBulkStatusChange = async () => {
+    if (!bulkStatus || selectedIds.size === 0) return;
+    const leadIds = [...selectedIds]
+      .filter(id => id.startsWith('lead:'))
+      .map(id => id.replace(/^lead:/, ''));
+    if (leadIds.length === 0) { toast.error('폼 출처 리드만 상태 변경 가능합니다'); return; }
+    try {
+      await Promise.all(leadIds.map(id => updateCampaignLead(id, { status: bulkStatus })));
+      toast.success(`${leadIds.length}건 상태를 '${bulkStatus}'로 변경`);
+      setSelectedIds(new Set());
+      setBulkStatus('');
+      qc.invalidateQueries({ queryKey: ['campaign_leads', campaign.id] });
+    } catch { toast.error('상태 변경 실패'); }
+  };
+
+  // 엑셀 다운로드
+  const handleDownload = () => {
+    const targets = statusFilter === '전체'
+      ? participants
+      : participants.filter(p => p.status === statusFilter);
+    if (targets.length === 0) { toast.error('다운로드할 데이터가 없습니다'); return; }
+    const rows = targets.map(p => ({
+      '이름':     p.name,
+      '학교':     p.school_name ?? '',
+      '연락처':   p.phone,
+      '이메일':   p.email ?? '',
+      '담당업무':  p.position ?? '',
+      '경로':     p.source === '기타' ? (p.source_etc ?? '기타') : (p.source ?? ''),
+      '출처':     p.origin === 'form' ? '폼' : '수동',
+      '구분':     p.customerTier === 'purchased' ? '구매고객' : p.customerTier === 'retrial' ? '재신청' : '신규',
+      '쿠폰코드':  p.coupon_code ?? '',
+      '상태':     p.status,
+      '등록일':   p.created_at.slice(0, 10),
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '리드');
+    const filterLabel = statusFilter === '전체' ? '' : `_${statusFilter}`;
+    XLSX.writeFile(wb, `${campaign.name}_리드${filterLabel}_${new Date().toISOString().slice(0,10)}.xlsx`);
+    toast.success(`${targets.length}건 다운로드`);
+  };
+
+  // 상태 필터
+  const [statusFilter, setStatusFilter] = useState<string>('전체');
+
   if (isLoading) return <div className="py-6 text-center text-sm text-muted-foreground">로딩 중...</div>;
 
-  const newCount = participants.filter(p => p.status === '신규').length;
-  const sentCount = participants.filter(p => p.status === '발송완료').length;
+  const filtered = statusFilter === '전체'
+    ? participants.filter(p => p.status !== '스팸') // 스팸은 기본 숨김
+    : participants.filter(p => p.status === statusFilter);
+
+  // 통계 (전체 기준)
+  const statusCounts = new Map<string, number>();
+  participants.forEach(p => statusCounts.set(p.status, (statusCounts.get(p.status) ?? 0) + 1));
+
   // 발송 가능: form 출처 + 신규 + 기존고객 아님
-  const selectableCount = participants.filter(p => p.origin === 'form' && p.status === '신규' && p.customerTier === 'new').length;
+  const selectableCount = filtered.filter(p => p.origin === 'form' && p.status === '신규' && p.customerTier === 'new').length;
 
   const selectAllNew = () => {
-    const selectable = participants.filter(p => p.origin === 'form' && p.status === '신규' && p.customerTier === 'new');
+    const selectable = filtered.filter(p => p.origin === 'form' && p.status === '신규' && p.customerTier === 'new');
     setSelectedIds(new Set(selectable.map(p => p.id)));
   };
 
@@ -853,11 +922,40 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
 
   return (
     <div className="space-y-2">
-      {/* 툴바 */}
+      {/* 상단: 상태 통계 */}
+      <div className="flex flex-wrap gap-1.5 px-1 text-xs">
+        <button onClick={() => setStatusFilter('전체')}
+          className={`px-2 py-1 rounded-full border transition-colors ${statusFilter === '전체' ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-muted/50'}`}>
+          전체 {participants.filter(p => p.status !== '스팸').length}
+        </button>
+        {LEAD_STATUSES.filter(s => statusCounts.has(s)).map(s => (
+          <button key={s} onClick={() => setStatusFilter(s)}
+            className={`px-2 py-1 rounded-full border transition-colors ${statusFilter === s ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:bg-muted/50'}`}>
+            {s} {statusCounts.get(s)}
+          </button>
+        ))}
+      </div>
+
+      {/* 툴바: 액션 */}
       <div className="flex items-center justify-between px-1 flex-wrap gap-2">
-        <div className="text-xs text-muted-foreground">
-          총 {participants.length}건 · 신규 <span className="text-primary font-medium">{newCount}</span> · 발송완료 <span className="text-teal-600 font-medium">{sentCount}</span>
-          {selectableCount > 0 && <span className="ml-2 text-muted-foreground">(발송 가능: {selectableCount}명)</span>}
+        <div className="flex items-center gap-1.5">
+          {/* 일괄 상태 변경 */}
+          {selectedIds.size > 0 && !sending && (
+            <>
+              <Select value={bulkStatus} onValueChange={setBulkStatus}>
+                <SelectTrigger className="h-7 text-xs w-28"><SelectValue placeholder="상태 변경" /></SelectTrigger>
+                <SelectContent>
+                  {LEAD_STATUSES.map(s => <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {bulkStatus && (
+                <Button size="sm" variant="outline" onClick={handleBulkStatusChange}
+                  className="h-7 text-xs px-2">
+                  {selectedIds.size}건 변경
+                </Button>
+              )}
+            </>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           {selectableCount > 0 && !sending && (
@@ -874,11 +972,15 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
               ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" />발송 중 {sendProgress.done}/{sendProgress.total}</>
               : <><Send className="h-3 w-3 mr-1" />선택한 {selectedIds.size}명 이용권 발송</>}
           </Button>
+          <Button size="sm" variant="outline" onClick={handleDownload}
+            className="h-7 text-xs px-2.5">
+            <Upload className="h-3 w-3 mr-1 rotate-180" />다운로드
+          </Button>
         </div>
       </div>
 
       {/* 목록 */}
-      {participants.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="py-8 text-center text-sm text-muted-foreground">
           아직 수집된 리드가 없습니다.<br />
           <span className="text-xs">공개 폼 URL을 공유해서 리드를 받거나, "발송된 체험권" 탭에서 수동 등록하세요.</span>
@@ -908,12 +1010,9 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {participants.map(p => {
-                const canSelect = p.origin === 'form' && p.status === '신규' && p.customerTier === 'new';
-                const statusColor = p.status === '발송완료' ? 'bg-teal-100 text-teal-700'
-                  : p.status === '실패' ? 'bg-red-100 text-red-700'
-                  : p.status === '제외' ? 'bg-slate-100 text-slate-500'
-                  : 'bg-blue-100 text-blue-700';
+              {filtered.map(p => {
+                const canSelect = p.origin === 'form' && !['체험발송', '전환', '스팸', '이탈'].includes(p.status);
+                const statusColor = LEAD_STATUS_META[p.status as LeadStatus]?.color ?? 'bg-slate-100 text-slate-600';
                 return (
                   <tr key={p.id} className={`hover:bg-muted/20 ${!canSelect && p.status === '신규' ? 'opacity-60' : ''}`}>
                     <td className="p-2 text-center">
