@@ -1,6 +1,6 @@
 // Supabase Edge Function: get-coupon-status
 // 1. 운영DB(MySQL)에서 쿠폰 상태 조회
-// 2. Supabase deal_licenses에 status + service_expire_at 업데이트 (동기화)
+// 2. Supabase deal_licenses + campaign_licenses에 status + service_expire_at 업데이트
 // 3. Supabase mdiary_coupons에 is_used + service_expire_at + member_count + group_name + edu_office_name + admin_last_login 업데이트
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -40,13 +40,18 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // codes 미제공 시 → deal_licenses(대기/사용중) + mdiary_coupons(is_used=true) 자동 조회
+    // codes 미제공 시 → deal_licenses(대기/사용중) + campaign_licenses(대기/사용중) + mdiary_coupons(is_used=true) 자동 조회
     // 미사용 쿠폰은 그룹 데이터가 없어 MySQL 부하만 높임 → 제외
     let codes: string[] = body.codes ?? [];
     if (codes.length === 0) {
-      const [{ data: dealData }, { data: mdiaryData }] = await Promise.all([
+      const [{ data: dealData }, { data: campaignData }, { data: mdiaryData }] = await Promise.all([
         supabase
           .from("deal_licenses")
+          .select("coupon_code")
+          .in("status", ["대기", "사용중"])
+          .not("coupon_code", "is", null),
+        supabase
+          .from("campaign_licenses")
           .select("coupon_code")
           .in("status", ["대기", "사용중"])
           .not("coupon_code", "is", null),
@@ -56,9 +61,10 @@ Deno.serve(async (req: Request) => {
           .eq("is_used", true)
           .not("coupon_code", "is", null),
       ]);
-      const dealCodes   = (dealData   ?? []).map((r: { coupon_code: string }) => r.coupon_code).filter(Boolean);
-      const mdiaryCodes = (mdiaryData ?? []).map((r: { coupon_code: string }) => r.coupon_code).filter(Boolean);
-      codes = [...new Set([...dealCodes, ...mdiaryCodes])];
+      const dealCodes     = (dealData     ?? []).map((r: { coupon_code: string }) => r.coupon_code).filter(Boolean);
+      const campaignCodes = (campaignData ?? []).map((r: { coupon_code: string }) => r.coupon_code).filter(Boolean);
+      const mdiaryCodes   = (mdiaryData   ?? []).map((r: { coupon_code: string }) => r.coupon_code).filter(Boolean);
+      codes = [...new Set([...dealCodes, ...campaignCodes, ...mdiaryCodes])];
     }
     const totalCodes = codes.length;
     if (totalCodes === 0) return json({ updated: 0, total: 0, hasMore: false });
@@ -164,6 +170,10 @@ Deno.serve(async (req: Request) => {
 
         return Promise.all([
           supabase.from("deal_licenses").update({
+            status,
+            service_expire_at: row.service_expire_at ?? null,
+          }).eq("coupon_code", row.coupon_code),
+          supabase.from("campaign_licenses").update({
             status,
             service_expire_at: row.service_expire_at ?? null,
           }).eq("coupon_code", row.coupon_code),

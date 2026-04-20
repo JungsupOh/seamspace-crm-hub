@@ -1136,6 +1136,27 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
     queryFn: () => getCampaignLicenses(campaign.id),
   });
 
+  // 탭 열릴 때 자동으로 mDiary 쿠폰 상태 동기화 (5분 캐시)
+  useQuery({
+    queryKey: ['campaign_license_sync', campaign.id],
+    queryFn: async () => {
+      const lics = await getCampaignLicenses(campaign.id);
+      const codes = lics.map(l => l.coupon_code).filter(Boolean) as string[];
+      if (codes.length === 0) return null;
+      // Edge Function으로 해당 쿠폰만 상태 동기화
+      await fetch(`${SUPABASE_URL}/functions/v1/get-coupon-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_KEY}` },
+        body: JSON.stringify({ codes }),
+      }).catch(() => {});
+      // 동기화 후 목록 새로고침
+      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+      return true;
+    },
+    staleTime: 1000 * 60 * 5, // 5분간 캐시 — 불필요한 재호출 방지
+    refetchOnWindowFocus: false,
+  });
+
   const normalize = (p?: string) => (p ?? '').replace(/\D/g, '');
   const isConverted = (phone?: string) => phone ? convertedPhones.has(normalize(phone)) : false;
 
