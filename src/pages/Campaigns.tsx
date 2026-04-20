@@ -500,15 +500,15 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<'leads' | 'licenses'>('leads');
 
-  // 캠페인 펼칠 때 즉시 mDiary 쿠폰 상태 동기화 (대기 상태만 — 부하 최소)
-  useQuery({
+  // 캠페인 펼칠 때 즉시 mDiary 쿠폰 상태 동기화 (대기/사용중만 — 부하 최소)
+  const { data: syncDone } = useQuery({
     queryKey: ['campaign_license_sync', campaign.id],
     queryFn: async () => {
       const lics = await getCampaignLicenses(campaign.id);
       const pendingCodes = lics
         .filter(l => l.coupon_code && (l.status === '대기' || l.status === '사용중'))
         .map(l => l.coupon_code!);
-      if (pendingCodes.length === 0) return null;
+      if (pendingCodes.length === 0) return true;
       const r = await fetch(`${SUPABASE_URL}/functions/v1/get-coupon-status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_KEY}` },
@@ -523,8 +523,29 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
     refetchOnWindowFocus: false,
   });
 
+  // 동기화 후 라이선스 통계 (동기화 완료 시만 표시)
+  const { data: syncedLicenses } = useQuery({
+    queryKey: ['campaign_licenses', campaign.id],
+    queryFn: () => getCampaignLicenses(campaign.id),
+  });
+  const normalize = (p?: string) => (p ?? '').replace(/\D/g, '');
+  const licTotal    = syncedLicenses?.length ?? 0;
+  const licActive   = syncedLicenses?.filter(l => l.status === '사용중').length ?? 0;
+  const licExpired  = syncedLicenses?.filter(l => l.status === '만료').length ?? 0;
+  const licConverted = syncedLicenses?.filter(l => convertedPhones.has(normalize(l.contact_phone))).length ?? 0;
+  const convRate    = licTotal > 0 ? Math.round((licConverted / licTotal) * 100) : 0;
+
   return (
     <div>
+      {/* 동기화 후 이용권 통계 */}
+      {syncDone && licTotal > 0 && (
+        <div className="flex items-center gap-5 px-2 py-2.5 mb-3 rounded-lg bg-muted/20 border border-border">
+          <Stat icon={<Ticket className="h-3.5 w-3.5" />} label="발송" value={licTotal} />
+          <Stat icon={<Clock className="h-3.5 w-3.5" />} label="사용중" value={licActive} accent="teal" />
+          <Stat icon={<XCircle className="h-3.5 w-3.5" />} label="만료" value={licExpired} accent="orange" />
+          <Stat icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="딜 전환" value={`${licConverted} (${convRate}%)`} accent="blue" />
+        </div>
+      )}
       <div className="flex border-b border-border mb-3">
         <button onClick={() => setActiveTab('leads')}
           className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5
@@ -1324,22 +1345,17 @@ interface CampaignCardProps {
 function CampaignCard({ campaign, convertedPhones, onEdit, onDelete, canEdit }: CampaignCardProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const { data: licenses } = useQuery({
-    queryKey: ['campaign_licenses', campaign.id],
-    queryFn: () => getCampaignLicenses(campaign.id),
-  });
   const { data: leads } = useQuery({
     queryKey: ['campaign_leads', campaign.id],
     queryFn: () => getCampaignLeads(campaign.id),
   });
+  const { data: licenses } = useQuery({
+    queryKey: ['campaign_licenses', campaign.id],
+    queryFn: () => getCampaignLicenses(campaign.id),
+  });
 
-  const normalize = (p?: string) => (p ?? '').replace(/\D/g, '');
-  const newLeads   = leads?.filter(l => l.status === '신규').length ?? 0;
-  const total      = licenses?.length ?? 0;
-  const active     = licenses?.filter(l => l.status === '사용중').length ?? 0;
-  const expired    = licenses?.filter(l => l.status === '만료').length ?? 0;
-  const converted  = licenses?.filter(l => convertedPhones.has(normalize(l.contact_phone))).length ?? 0;
-  const convRate   = total > 0 ? Math.round((converted / total) * 100) : 0;
+  const newLeads = leads?.filter(l => l.status === '신규').length ?? 0;
+  const total    = licenses?.length ?? 0;
 
   const statusMeta = CAMPAIGN_STATUS[campaign.status];
 
@@ -1372,13 +1388,10 @@ function CampaignCard({ campaign, convertedPhones, onEdit, onDelete, canEdit }: 
           )}
         </div>
 
-        {/* 통계 */}
+        {/* 통계 (동기화 전에도 정확한 것만 표시) */}
         <div className="flex items-center gap-5 shrink-0">
-          <Stat icon={<Inbox className="h-3.5 w-3.5" />} label="신규" value={newLeads} accent="purple" />
-          <Stat icon={<Users className="h-3.5 w-3.5" />} label="발송" value={total} />
-          <Stat icon={<Clock className="h-3.5 w-3.5" />} label="사용중" value={active} accent="teal" />
-          <Stat icon={<XCircle className="h-3.5 w-3.5" />} label="만료" value={expired} accent="orange" />
-          <Stat icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="전환" value={`${converted} (${convRate}%)`} accent="blue" />
+          <Stat icon={<Inbox className="h-3.5 w-3.5" />} label="신규 리드" value={newLeads} accent="purple" />
+          <Stat icon={<Ticket className="h-3.5 w-3.5" />} label="발송" value={total} />
         </div>
 
         {/* 수정/삭제 */}
