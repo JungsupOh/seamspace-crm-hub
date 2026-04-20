@@ -159,7 +159,7 @@ Deno.serve(async (req: Request) => {
       ]);
     }
 
-    const SYNC_BATCH = 20;
+    const SYNC_BATCH = 10;
     for (let i = 0; i < rows.length; i += SYNC_BATCH) {
       const batch = rows.slice(i, i + SYNC_BATCH);
       const results = await Promise.all(batch.map(row => {
@@ -169,14 +169,16 @@ Deno.serve(async (req: Request) => {
           : "사용중";
 
         return Promise.all([
+          // deal_licenses + campaign_licenses 동시 업데이트 (RPC 대신 순차 실행으로 리소스 절약)
           supabase.from("deal_licenses").update({
             status,
             service_expire_at: row.service_expire_at ?? null,
-          }).eq("coupon_code", row.coupon_code),
-          supabase.from("campaign_licenses").update({
-            status,
-            service_expire_at: row.service_expire_at ?? null,
-          }).eq("coupon_code", row.coupon_code),
+          }).eq("coupon_code", row.coupon_code).then(() =>
+            supabase.from("campaign_licenses").update({
+              status,
+              service_expire_at: row.service_expire_at ?? null,
+            }).eq("coupon_code", row.coupon_code)
+          ),
           supabase.from("mdiary_coupons").update({
             is_used:           !!row.is_used,
             service_expire_at: row.service_expire_at ?? null,
