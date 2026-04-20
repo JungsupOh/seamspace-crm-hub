@@ -497,7 +497,32 @@ interface CampaignDetailProps {
 }
 
 function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
+  const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<'leads' | 'licenses'>('leads');
+
+  // 캠페인 펼칠 때 즉시 mDiary 쿠폰 상태 동기화 (대기 상태만 — 부하 최소)
+  useQuery({
+    queryKey: ['campaign_license_sync', campaign.id],
+    queryFn: async () => {
+      const lics = await getCampaignLicenses(campaign.id);
+      const pendingCodes = lics
+        .filter(l => l.coupon_code && (l.status === '대기' || l.status === '사용중'))
+        .map(l => l.coupon_code!);
+      if (pendingCodes.length === 0) return null;
+      const r = await fetch(`${SUPABASE_URL}/functions/v1/get-coupon-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_KEY}` },
+        body: JSON.stringify({ codes: pendingCodes, limit: pendingCodes.length }),
+      });
+      if (r.ok) {
+        qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+      }
+      return true;
+    },
+    staleTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+  });
+
   return (
     <div>
       <div className="flex border-b border-border mb-3">
@@ -1136,26 +1161,7 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
     queryFn: () => getCampaignLicenses(campaign.id),
   });
 
-  // 탭 열릴 때 자동으로 mDiary 쿠폰 상태 동기화 (5분 캐시)
-  useQuery({
-    queryKey: ['campaign_license_sync', campaign.id],
-    queryFn: async () => {
-      const lics = await getCampaignLicenses(campaign.id);
-      const codes = lics.map(l => l.coupon_code).filter(Boolean) as string[];
-      if (codes.length === 0) return null;
-      // Edge Function으로 해당 쿠폰만 상태 동기화
-      await fetch(`${SUPABASE_URL}/functions/v1/get-coupon-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_KEY}` },
-        body: JSON.stringify({ codes }),
-      }).catch(() => {});
-      // 동기화 후 목록 새로고침
-      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
-      return true;
-    },
-    staleTime: 1000 * 60 * 5, // 5분간 캐시 — 불필요한 재호출 방지
-    refetchOnWindowFocus: false,
-  });
+  // 동기화는 CampaignDetail 레벨에서 실행 (캠페인 펼칠 때 즉시)
 
   const normalize = (p?: string) => (p ?? '').replace(/\D/g, '');
   const isConverted = (phone?: string) => phone ? convertedPhones.has(normalize(phone)) : false;
