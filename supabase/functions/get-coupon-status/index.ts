@@ -153,33 +153,35 @@ Deno.serve(async (req: Request) => {
       ]);
     }
 
-    const SYNC_BATCH = 10;
-    for (let i = 0; i < rows.length; i += SYNC_BATCH) {
-      const batch = rows.slice(i, i + SYNC_BATCH);
-      const results = await Promise.all(batch.map(row => {
-        const status =
-          !row.is_used                                              ? "대기"
-          : row.service_expire_at && row.service_expire_at < today ? "만료"
-          : "사용중";
+    // 순차 처리 — 리소스 제한 회피 (3266개 수준이면 순차도 수 초 내 완료)
+    for (const row of rows) {
+      const status =
+        !row.is_used                                              ? "대기"
+        : row.service_expire_at && row.service_expire_at < today ? "만료"
+        : "사용중";
 
-        return Promise.all([
-          supabase.from("deal_licenses").update({
-            status,
-            service_expire_at: row.service_expire_at ?? null,
-          }).eq("coupon_code", row.coupon_code),
-          supabase.from("mdiary_coupons").update({
-            is_used:           !!row.is_used,
-            service_expire_at: row.service_expire_at ?? null,
-            member_count:      row.member_count ?? 0,
-            group_name:        row.group_name    ?? null,
-            edu_office_name:   row.edu_office_name ?? null,
-            admin_name:        row.admin_name    ?? null,
-            admin_phone:       row.admin_phone   ?? null,
-            admin_last_login:  row.admin_last_login ?? null,
-          }).eq("coupon_code", row.coupon_code),
-        ]);
-      }));
-      updated += results.filter(([dl, mc]) => !dl.error || !mc.error).length;
+      await supabase.from("deal_licenses").update({
+        status,
+        service_expire_at: row.service_expire_at ?? null,
+      }).eq("coupon_code", row.coupon_code);
+
+      await supabase.from("campaign_licenses").update({
+        status,
+        service_expire_at: row.service_expire_at ?? null,
+      }).eq("coupon_code", row.coupon_code);
+
+      await supabase.from("mdiary_coupons").update({
+        is_used:           !!row.is_used,
+        service_expire_at: row.service_expire_at ?? null,
+        member_count:      row.member_count ?? 0,
+        group_name:        row.group_name    ?? null,
+        edu_office_name:   row.edu_office_name ?? null,
+        admin_name:        row.admin_name    ?? null,
+        admin_phone:       row.admin_phone   ?? null,
+        admin_last_login:  row.admin_last_login ?? null,
+      }).eq("coupon_code", row.coupon_code);
+
+      updated++;
     }
 
     return json({ updated, deleted: deletedCodes.length, total: totalCodes, processed: offset + rows.length, hasMore: offset + rows.length < totalCodes });
