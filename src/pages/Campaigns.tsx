@@ -500,9 +500,9 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<'leads' | 'licenses'>('leads');
 
-  // 캠페인 펼칠 때 즉시 쿠폰 상태 동기화
-  // 1) Edge Function(원본)으로 mDiary→deal_licenses+mdiary_coupons 동기화
-  // 2) mdiary_coupons에서 최신 상태 읽어 campaign_licenses에 직접 반영
+  // 캠페인 펼칠 때 쿠폰 상태 동기화
+  // Edge Function 없이 mdiary_coupons(이미 동기화된 데이터) → campaign_licenses 반영
+  // mdiary_coupons는 이용권 관리 > "운영DB 동기화" 버튼으로 주기적 갱신
   const { data: syncDone } = useQuery({
     queryKey: ['campaign_license_sync', campaign.id],
     queryFn: async () => {
@@ -512,36 +512,28 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
         .map(l => l.coupon_code!);
       if (pendingCodes.length === 0) return true;
 
-      // Step 1: Edge Function → mDiary 조회 → deal_licenses + mdiary_coupons 동기화
-      await fetch(`${SUPABASE_URL}/functions/v1/get-coupon-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_KEY}` },
-        body: JSON.stringify({ codes: pendingCodes, limit: pendingCodes.length }),
-      }).catch(() => {});
-
-      // Step 2: mdiary_coupons에서 최신 상태 읽기 → campaign_licenses 직접 PATCH
+      // mdiary_coupons에서 최신 상태 읽기 (Edge Function 호출 없이 Supabase REST만 사용)
       const mRes = await fetch(
         `${SUPABASE_URL}/rest/v1/mdiary_coupons?coupon_code=in.(${pendingCodes.join(',')})&select=coupon_code,is_used,service_expire_at`,
         { headers: HEADERS }
       ).catch(() => null);
-      if (mRes?.ok) {
-        const mdata: { coupon_code: string; is_used: boolean; service_expire_at?: string }[] = await mRes.json();
-        if (Array.isArray(mdata)) {
-          const today = new Date().toISOString().slice(0, 10);
-          // 상태별 그룹핑 → 일괄 PATCH (네트워크 절약)
-          const groups: Record<string, string[]> = {};
-          mdata.forEach(m => {
-            const st = !m.is_used ? '대기' : (m.service_expire_at && m.service_expire_at < today) ? '만료' : '사용중';
-            (groups[st] ??= []).push(m.coupon_code);
-          });
-          for (const [st, codes] of Object.entries(groups)) {
-            if (st === '대기') continue; // 이미 대기인 건 스킵
-            await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?coupon_code=in.(${codes.join(',')})`, {
-              method: 'PATCH', headers: HEADERS,
-              body: JSON.stringify({ status: st }),
-            }).catch(() => {});
-          }
-        }
+      if (!mRes?.ok) return true;
+
+      const mdata: { coupon_code: string; is_used: boolean; service_expire_at?: string }[] = await mRes.json();
+      if (!Array.isArray(mdata) || mdata.length === 0) return true;
+
+      const today = new Date().toISOString().slice(0, 10);
+      const groups: Record<string, string[]> = {};
+      mdata.forEach(m => {
+        const st = !m.is_used ? '대기' : (m.service_expire_at && m.service_expire_at < today) ? '만료' : '사용중';
+        (groups[st] ??= []).push(m.coupon_code);
+      });
+      for (const [st, codes] of Object.entries(groups)) {
+        if (st === '대기') continue;
+        await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?coupon_code=in.(${codes.join(',')})`, {
+          method: 'PATCH', headers: HEADERS,
+          body: JSON.stringify({ status: st }),
+        }).catch(() => {});
       }
 
       qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
