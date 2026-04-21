@@ -67,6 +67,8 @@ interface CampaignLicense {
   user_count?: string;
   status: '대기' | '사용중' | '만료';
   service_expire_at?: string;
+  group_name?: string;
+  member_count?: number;
   created_at: string;
 }
 
@@ -1278,12 +1280,15 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
                 : <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/30" />}
             </div>
 
-            {/* 기관 · 이름 · 전화번호 */}
+            {/* 기관 · 이름 · 전화번호 · 그룹명 */}
             <div className="flex-1 min-w-0">
               <span className="font-medium text-sm">{lic.org_name || '-'}</span>
               <span className="text-muted-foreground text-sm ml-2">{lic.contact_name}</span>
               {lic.contact_phone && (
                 <span className="text-xs text-muted-foreground ml-2">{lic.contact_phone}</span>
+              )}
+              {lic.group_name && (
+                <span className="text-xs text-teal-600 ml-2">[{lic.group_name}{lic.member_count ? ` · ${lic.member_count}명` : ''}]</span>
               )}
             </div>
 
