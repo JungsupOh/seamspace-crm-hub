@@ -73,7 +73,7 @@ Deno.serve(async (req: Request) => {
     const password = Deno.env.get("MDIARY_DB_PASSWORD");
     if (!password) throw new Error("MDIARY_DB_PASSWORD secret이 설정되지 않았습니다");
 
-    const mysql = await import("npm:mysql2/promise");
+    const mysql = await import("npm:mysql2@3.9.7/promise");
     const conn  = await mysql.createConnection({
       host: MYSQL_HOST, port: MYSQL_PORT,
       database: MYSQL_DB, user: MYSQL_USER,
@@ -154,6 +154,10 @@ Deno.serve(async (req: Request) => {
 
         return Promise.all([
           supabase.from("deal_licenses").update({
+            status,
+            service_expire_at: row.service_expire_at ?? null,
+          }).eq("coupon_code", row.coupon_code),
+          supabase.from("campaign_licenses").update({
             status,
             service_expire_at: row.service_expire_at ?? null,
           }).eq("coupon_code", row.coupon_code),
