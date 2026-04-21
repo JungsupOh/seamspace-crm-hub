@@ -153,36 +153,41 @@ Deno.serve(async (req: Request) => {
       ]);
     }
 
-    // 순차 처리 — 리소스 제한 회피 (3266개 수준이면 순차도 수 초 내 완료)
+    // 상태별로 그룹핑 → 일괄 UPDATE (네트워크 호출 최소화 — WallClockTime 제한 회피)
+    const byStatus = new Map<string, string[]>(); // status → coupon_codes
     for (const row of rows) {
       const status =
         !row.is_used                                              ? "대기"
         : row.service_expire_at && row.service_expire_at < today ? "만료"
         : "사용중";
-
-      await supabase.from("deal_licenses").update({
-        status,
-        service_expire_at: row.service_expire_at ?? null,
-      }).eq("coupon_code", row.coupon_code);
-
-      await supabase.from("campaign_licenses").update({
-        status,
-        service_expire_at: row.service_expire_at ?? null,
-      }).eq("coupon_code", row.coupon_code);
-
-      await supabase.from("mdiary_coupons").update({
-        is_used:           !!row.is_used,
-        service_expire_at: row.service_expire_at ?? null,
-        member_count:      row.member_count ?? 0,
-        group_name:        row.group_name    ?? null,
-        edu_office_name:   row.edu_office_name ?? null,
-        admin_name:        row.admin_name    ?? null,
-        admin_phone:       row.admin_phone   ?? null,
-        admin_last_login:  row.admin_last_login ?? null,
-      }).eq("coupon_code", row.coupon_code);
-
-      updated++;
+      const list = byStatus.get(status) ?? [];
+      list.push(row.coupon_code);
+      byStatus.set(status, list);
     }
+
+    // 상태별 일괄 UPDATE (최대 3그룹 × 2테이블 = 6회 네트워크 호출)
+    for (const [status, statusCodes] of byStatus) {
+      await supabase.from("deal_licenses").update({ status }).in("coupon_code", statusCodes);
+      await supabase.from("campaign_licenses").update({ status }).in("coupon_code", statusCodes);
+    }
+
+    // mdiary_coupons는 개별 필드가 달라 개별 처리 필요 — 하지만 병렬로
+    const BATCH = 20;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      await Promise.all(rows.slice(i, i + BATCH).map(row =>
+        supabase.from("mdiary_coupons").update({
+          is_used:           !!row.is_used,
+          service_expire_at: row.service_expire_at ?? null,
+          member_count:      row.member_count ?? 0,
+          group_name:        row.group_name    ?? null,
+          edu_office_name:   row.edu_office_name ?? null,
+          admin_name:        row.admin_name    ?? null,
+          admin_phone:       row.admin_phone   ?? null,
+          admin_last_login:  row.admin_last_login ?? null,
+        }).eq("coupon_code", row.coupon_code)
+      ));
+    }
+    updated = rows.length;
 
     return json({ updated, deleted: deletedCodes.length, total: totalCodes, processed: offset + rows.length, hasMore: offset + rows.length < totalCodes });
   } catch (e) {
