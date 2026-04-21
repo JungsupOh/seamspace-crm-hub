@@ -157,10 +157,6 @@ Deno.serve(async (req: Request) => {
             status,
             service_expire_at: row.service_expire_at ?? null,
           }).eq("coupon_code", row.coupon_code),
-          supabase.from("campaign_licenses").update({
-            status,
-            service_expire_at: row.service_expire_at ?? null,
-          }).eq("coupon_code", row.coupon_code),
           supabase.from("mdiary_coupons").update({
             is_used:           !!row.is_used,
             service_expire_at: row.service_expire_at ?? null,

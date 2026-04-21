@@ -500,7 +500,8 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<'leads' | 'licenses'>('leads');
 
-  // 캠페인 펼칠 때 쿠폰 상태 동기화 (Pro 플랜 — Edge Function 직접 호출)
+  // 캠페인 펼칠 때 쿠폰 상태 동기화 — mdiary_coupons에서 읽기 (Edge Function 사용 안 함)
+  // mdiary_coupons는 이용권 관리 > "운영DB 동기화"로 갱신됨
   const { data: syncDone } = useQuery({
     queryKey: ['campaign_license_sync', campaign.id],
     queryFn: async () => {
@@ -509,12 +510,28 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
         .filter(l => l.coupon_code && (l.status === '대기' || l.status === '사용중'))
         .map(l => l.coupon_code!);
       if (pendingCodes.length === 0) return true;
-      const r = await fetch(`${SUPABASE_URL}/functions/v1/get-coupon-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_KEY}` },
-        body: JSON.stringify({ codes: pendingCodes, limit: pendingCodes.length }),
+
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/mdiary_coupons?coupon_code=in.(${pendingCodes.join(',')})&select=coupon_code,is_used,service_expire_at`,
+        { headers: HEADERS }
+      ).catch(() => null);
+      if (!r?.ok) return true;
+      const rows: { coupon_code: string; is_used: boolean; service_expire_at?: string }[] = await r.json();
+      if (!Array.isArray(rows) || rows.length === 0) return true;
+
+      const today = new Date().toISOString().slice(0, 10);
+      const groups: Record<string, string[]> = {};
+      rows.forEach(m => {
+        const st = !m.is_used ? '대기' : (m.service_expire_at && m.service_expire_at < today) ? '만료' : '사용중';
+        (groups[st] ??= []).push(m.coupon_code);
       });
-      if (r.ok) qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+      for (const [st, codes] of Object.entries(groups)) {
+        if (st === '대기') continue;
+        await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?coupon_code=in.(${codes.join(',')})`, {
+          method: 'PATCH', headers: HEADERS, body: JSON.stringify({ status: st }),
+        }).catch(() => {});
+      }
+      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
       return true;
     },
     staleTime: 1000 * 60 * 5,
