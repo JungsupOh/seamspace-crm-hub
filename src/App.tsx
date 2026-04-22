@@ -22,6 +22,10 @@ import OrderComplete from "./pages/OrderComplete";
 import OrderFail from "./pages/OrderFail";
 import ChangePassword from "./pages/ChangePassword";
 import Users from "./pages/Users";
+import Shop from "./pages/Shop";
+import ShopProductDetail from "./pages/ShopProductDetail";
+import ShopCart from "./pages/ShopCart";
+import ShopCheckout from "./pages/ShopCheckout";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -130,6 +134,11 @@ function AppRoutes() {
       <Route path="/order" element={<Order />} />
       <Route path="/order/complete" element={<OrderComplete />} />
       <Route path="/order/fail" element={<OrderFail />} />
+      {/* 상품 스토어 — 로그인 불필요 */}
+      <Route path="/shop" element={<Shop />} />
+      <Route path="/shop/:id" element={<ShopProductDetail />} />
+      <Route path="/shop/cart" element={<ShopCart />} />
+      <Route path="/shop/checkout" element={<ShopCheckout />} />
       {/* /order-test는 내부 결제 테스트용 — 실제 Toss 결제 흐름 */}
       <Route path="/order-test" element={<OrderTest />} />
       <Route path="/order-test/complete" element={<OrderComplete />} />

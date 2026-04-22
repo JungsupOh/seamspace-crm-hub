@@ -799,13 +799,13 @@ export default function OrderTest() {
       <div className="max-w-6xl mx-auto px-4 py-10 flex gap-6">
       {/* 사이드 배너 (데스크톱만) */}
       <aside className="hidden lg:flex flex-col gap-3 w-[180px] shrink-0 pt-16">
-        <a href="#" className="rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow border border-border">
+        <a href="/shop/keyring" className="rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow border border-border">
           <img src="/banner/keyring.png" alt="심스페이스 감정 키링" className="w-full" />
         </a>
-        <a href="#" className="rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow border border-border">
+        <a href="/shop/boardgame" className="rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow border border-border">
           <img src="/banner/boardgame.png" alt="심스페이스 보드게임" className="w-full" />
         </a>
-        <a href="#" className="rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow border border-border">
+        <a href="/shop/diary" className="rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow border border-border">
           <img src="/banner/diary.png" alt="심스페이스 일기책" className="w-full" />
         </a>
       </aside>
@@ -1833,13 +1833,13 @@ export default function OrderTest() {
 
       {/* 모바일 배너 (하단) */}
       <div className="lg:hidden flex gap-2 overflow-x-auto pb-2 px-1 shrink-0">
-        <a href="#" className="rounded-lg overflow-hidden shadow-sm border border-border shrink-0 w-48">
+        <a href="/shop/keyring" className="rounded-lg overflow-hidden shadow-sm border border-border shrink-0 w-48">
           <img src="/banner/keyring.png" alt="심스페이스 감정 키링" className="w-full" />
         </a>
-        <a href="#" className="rounded-lg overflow-hidden shadow-sm border border-border shrink-0 w-48">
+        <a href="/shop/boardgame" className="rounded-lg overflow-hidden shadow-sm border border-border shrink-0 w-48">
           <img src="/banner/boardgame.png" alt="심스페이스 보드게임" className="w-full" />
         </a>
-        <a href="#" className="rounded-lg overflow-hidden shadow-sm border border-border shrink-0 w-48">
+        <a href="/shop/diary" className="rounded-lg overflow-hidden shadow-sm border border-border shrink-0 w-48">
           <img src="/banner/diary.png" alt="심스페이스 일기책" className="w-full" />
         </a>
       </div>
