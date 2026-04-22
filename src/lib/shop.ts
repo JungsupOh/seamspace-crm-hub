@@ -10,6 +10,7 @@ export interface ShopProduct {
   name: string;
   description?: string;
   price: number;
+  original_price?: number;         // 정가 (할인 전, null이면 할인 없음)
   unit_qty: number;
   unit_label?: string;
   options?: string[];

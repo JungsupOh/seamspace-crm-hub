@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS shop_products (
   id              TEXT PRIMARY KEY,              -- 'keyring', 'boardgame', 'diary'
   name            TEXT NOT NULL,
   description     TEXT,
-  price           INTEGER NOT NULL DEFAULT 0,    -- 원 단위
+  price           INTEGER NOT NULL DEFAULT 0,    -- 판매가 (원)
+  original_price  INTEGER,                       -- 정가 (할인 전, NULL이면 할인 없음)
   unit_qty        INTEGER NOT NULL DEFAULT 1,    -- 키링=10(묶음), 보드게임=1
   unit_label      TEXT,                          -- '10개 1세트', '1개' 등
   options         JSONB,                         -- ["한글판","영문판"] or null
@@ -75,9 +76,9 @@ CREATE INDEX IF NOT EXISTS idx_shop_orders_phone ON shop_orders (customer_phone)
 CREATE INDEX IF NOT EXISTS idx_shop_order_items_order ON shop_order_items (order_id);
 
 -- 6. 초기 상품 데이터
-INSERT INTO shop_products (id, name, description, price, unit_qty, unit_label, options, image_url, detail_image_url, active, sort_order)
+INSERT INTO shop_products (id, name, description, price, original_price, unit_qty, unit_label, options, image_url, detail_image_url, active, sort_order)
 VALUES
-  ('keyring', '심스페이스 감정 키링 10종', '내 마음을 표현하는 감정 캐릭터 키링 세트', 0, 10, '10개 1세트', NULL, '/banner/keyring.png', '/banner/keyring_detail.png', true, 1),
-  ('boardgame', '심스페이스 마음여행 보드게임', '심소와 함께 떠나는 마음 여행', 0, 1, '1개', '["한글판","영문판"]', '/banner/boardgame.png', '/banner/boardgame_detail.png', true, 2),
-  ('diary', '심스페이스 일기책', '나의 이야기를 한 권의 책으로', 0, 1, '1권', NULL, '/banner/diary.png', '/banner/diary_detail.png', false, 3)
+  ('keyring', '심스페이스 감정 키링 10종', '내 마음을 표현하는 감정 캐릭터 키링 세트', 30000, 33000, 10, '10개 1세트', NULL, '/banner/keyring.png', '/banner/keyring_detail.png', true, 1),
+  ('boardgame', '심스페이스 마음여행 보드게임', '심소와 함께 떠나는 마음 여행', 32000, 44000, 1, '1개', '["한글판","영문판"]', '/banner/boardgame.png', '/banner/boardgame_detail.png', true, 2),
+  ('diary', '심스페이스 일기책', '나의 이야기를 한 권의 책으로', 0, NULL, 1, '1권', NULL, '/banner/diary.png', '/banner/diary_detail.png', false, 3)
 ON CONFLICT (id) DO NOTHING;
