@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { ShoppingCart, Search } from 'lucide-react';
+import { ShoppingCart, ClipboardList } from 'lucide-react';
 import { getShopProducts, getCart } from '@/lib/shop';
 import { useState, useEffect } from 'react';
 
@@ -20,7 +20,7 @@ export default function Shop() {
           <Link to="/shop" className="font-bold text-lg">심스페이스 스토어</Link>
           <div className="flex items-center gap-1">
             <Link to="/shop/lookup" className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground" title="주문 조회">
-              <Search className="h-5 w-5" />
+              <ClipboardList className="h-5 w-5" />
             </Link>
             <Link to="/shop/cart" className="relative p-2 hover:bg-muted rounded-lg transition-colors">
               <ShoppingCart className="h-5 w-5" />
