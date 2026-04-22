@@ -39,20 +39,50 @@ export default function Shop() {
           <div className="text-center py-16 text-muted-foreground">로딩 중...</div>
         ) : (
           <div className="grid grid-cols-3 gap-4">
-            <Link to="/shop/keyring" className="group">
-              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow">
+            <Link to="/shop/keyring" className="group text-center">
+              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-2">
                 <img src="/banner/keyring(Thmb).png" alt="감정 키링 10종" className="w-full group-hover:scale-105 transition-transform duration-300" />
               </div>
+              {products?.find(p => p.id === 'keyring') && (() => {
+                const p = products.find(p => p.id === 'keyring')!;
+                const discount = p.original_price ? Math.round((1 - p.price / p.original_price) * 100) : 0;
+                return (<>
+                  <h3 className="font-bold text-sm">{p.name}</h3>
+                  <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                    {discount > 0 && <span className="text-xs font-bold text-red-500">{discount}%</span>}
+                    <span className="text-sm font-bold">{p.price.toLocaleString()}원</span>
+                    {p.original_price && p.original_price > p.price && (
+                      <span className="text-xs text-muted-foreground line-through">{p.original_price.toLocaleString()}원</span>
+                    )}
+                  </div>
+                </>);
+              })()}
             </Link>
-            <Link to="/shop/boardgame" className="group">
-              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow">
+            <Link to="/shop/boardgame" className="group text-center">
+              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-2">
                 <img src="/banner/boardgame(Thmb).png" alt="마음여행 보드게임" className="w-full group-hover:scale-105 transition-transform duration-300" />
               </div>
+              {products?.find(p => p.id === 'boardgame') && (() => {
+                const p = products.find(p => p.id === 'boardgame')!;
+                const discount = p.original_price ? Math.round((1 - p.price / p.original_price) * 100) : 0;
+                return (<>
+                  <h3 className="font-bold text-sm">{p.name}</h3>
+                  <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                    {discount > 0 && <span className="text-xs font-bold text-red-500">{discount}%</span>}
+                    <span className="text-sm font-bold">{p.price.toLocaleString()}원</span>
+                    {p.original_price && p.original_price > p.price && (
+                      <span className="text-xs text-muted-foreground line-through">{p.original_price.toLocaleString()}원</span>
+                    )}
+                  </div>
+                </>);
+              })()}
             </Link>
-            <Link to="/order-test" className="group">
-              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow">
+            <Link to="/order-test" className="group text-center">
+              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-2">
                 <img src="/banner/MindDiary(Thmb).png" alt="AI 마음일기" className="w-full group-hover:scale-105 transition-transform duration-300" />
               </div>
+              <h3 className="font-bold text-sm">AI 마음일기</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">견적 요청 →</p>
             </Link>
           </div>
         )}
