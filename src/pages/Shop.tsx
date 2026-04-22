@@ -38,7 +38,6 @@ export default function Shop() {
         {isLoading ? (
           <div className="text-center py-16 text-muted-foreground">로딩 중...</div>
         ) : (
-          <>
           <div className="grid grid-cols-3 gap-4">
             <Link to="/shop/keyring" className="group">
               <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow">
@@ -56,52 +55,17 @@ export default function Shop() {
               </div>
             </Link>
           </div>
-
-          <div className="grid grid-cols-3 gap-4 -mt-2">
-            {products?.filter(p => p.active).map(p => {
-              const discount = p.original_price ? Math.round((1 - p.price / p.original_price) * 100) : 0;
-              return (
-                <Link key={p.id} to={`/shop/${p.id}`} className="text-center hover:text-primary transition-colors">
-                  <h3 className="font-bold text-sm">{p.name}</h3>
-                  <div className="flex items-center justify-center gap-1.5 mt-0.5">
-                    {discount > 0 && <span className="text-xs font-bold text-red-500">{discount}%</span>}
-                    <span className="text-sm font-bold">{p.price.toLocaleString()}원</span>
-                    {p.original_price && p.original_price > p.price && (
-                      <span className="text-xs text-muted-foreground line-through">{p.original_price.toLocaleString()}원</span>
-                    )}
-                  </div>
-                </Link>
-              );
-            })}
-            <Link to="/order-test" className="text-center hover:text-primary transition-colors">
-              <h3 className="font-bold text-sm">AI 마음일기</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">견적 요청 →</p>
-            </Link>
-          </div>
-          </>
         )}
-
-        {/* 하단 마음일기 링크 */}
-        <div className="mt-12 text-center">
-          <p className="text-sm text-muted-foreground mb-2">AI 마음일기 이용권이 필요하신가요?</p>
-          <Link to="/order-test" className="text-sm text-primary hover:underline font-medium">
-            심스페이스 마음일기 주문 →
-          </Link>
-        </div>
-
-        {/* 주문 조회 */}
-        <div className="mt-8 text-center">
-          <Link to="/shop/lookup" className="text-xs text-muted-foreground hover:underline">
-            주문 조회하기
-          </Link>
-        </div>
       </main>
 
       <footer className="border-t py-8 bg-muted/30">
         <div className="max-w-4xl mx-auto px-4 text-xs text-muted-foreground space-y-1">
           <p className="font-medium text-foreground/70">테바소프트 주식회사</p>
-          <p>배송비: 3,000원 (50,000원 이상 무료배송) · 국내 배송만 가능</p>
-          <p>문의: 042-864-5566 · sales@tebahsoft.com</p>
+          <p>대표이사: 오정섭 · 사업자등록번호: 440-87-02207</p>
+          <p>통신판매업신고: 제 2022-대전유성-0475호</p>
+          <p>주소: 대전광역시 유성구 대학로 291, 테바소프트</p>
+          <p>전화: 042-864-5566 · 이메일: sales@tebahsoft.com</p>
+          <p className="pt-1">배송비: 3,000원 (50,000원 이상 무료배송) · 국내 배송만 가능</p>
         </div>
       </footer>
     </div>
