@@ -77,12 +77,15 @@ export default function Shop() {
                 </>);
               })()}
             </Link>
-            <Link to="/order-test" className="group text-center">
+            <Link to="/shop/minddiary" className="group text-center">
               <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-2">
                 <img src="/banner/MindDiary(Thmb).png" alt="AI 마음일기" className="w-full group-hover:scale-105 transition-transform duration-300" />
               </div>
               <h3 className="font-bold text-sm">AI 마음일기</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">견적 요청 →</p>
+              <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                <span className="text-sm font-bold">40,000원</span>
+                <span className="text-xs text-muted-foreground">/ 1학급 1개월</span>
+              </div>
             </Link>
           </div>
         )}
