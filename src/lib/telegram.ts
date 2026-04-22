@@ -64,3 +64,59 @@ export function notifyCampaignLead(params: {
     `👤 ${name} / ${phone}${positionStr}${sourceStr}${existingTag}`
   );
 }
+
+// ── 웹 견적 발송 알림 ──────────────────────────────
+export function notifyWebQuote(params: {
+  quoteNumber: string;
+  orgName: string;
+  buyerName: string;
+  buyerPhone: string;
+  plan: string;
+  duration: number;
+  quantity: number;
+  totalAmount: number;
+}): void {
+  const { quoteNumber, orgName, buyerName, buyerPhone, plan, duration, quantity, totalAmount } = params;
+  sendTelegramNotification(
+    `📄 <b>웹 견적서 발급</b>\n\n` +
+    `📌 ${quoteNumber}\n` +
+    `🏫 ${orgName || '(미입력)'}\n` +
+    `👤 ${buyerName} / ${buyerPhone}\n` +
+    `📦 ${plan} ${duration}개월 × ${quantity}건\n` +
+    `💰 ${totalAmount.toLocaleString()}원`
+  );
+}
+
+// ── 웹 결제 완료 알림 ──────────────────────────────
+export function notifyWebPayment(params: {
+  quoteNumber: string;
+  orgName: string;
+  buyerName: string;
+  amount: number;
+  method: 'card' | 'bank';
+}): void {
+  const { quoteNumber, orgName, buyerName, amount, method } = params;
+  const methodLabel = method === 'card' ? '카드결제' : '계좌이체';
+  sendTelegramNotification(
+    `💳 <b>웹 결제 완료</b>\n\n` +
+    `📌 ${quoteNumber}\n` +
+    `🏫 ${orgName || '(미입력)'}\n` +
+    `👤 ${buyerName}\n` +
+    `💰 ${amount.toLocaleString()}원 (${methodLabel})`
+  );
+}
+
+// ── 웹 이용권 발송 알림 ──────────────────────────────
+export function notifyWebLicenseIssued(params: {
+  quoteNumber: string;
+  orgName: string;
+  recipientCount: number;
+}): void {
+  const { quoteNumber, orgName, recipientCount } = params;
+  sendTelegramNotification(
+    `🎟 <b>웹 이용권 발송</b>\n\n` +
+    `📌 ${quoteNumber}\n` +
+    `🏫 ${orgName || '(미입력)'}\n` +
+    `📮 ${recipientCount}명에게 발송 완료`
+  );
+}

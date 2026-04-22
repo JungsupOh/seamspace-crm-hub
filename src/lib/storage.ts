@@ -219,6 +219,18 @@ export interface DealQuote {
   contact_phone?: string;
   is_selected: boolean;
   created_at: string;
+  // 웹 주문 필드
+  source?: 'crm' | 'web';
+  buyer_phone?: string;
+  buyer_phone_normalized?: string;
+  buyer_name?: string;
+  buyer_email?: string;
+  org_name?: string;
+  order_status?: '견적' | '결제대기' | '결제완료' | '발송완료' | '취소';
+  payment_method?: 'card' | 'bank';
+  payment_key?: string;
+  paid_at?: string;
+  student_count?: number;
 }
 
 const QUOTES_URL = `${SUPABASE_URL}/rest/v1/deal_quotes`;
@@ -291,6 +303,32 @@ export async function fetchAllDealQuoteNumbers(): Promise<string[]> {
   if (!res.ok) return [];
   const rows: { quote_number: string }[] = await res.json();
   return rows.map(r => r.quote_number).filter(Boolean);
+}
+
+// ── 웹 견적 조회 (견적번호 + 핸드폰) ────────────────
+export async function lookupWebQuote(
+  quoteNumber: string,
+  phoneNormalized: string,
+): Promise<DealQuote | null> {
+  const res = await fetch(
+    `${QUOTES_URL}?quote_number=eq.${encodeURIComponent(quoteNumber)}&buyer_phone_normalized=eq.${encodeURIComponent(phoneNormalized)}&source=eq.web&limit=1`,
+    { headers: DB_HEADERS }
+  );
+  if (!res.ok) return null;
+  const rows: DealQuote[] = await res.json();
+  return rows[0] ?? null;
+}
+
+// ── 웹 견적 상태 업데이트 ────────────────────────────
+export async function updateWebQuoteStatus(
+  id: string,
+  updates: Partial<Pick<DealQuote, 'order_status' | 'payment_method' | 'payment_key' | 'paid_at'>>,
+): Promise<void> {
+  await fetch(`${QUOTES_URL}?id=eq.${id}`, {
+    method: 'PATCH',
+    headers: DB_HEADERS,
+    body: JSON.stringify(updates),
+  });
 }
 
 export async function deleteDealLicense(id: string): Promise<void> {
