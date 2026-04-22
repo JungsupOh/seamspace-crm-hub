@@ -26,6 +26,9 @@ import Shop from "./pages/Shop";
 import ShopProductDetail from "./pages/ShopProductDetail";
 import ShopCart from "./pages/ShopCart";
 import ShopCheckout from "./pages/ShopCheckout";
+import ShopComplete from "./pages/ShopComplete";
+import ShopFail from "./pages/ShopFail";
+import ShopOrderLookup from "./pages/ShopOrderLookup";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -139,6 +142,9 @@ function AppRoutes() {
       <Route path="/shop/:id" element={<ShopProductDetail />} />
       <Route path="/shop/cart" element={<ShopCart />} />
       <Route path="/shop/checkout" element={<ShopCheckout />} />
+      <Route path="/shop/complete" element={<ShopComplete />} />
+      <Route path="/shop/fail" element={<ShopFail />} />
+      <Route path="/shop/lookup" element={<ShopOrderLookup />} />
       {/* /order-test는 내부 결제 테스트용 — 실제 Toss 결제 흐름 */}
       <Route path="/order-test" element={<OrderTest />} />
       <Route path="/order-test/complete" element={<OrderComplete />} />
