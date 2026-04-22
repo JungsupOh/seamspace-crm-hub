@@ -1,51 +1,51 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Search, Package, Truck, CheckCircle2, Loader2 } from 'lucide-react';
+import { ArrowLeft, Search, Package, Truck, CheckCircle2, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { formatPhone } from '@/lib/utils';
-import { lookupShopOrder, type ShopOrder, type ShopOrderItem } from '@/lib/shop';
+import { lookupMyOrders, type ShopOrder, type ShopOrderItem } from '@/lib/shop';
 
-const STATUS_META: Record<string, { label: string; color: string; icon: any }> = {
-  '결제완료': { label: '결제완료', color: 'text-blue-600', icon: CheckCircle2 },
-  '배송준비': { label: '배송준비중', color: 'text-amber-600', icon: Package },
-  '배송중':   { label: '배송중', color: 'text-teal-600', icon: Truck },
-  '배송완료': { label: '배송완료', color: 'text-emerald-600', icon: CheckCircle2 },
+const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
+  '결제완료': { label: '결제완료', color: 'text-blue-700', bg: 'bg-blue-100' },
+  '배송준비': { label: '배송준비', color: 'text-amber-700', bg: 'bg-amber-100' },
+  '배송중':   { label: '배송중', color: 'text-teal-700', bg: 'bg-teal-100' },
+  '배송완료': { label: '배송완료', color: 'text-emerald-700', bg: 'bg-emerald-100' },
+  '취소':     { label: '취소', color: 'text-red-700', bg: 'bg-red-100' },
 };
 
 export default function ShopOrderLookup() {
   const [params] = useSearchParams();
-  const [orderId, setOrderId] = useState(params.get('orderId') || '');
+  const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [order, setOrder] = useState<ShopOrder | null>(null);
-  const [items, setItems] = useState<ShopOrderItem[]>([]);
+  const [orders, setOrders] = useState<{ order: ShopOrder; items: ShopOrderItem[] }[] | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(params.get('orderId') || null);
 
   const handleLookup = async () => {
-    if (!orderId.trim() || !phone.trim()) {
-      setError('주문번호와 연락처를 모두 입력해주세요.');
+    if (!name.trim() || !phone.trim()) {
+      setError('이름과 연락처를 모두 입력해주세요.');
       return;
     }
     setLoading(true);
     setError('');
     try {
-      const result = await lookupShopOrder(orderId.trim(), phone);
-      if (!result) {
-        setError('주문을 찾을 수 없습니다. 주문번호와 연락처를 확인해주세요.');
+      const result = await lookupMyOrders(name.trim(), phone);
+      if (result.length === 0) {
+        setError('최근 1개월 내 주문 내역이 없습니다.');
+        setOrders(null);
         return;
       }
-      setOrder(result.order);
-      setItems(result.items);
+      setOrders(result);
+      if (result.length === 1) setExpandedId(result[0].order.order_id);
     } catch {
       setError('조회 중 오류가 발생했습니다.');
     } finally {
       setLoading(false);
     }
   };
-
-  const meta = order ? STATUS_META[order.status] : null;
 
   return (
     <div className="min-h-screen bg-muted/20">
@@ -59,71 +59,100 @@ export default function ShopOrderLookup() {
         </div>
       </header>
 
-      <main className="max-w-md mx-auto px-4 py-8 space-y-6">
-        {!order ? (
-          <div className="bg-white rounded-2xl border border-border p-6 space-y-4">
-            <div className="space-y-1.5">
-              <Label className="text-sm">주문번호</Label>
-              <Input value={orderId} onChange={e => setOrderId(e.target.value)}
-                placeholder="SHOP-xxxxxx" className="h-11 font-mono" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-sm">연락처</Label>
-              <Input value={phone} onChange={e => setPhone(formatPhone(e.target.value))}
-                placeholder="010-0000-0000" className="h-11" type="tel" />
-            </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button className="w-full h-11" disabled={loading} onClick={handleLookup}>
-              {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Search className="h-4 w-4 mr-2" />}
-              조회하기
-            </Button>
+      <main className="max-w-lg mx-auto px-4 py-8 space-y-6">
+        {/* 조회 폼 */}
+        <div className="bg-white rounded-2xl border border-border p-5 space-y-4">
+          <p className="text-sm font-medium">주문 시 입력한 정보로 조회합니다</p>
+          <div className="space-y-1.5">
+            <Label className="text-xs">이름</Label>
+            <Input value={name} onChange={e => setName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleLookup(); }}
+              placeholder="홍길동" className="h-11" />
           </div>
-        ) : (
-          <div className="space-y-4">
-            {/* 상태 */}
-            <div className="bg-white rounded-2xl border border-border p-6 text-center">
-              {meta && <meta.icon className={`h-12 w-12 mx-auto mb-2 ${meta.color}`} />}
-              <p className={`text-lg font-bold ${meta?.color}`}>{meta?.label || order.status}</p>
-              <p className="text-xs text-muted-foreground mt-1">주문번호: {order.order_id}</p>
-              <p className="text-xs text-muted-foreground">{order.created_at.slice(0, 10)}</p>
-              {order.tracking_number && (
-                <div className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-sm">
-                  <p className="text-xs text-muted-foreground">운송장번호</p>
-                  <p className="font-mono font-bold">{order.carrier ? `${order.carrier} ` : ''}{order.tracking_number}</p>
-                </div>
-              )}
-            </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">연락처</Label>
+            <Input value={phone} onChange={e => setPhone(formatPhone(e.target.value))}
+              onKeyDown={e => { if (e.key === 'Enter') handleLookup(); }}
+              placeholder="010-0000-0000" className="h-11" type="tel" />
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <Button className="w-full h-11" disabled={loading} onClick={handleLookup}>
+            {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Search className="h-4 w-4 mr-2" />}
+            조회하기
+          </Button>
+        </div>
 
-            {/* 상품 */}
-            <div className="bg-white rounded-2xl border border-border p-4">
-              <p className="text-sm font-medium mb-3">주문 상품</p>
-              {items.map(item => (
-                <div key={item.id} className="flex justify-between text-sm py-1.5 border-b last:border-0">
-                  <span>{item.product_name}{item.option ? ` (${item.option})` : ''} × {item.qty}</span>
-                  <span className="font-medium">{item.subtotal.toLocaleString()}원</span>
-                </div>
-              ))}
-              <div className="mt-2 pt-2 border-t space-y-1 text-sm">
-                <div className="flex justify-between text-muted-foreground">
-                  <span>배송비</span><span>{order.shipping_fee === 0 ? '무료' : `${order.shipping_fee.toLocaleString()}원`}</span>
-                </div>
-                <div className="flex justify-between font-bold">
-                  <span>총 결제금액</span><span>{order.total_amount.toLocaleString()}원</span>
-                </div>
-              </div>
-            </div>
+        {/* 주문 목록 */}
+        {orders && (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">{orders.length}건의 주문</p>
+            {orders.map(({ order, items }) => {
+              const meta = STATUS_META[order.status] ?? { label: order.status, color: 'text-slate-600', bg: 'bg-slate-100' };
+              const isExpanded = expandedId === order.order_id;
+              const itemSummary = items.length > 0
+                ? items.length === 1
+                  ? items[0].product_name
+                  : `${items[0].product_name} 외 ${items.length - 1}건`
+                : '상품 정보 없음';
 
-            {/* 배송지 */}
-            <div className="bg-white rounded-2xl border border-border p-4 text-sm space-y-1">
-              <p className="font-medium mb-2">배송지</p>
-              <p>{order.customer_name} · {order.customer_phone}</p>
-              <p className="text-muted-foreground">[{order.zipcode}] {order.address} {order.address_detail}</p>
-              {order.delivery_memo && <p className="text-muted-foreground">메모: {order.delivery_memo}</p>}
-            </div>
+              return (
+                <div key={order.order_id} className="bg-white rounded-2xl border border-border overflow-hidden">
+                  {/* 요약 */}
+                  <button onClick={() => setExpandedId(isExpanded ? null : order.order_id)}
+                    className="w-full text-left px-4 py-3.5 flex items-center gap-3 hover:bg-muted/20 transition-colors">
+                    {isExpanded ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${meta.bg} ${meta.color}`}>{meta.label}</span>
+                        <span className="text-xs text-muted-foreground">{order.created_at.slice(0, 10)}</span>
+                      </div>
+                      <p className="text-sm font-medium truncate">{itemSummary}</p>
+                    </div>
+                    <span className="text-sm font-bold shrink-0">{order.total_amount.toLocaleString()}원</span>
+                  </button>
 
-            <Button variant="outline" className="w-full" onClick={() => { setOrder(null); setItems([]); }}>
-              다른 주문 조회
-            </Button>
+                  {/* 상세 */}
+                  {isExpanded && (
+                    <div className="border-t px-4 py-3 space-y-3 text-sm">
+                      <p className="text-xs text-muted-foreground font-mono">주문번호: {order.order_id}</p>
+
+                      {/* 상품 */}
+                      {items.map(item => (
+                        <div key={item.id} className="flex justify-between py-1">
+                          <span className="text-muted-foreground">{item.product_name}{item.option ? ` (${item.option})` : ''} × {item.qty}</span>
+                          <span>{item.subtotal.toLocaleString()}원</span>
+                        </div>
+                      ))}
+                      <div className="border-t pt-2 space-y-1 text-xs">
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>배송비</span><span>{order.shipping_fee === 0 ? '무료' : `${order.shipping_fee.toLocaleString()}원`}</span>
+                        </div>
+                        <div className="flex justify-between font-bold text-sm">
+                          <span>결제금액</span><span>{order.total_amount.toLocaleString()}원</span>
+                        </div>
+                      </div>
+
+                      {/* 배송 */}
+                      {order.address !== '디지털 상품 (배송 없음)' && (
+                        <div className="border-t pt-2 text-xs text-muted-foreground space-y-0.5">
+                          <p className="font-medium text-foreground text-sm">배송지</p>
+                          <p>[{order.zipcode}] {order.address} {order.address_detail}</p>
+                          {order.delivery_memo && <p>메모: {order.delivery_memo}</p>}
+                        </div>
+                      )}
+
+                      {/* 운송장 */}
+                      {order.tracking_number && (
+                        <div className="border-t pt-2">
+                          <p className="text-xs text-muted-foreground">운송장</p>
+                          <p className="font-mono font-bold">{order.carrier ? `${order.carrier} ` : ''}{order.tracking_number}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </main>

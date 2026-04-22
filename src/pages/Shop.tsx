@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { ShoppingCart } from 'lucide-react';
+import { ShoppingCart, Search } from 'lucide-react';
 import { getShopProducts, getCart } from '@/lib/shop';
 import { useState, useEffect } from 'react';
 
@@ -18,14 +18,19 @@ export default function Shop() {
       <header className="bg-white border-b sticky top-0 z-30">
         <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
           <Link to="/shop" className="font-bold text-lg">심스페이스 스토어</Link>
-          <Link to="/shop/cart" className="relative p-2 hover:bg-muted rounded-lg transition-colors">
-            <ShoppingCart className="h-5 w-5" />
-            {cartCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 bg-primary text-primary-foreground text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                {cartCount}
-              </span>
-            )}
-          </Link>
+          <div className="flex items-center gap-1">
+            <Link to="/shop/lookup" className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground" title="주문 조회">
+              <Search className="h-5 w-5" />
+            </Link>
+            <Link to="/shop/cart" className="relative p-2 hover:bg-muted rounded-lg transition-colors">
+              <ShoppingCart className="h-5 w-5" />
+              {cartCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 bg-primary text-primary-foreground text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {cartCount}
+                </span>
+              )}
+            </Link>
+          </div>
         </div>
       </header>
 

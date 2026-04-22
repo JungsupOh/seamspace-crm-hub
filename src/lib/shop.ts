@@ -152,6 +152,31 @@ export async function lookupShopOrder(orderId: string, phone: string): Promise<{
   return { order: orders[0], items };
 }
 
+// 고객용: 이름+전화번호로 최근 1개월 주문 목록 조회
+export async function lookupMyOrders(name: string, phone: string): Promise<{ order: ShopOrder; items: ShopOrderItem[] }[]> {
+  const phoneNorm = phone.replace(/\D/g, '');
+  const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const orderRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/shop_orders?customer_name=eq.${encodeURIComponent(name)}&customer_phone=eq.${phoneNorm}&created_at=gte.${encodeURIComponent(oneMonthAgo)}&order=created_at.desc`,
+    { headers: HEADERS }
+  );
+  if (!orderRes.ok) return [];
+  const orders: ShopOrder[] = await orderRes.json();
+  if (!Array.isArray(orders) || orders.length === 0) return [];
+
+  const orderIds = orders.map(o => o.order_id);
+  const itemsRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/shop_order_items?order_id=in.(${orderIds.map(id => `"${id}"`).join(',')})`,
+    { headers: HEADERS }
+  );
+  const allItems: ShopOrderItem[] = itemsRes.ok ? await itemsRes.json() : [];
+
+  return orders.map(o => ({
+    order: o,
+    items: Array.isArray(allItems) ? allItems.filter(i => i.order_id === o.order_id) : [],
+  }));
+}
+
 // 관리자용: 전체 주문 조회
 export async function getAllShopOrders(): Promise<ShopOrder[]> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/shop_orders?order=created_at.desc&limit=500`, { headers: HEADERS });
