@@ -127,10 +127,15 @@ export function clearCart() {
   localStorage.removeItem(CART_KEY);
 }
 
-export function getCartTotal(cart: CartItem[]): { subtotal: number; shippingFee: number; total: number } {
+// 배송 불필요 상품 (디지털/알림톡 발송)
+const DIGITAL_PRODUCTS = new Set(['minddiary']);
+
+export function getCartTotal(cart: CartItem[]): { subtotal: number; shippingFee: number; total: number; needsShipping: boolean } {
   const subtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.qty, 0);
-  const shippingFee = subtotal >= 50000 ? 0 : 3000;
-  return { subtotal, shippingFee, total: subtotal + shippingFee };
+  const hasPhysical = cart.some(item => !DIGITAL_PRODUCTS.has(item.productId));
+  const needsShipping = hasPhysical;
+  const shippingFee = !needsShipping ? 0 : subtotal >= 50000 ? 0 : 3000;
+  return { subtotal, shippingFee, total: subtotal + shippingFee, needsShipping };
 }
 
 // ── 주문 API ──────────────────────────────────────

@@ -34,7 +34,7 @@ export default function ShopCheckout() {
     setItems(cart);
   }, [navigate]);
 
-  const { subtotal, shippingFee, total } = getCartTotal(items);
+  const { subtotal, shippingFee, total, needsShipping } = getCartTotal(items);
   const f = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }));
 
   // Daum 우편번호 검색
@@ -54,7 +54,7 @@ export default function ShopCheckout() {
     }).open();
   };
 
-  const canSubmit = form.name.trim() && form.phone.trim() && form.zipcode && form.address;
+  const canSubmit = form.name.trim() && form.phone.trim() && (!needsShipping || (form.zipcode && form.address));
 
   const handlePayment = async () => {
     if (!canSubmit) { toast.error('필수 정보를 입력해주세요'); return; }
@@ -153,7 +153,8 @@ export default function ShopCheckout() {
           </div>
         </div>
 
-        {/* 배송지 */}
+        {/* 배송지 — 실물 상품이 있을 때만 */}
+        {needsShipping ? (
         <div className="bg-white rounded-2xl border border-border p-4 space-y-3">
           <p className="text-sm font-medium">배송지</p>
           <div className="flex gap-2">
@@ -166,6 +167,11 @@ export default function ShopCheckout() {
           <Input value={form.memo} onChange={e => f('memo', e.target.value)}
             placeholder="배송 메모 (선택)" className="h-10" />
         </div>
+        ) : (
+        <div className="bg-white rounded-2xl border border-border p-4">
+          <p className="text-sm text-teal-700">📱 디지털 상품은 알림톡으로 발송되어 별도 배송이 필요 없습니다.</p>
+        </div>
+        )}
 
         {/* 결제 버튼 */}
         <Button className="w-full h-12 text-base" disabled={!canSubmit || submitting} onClick={handlePayment}>

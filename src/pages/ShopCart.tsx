@@ -27,7 +27,7 @@ export default function ShopCart() {
     saveCart(next);
   };
 
-  const { subtotal, shippingFee, total } = getCartTotal(items);
+  const { subtotal, shippingFee, total, needsShipping } = getCartTotal(items);
   const finalTotal = Math.max(0, total - couponDiscount);
 
   const handleApplyCoupon = () => {
@@ -123,7 +123,7 @@ export default function ShopCart() {
             <span className="text-muted-foreground">배송비</span>
             <span>{shippingFee === 0 ? '무료' : `${shippingFee.toLocaleString()}원`}</span>
           </div>
-          {shippingFee > 0 && subtotal < 50000 && (
+          {needsShipping && shippingFee > 0 && subtotal < 50000 && (
             <p className="text-xs text-muted-foreground">
               {(50000 - subtotal).toLocaleString()}원 더 담으면 무료배송!
             </p>
