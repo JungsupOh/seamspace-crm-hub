@@ -91,34 +91,36 @@ export default function ShopProductDetail() {
           </div>
         )}
 
-        {/* 구매 영역 */}
-        <div className="bg-white rounded-2xl border border-border p-6 sticky bottom-0 shadow-lg">
-          <h1 className="text-xl font-bold mb-1">{product.name}</h1>
-          {product.description && <p className="text-sm text-muted-foreground mb-3">{product.description}</p>}
+        {/* 구매 영역 — 콤팩트 */}
+        <div className="bg-white rounded-2xl border border-border p-4 sticky bottom-0 shadow-lg">
+          <div className="flex items-start justify-between mb-1">
+            <div>
+              <h1 className="text-lg font-bold">{product.name}</h1>
+              {product.description && <p className="text-xs text-muted-foreground">{product.description}</p>}
+            </div>
+          </div>
 
-          {/* 가격 */}
-          <div className="flex items-center gap-2 mb-4">
+          {/* 가격 + 단위 */}
+          <div className="flex items-center gap-2 mb-3">
             {discount > 0 && (
-              <span className="text-lg font-bold text-red-500">{discount}%</span>
+              <span className="text-base font-bold text-red-500">{discount}%</span>
             )}
-            <span className="text-2xl font-bold">{product.price.toLocaleString()}원</span>
+            <span className="text-xl font-bold">{product.price.toLocaleString()}원</span>
             {product.original_price && product.original_price > product.price && (
-              <span className="text-base text-muted-foreground line-through">{product.original_price.toLocaleString()}원</span>
+              <span className="text-sm text-muted-foreground line-through">{product.original_price.toLocaleString()}원</span>
+            )}
+            {product.unit_label && (
+              <span className="text-xs text-muted-foreground ml-1">/ {product.unit_label}</span>
             )}
           </div>
 
-          {product.unit_label && (
-            <p className="text-xs text-muted-foreground mb-4">{product.unit_label}</p>
-          )}
-
-          {/* 옵션 선택 */}
-          {needsOption && (
-            <div className="mb-4">
-              <p className="text-sm font-medium mb-2">옵션 선택</p>
-              <div className="flex gap-2">
+          {/* 옵션 + 수량 한 줄 */}
+          <div className="flex items-center gap-4 mb-3">
+            {needsOption && (
+              <div className="flex items-center gap-1.5">
                 {options.map(opt => (
                   <button key={opt} onClick={() => setSelectedOption(opt)}
-                    className={`px-4 py-2 rounded-lg border text-sm transition-colors
+                    className={`px-3 py-1.5 rounded-lg border text-xs transition-colors
                       ${selectedOption === opt
                         ? 'border-primary bg-primary/5 text-primary font-medium'
                         : 'border-border hover:border-primary/50'}`}>
@@ -126,32 +128,27 @@ export default function ShopProductDetail() {
                   </button>
                 ))}
               </div>
-            </div>
-          )}
-
-          {/* 수량 */}
-          <div className="flex items-center gap-3 mb-5">
-            <span className="text-sm font-medium">수량</span>
-            <div className="flex items-center border border-border rounded-lg">
+            )}
+            <div className="flex items-center border border-border rounded-lg ml-auto">
               <button onClick={() => setQty(q => Math.max(1, q - 1))}
-                className="p-2 hover:bg-muted transition-colors rounded-l-lg">
-                <Minus className="h-4 w-4" />
+                className="p-1.5 hover:bg-muted transition-colors rounded-l-lg">
+                <Minus className="h-3.5 w-3.5" />
               </button>
-              <span className="px-4 py-2 text-sm font-medium min-w-[40px] text-center">{qty}</span>
+              <span className="px-3 py-1.5 text-sm font-medium min-w-[32px] text-center">{qty}</span>
               <button onClick={() => setQty(q => q + 1)}
-                className="p-2 hover:bg-muted transition-colors rounded-r-lg">
-                <Plus className="h-4 w-4" />
+                className="p-1.5 hover:bg-muted transition-colors rounded-r-lg">
+                <Plus className="h-3.5 w-3.5" />
               </button>
             </div>
-            <span className="ml-auto text-lg font-bold">{(product.price * qty).toLocaleString()}원</span>
+            <span className="text-base font-bold shrink-0">{(product.price * qty).toLocaleString()}원</span>
           </div>
 
           {/* 버튼 */}
-          <div className="flex gap-3">
-            <Button variant="outline" className="flex-1 h-12" onClick={handleAddToCart}>
-              <ShoppingCart className="h-4 w-4 mr-2" />장바구니
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1 h-11" onClick={handleAddToCart}>
+              <ShoppingCart className="h-4 w-4 mr-1.5" />장바구니
             </Button>
-            <Button className="flex-1 h-12" onClick={handleBuyNow}>
+            <Button className="flex-1 h-11" onClick={handleBuyNow}>
               바로 구매
             </Button>
           </div>
