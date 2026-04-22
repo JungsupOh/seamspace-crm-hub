@@ -1,0 +1,163 @@
+// ── 실물 상품 주문 시스템 ────────────────────────────
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
+
+// ── 타입 ──────────────────────────────────────────
+export interface ShopProduct {
+  id: string;
+  name: string;
+  description?: string;
+  price: number;
+  unit_qty: number;
+  unit_label?: string;
+  options?: string[];
+  image_url?: string;
+  detail_image_url?: string;
+  active: boolean;
+  sort_order: number;
+}
+
+export interface CartItem {
+  productId: string;
+  productName: string;
+  option?: string;
+  qty: number;
+  unitPrice: number;
+}
+
+export interface ShopOrder {
+  id: number;
+  order_id: string;
+  created_at: string;
+  status: '결제완료' | '배송준비' | '배송중' | '배송완료' | '취소';
+  customer_name: string;
+  customer_phone: string;
+  customer_email?: string;
+  zipcode: string;
+  address: string;
+  address_detail?: string;
+  delivery_memo?: string;
+  subtotal: number;
+  shipping_fee: number;
+  discount: number;
+  coupon_code?: string;
+  total_amount: number;
+  payment_key?: string;
+  toss_method?: string;
+  carrier?: string;
+  tracking_number?: string;
+  shipped_at?: string;
+  delivered_at?: string;
+}
+
+export interface ShopOrderItem {
+  id: number;
+  order_id: string;
+  product_id: string;
+  product_name: string;
+  option?: string;
+  qty: number;
+  unit_price: number;
+  subtotal: number;
+}
+
+// ── 상품 API ──────────────────────────────────────
+export async function getShopProducts(): Promise<ShopProduct[]> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/shop_products?active=eq.true&order=sort_order.asc`, { headers: HEADERS });
+  if (!r.ok) return [];
+  return r.json();
+}
+
+export async function getShopProduct(id: string): Promise<ShopProduct | null> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/shop_products?id=eq.${id}&limit=1`, { headers: HEADERS });
+  if (!r.ok) return null;
+  const rows: ShopProduct[] = await r.json();
+  return rows[0] ?? null;
+}
+
+// ── 장바구니 (localStorage) ───────────────────────
+const CART_KEY = 'seamspace_cart';
+
+export function getCart(): CartItem[] {
+  try {
+    const raw = localStorage.getItem(CART_KEY);
+    if (!raw) return [];
+    const data = JSON.parse(raw);
+    return Array.isArray(data.items) ? data.items : [];
+  } catch { return []; }
+}
+
+export function saveCart(items: CartItem[]) {
+  localStorage.setItem(CART_KEY, JSON.stringify({ items }));
+}
+
+export function addToCart(item: CartItem) {
+  const cart = getCart();
+  const existing = cart.find(c => c.productId === item.productId && c.option === item.option);
+  if (existing) {
+    existing.qty += item.qty;
+  } else {
+    cart.push(item);
+  }
+  saveCart(cart);
+}
+
+export function updateCartQty(productId: string, option: string | undefined, qty: number) {
+  const cart = getCart();
+  const item = cart.find(c => c.productId === productId && c.option === option);
+  if (item) {
+    if (qty <= 0) {
+      saveCart(cart.filter(c => !(c.productId === productId && c.option === option)));
+    } else {
+      item.qty = qty;
+      saveCart(cart);
+    }
+  }
+}
+
+export function removeFromCart(productId: string, option?: string) {
+  const cart = getCart().filter(c => !(c.productId === productId && c.option === option));
+  saveCart(cart);
+}
+
+export function clearCart() {
+  localStorage.removeItem(CART_KEY);
+}
+
+export function getCartTotal(cart: CartItem[]): { subtotal: number; shippingFee: number; total: number } {
+  const subtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.qty, 0);
+  const shippingFee = subtotal >= 50000 ? 0 : 3000;
+  return { subtotal, shippingFee, total: subtotal + shippingFee };
+}
+
+// ── 주문 API ──────────────────────────────────────
+export async function lookupShopOrder(orderId: string, phone: string): Promise<{ order: ShopOrder; items: ShopOrderItem[] } | null> {
+  const phoneNorm = phone.replace(/\D/g, '');
+  const [orderRes, itemsRes] = await Promise.all([
+    fetch(`${SUPABASE_URL}/rest/v1/shop_orders?order_id=eq.${encodeURIComponent(orderId)}&customer_phone=eq.${phoneNorm}&limit=1`, { headers: HEADERS }),
+    fetch(`${SUPABASE_URL}/rest/v1/shop_order_items?order_id=eq.${encodeURIComponent(orderId)}`, { headers: HEADERS }),
+  ]);
+  if (!orderRes.ok) return null;
+  const orders: ShopOrder[] = await orderRes.json();
+  if (orders.length === 0) return null;
+  const items: ShopOrderItem[] = itemsRes.ok ? await itemsRes.json() : [];
+  return { order: orders[0], items };
+}
+
+// 관리자용: 전체 주문 조회
+export async function getAllShopOrders(): Promise<ShopOrder[]> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/shop_orders?order=created_at.desc&limit=500`, { headers: HEADERS });
+  if (!r.ok) return [];
+  return r.json();
+}
+
+// 관리자용: 주문 상태 업데이트
+export async function updateShopOrderStatus(orderId: string, updates: Partial<ShopOrder>): Promise<void> {
+  await fetch(`${SUPABASE_URL}/rest/v1/shop_orders?order_id=eq.${encodeURIComponent(orderId)}`, {
+    method: 'PATCH',
+    headers: HEADERS,
+    body: JSON.stringify(updates),
+  });
+}

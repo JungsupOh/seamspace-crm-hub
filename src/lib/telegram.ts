@@ -120,3 +120,23 @@ export function notifyWebLicenseIssued(params: {
     `📮 ${recipientCount}명에게 발송 완료`
   );
 }
+
+// ── 상품 주문 알림 ──────────────────────────────────
+export function notifyShopOrder(params: {
+  orderId: string;
+  customerName: string;
+  customerPhone: string;
+  items: string;
+  totalAmount: number;
+  address: string;
+}): void {
+  const { orderId, customerName, customerPhone, items, totalAmount, address } = params;
+  sendTelegramNotification(
+    `🛒 <b>상품 주문 접수</b>\n\n` +
+    `📌 ${orderId}\n` +
+    `👤 ${customerName} / ${customerPhone}\n` +
+    `📦 ${items}\n` +
+    `💰 ${totalAmount.toLocaleString()}원\n` +
+    `📍 ${address}`
+  );
+}
