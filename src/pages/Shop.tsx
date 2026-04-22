@@ -38,20 +38,18 @@ export default function Shop() {
         {isLoading ? (
           <div className="text-center py-16 text-muted-foreground">로딩 중...</div>
         ) : (
+          <>
           <div className="grid grid-cols-3 gap-4">
-            {/* 키링 */}
             <Link to="/shop/keyring" className="group">
               <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow">
                 <img src="/banner/keyring(Thmb).png" alt="감정 키링 10종" className="w-full group-hover:scale-105 transition-transform duration-300" />
               </div>
             </Link>
-            {/* 보드게임 */}
             <Link to="/shop/boardgame" className="group">
               <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow">
                 <img src="/banner/boardgame(Thmb).png" alt="마음여행 보드게임" className="w-full group-hover:scale-105 transition-transform duration-300" />
               </div>
             </Link>
-            {/* 마음일기 → 주문 페이지 */}
             <Link to="/order-test" className="group">
               <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow">
                 <img src="/banner/MindDiary(Thmb).png" alt="AI 마음일기" className="w-full group-hover:scale-105 transition-transform duration-300" />
@@ -59,7 +57,6 @@ export default function Shop() {
             </Link>
           </div>
 
-          {/* 가격 정보 */}
           <div className="grid grid-cols-3 gap-4 -mt-2">
             {products?.filter(p => p.active).map(p => {
               const discount = p.original_price ? Math.round((1 - p.price / p.original_price) * 100) : 0;
@@ -81,6 +78,7 @@ export default function Shop() {
               <p className="text-xs text-muted-foreground mt-0.5">견적 요청 →</p>
             </Link>
           </div>
+          </>
         )}
 
         {/* 하단 마음일기 링크 */}
