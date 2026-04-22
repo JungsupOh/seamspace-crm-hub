@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { formatPhone } from '@/lib/utils';
-// Toss Payments 결제창 SDK loaded via CDN (https://js.tosspayments.com/v1)
 import { searchSchools, SchoolInfo } from '@/lib/neis';
+import { notifyWebQuote, notifyWebPayment, notifyWebLicenseIssued } from '@/lib/telegram';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -508,6 +508,9 @@ export default function OrderTest() {
       }
       const qNum = `${prefix}${String(seq).padStart(4, '0')}`;
 
+      const planLabel = selectedProduct.code === '01' ? activePlan.label : selectedProduct.name;
+      const phoneNorm = info.phone.replace(/\D/g, '');
+
       const saveRes = await fetch(`${SUPABASE_URL}/rest/v1/deal_quotes`, {
         method: 'POST',
         headers: {
@@ -519,21 +522,40 @@ export default function OrderTest() {
         body: JSON.stringify({
           deal_id: 'web',
           quote_number: qNum,
-          plan: selectedProduct.code === '01' ? activePlan.label : selectedProduct.name,
+          plan: planLabel,
           qty: info.qty,
           duration: selectedProduct.code === '01' ? info.months : undefined,
           unit_price: selectedProduct.code === '01' ? unitPrice : undefined,
           supply_price: selectedProduct.code === '01' ? supply : undefined,
           tax_amount: selectedProduct.code === '01' ? tax : undefined,
           final_value: selectedProduct.code === '01' ? total : undefined,
-          contact_phone: info.phone.replace(/\D/g, ''),
-          contact_email: info.email.trim() || null,
+          contact_phone: phoneNorm,
           quote_date: today,
           notes: `[웹주문] 상품: 심스페이스-${selectedProduct.name} / 기관: ${info.orgName} / 담당자: ${info.contactName} / 연락처: ${info.phone} / 이메일: ${info.email}${info.students ? ` / 학생수: ${info.students}명` : ''}`,
+          // 웹 주문 필드
+          source: 'web',
+          buyer_phone: info.phone,
+          buyer_phone_normalized: phoneNorm,
+          buyer_name: info.contactName,
+          buyer_email: info.email.trim() || null,
+          org_name: info.orgName,
+          order_status: '견적',
+          student_count: info.students ? parseInt(info.students) || null : null,
         }),
       });
       if (saveRes.ok || saveRes.status === 201) {
         setSavedQuoteNum(qNum);
+        // 텔레그램 알림
+        notifyWebQuote({
+          quoteNumber: qNum,
+          orgName: info.orgName,
+          buyerName: info.contactName,
+          buyerPhone: info.phone,
+          plan: planLabel,
+          duration: info.months,
+          quantity: info.qty,
+          totalAmount: total,
+        });
         return qNum;
       }
     } catch (e) {
@@ -622,6 +644,7 @@ export default function OrderTest() {
         },
         body: JSON.stringify({
           to: info.email.trim(),
+          cc: 'sales@tebahsoft.com',
           subject: `[심스페이스] 견적서 ${qNum} — ${info.orgName}`,
           html: htmlBody,
         }),
@@ -664,8 +687,8 @@ export default function OrderTest() {
       if (Array.isArray(data) && data.length > 0) {
         const record = data[0];
         // 이메일/전화번호 중 하나가 맞으면 통과
-        const storedEmail = normalizeEmail(record.contact_email ?? '');
-        const storedPhone = normalizePhone(record.contact_phone ?? '');
+        const storedEmail = normalizeEmail(record.contact_email ?? (record as any).buyer_email ?? '');
+        const storedPhone = normalizePhone(record.contact_phone ?? (record as any).buyer_phone_normalized ?? '');
         const emailOk = entEmail && storedEmail && storedEmail === entEmail;
         const phoneOk = entPhone && storedPhone && storedPhone === entPhone;
         const hasStoredContact = !!(storedEmail || storedPhone);
