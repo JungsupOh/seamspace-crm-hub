@@ -800,65 +800,67 @@ export default function OrderTest() {
 
         {/* ══ ENTRY ══════════════════════════════════════ */}
         {mode === 'entry' && (
-          <div className="space-y-8">
-            <div className="text-center">
-              <h1 className="text-2xl font-bold mb-2">심스페이스 이용권 구매</h1>
-              <p className="text-muted-foreground text-sm">학교·기관 전용 구독 서비스입니다.</p>
+          <div className="space-y-10">
+            {/* 헤더 */}
+            <div className="text-center pt-4">
+              <h1 className="text-3xl font-bold mb-3">심스페이스 주문</h1>
+              <p className="text-muted-foreground">행복한 사회정서학습, AI 마음일기 서비스</p>
             </div>
 
-            <div className="grid grid-cols-1 gap-4">
-              {/* 견적 */}
+            {/* 3카드 가로 배열 */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* 견적 요청 */}
               <button type="button"
                 onClick={() => { setSelectedProduct(PRODUCTS[0]); PRODUCTS.length === 1 ? (setMode('quote-stage'), setQStep(1)) : setMode('product-select'); }}
-                className="group bg-white rounded-2xl border-2 border-border hover:border-primary shadow-sm p-6 text-left transition-all hover:shadow-md flex items-start gap-5">
-                <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/15 transition-colors">
-                  <FileText className="h-6 w-6 text-primary" />
+                className="group bg-white rounded-2xl border-2 border-border hover:border-primary shadow-sm hover:shadow-lg transition-all flex flex-col items-center text-center p-8 gap-4">
+                <div className="w-20 h-20 rounded-2xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/15 transition-colors">
+                  <FileText className="h-10 w-10 text-primary" />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-bold bg-primary/10 text-primary px-2 py-0.5 rounded-full">STEP 1</span>
-                    <h2 className="font-bold text-base">견적 요청</h2>
-                  </div>
-                  <p className="text-sm text-muted-foreground">기관 정보와 플랜을 선택하면 견적서가 이메일로 발송됩니다.</p>
+                <div>
+                  <h2 className="font-bold text-lg mb-2">견적 요청</h2>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    플랜을 선택하고<br />견적서를 이메일로<br />받아보세요
+                  </p>
                 </div>
-                <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-primary shrink-0 mt-1" />
               </button>
 
-              {/* 결제 */}
+              {/* 결제하기 */}
               <button type="button" onClick={() => { setMode('payment-stage'); setPSub('lookup'); }}
-                className="group bg-white rounded-2xl border-2 border-border hover:border-teal-500 shadow-sm p-6 text-left transition-all hover:shadow-md flex items-start gap-5">
-                <div className="w-12 h-12 rounded-xl bg-teal-50 flex items-center justify-center shrink-0 group-hover:bg-teal-100 transition-colors">
-                  <CreditCard className="h-6 w-6 text-teal-600" />
+                className="group bg-white rounded-2xl border-2 border-border hover:border-teal-500 shadow-sm hover:shadow-lg transition-all flex flex-col items-center text-center p-8 gap-4">
+                <div className="w-20 h-20 rounded-2xl bg-teal-50 flex items-center justify-center group-hover:bg-teal-100 transition-colors">
+                  <CreditCard className="h-10 w-10 text-teal-600" />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-bold bg-teal-50 text-teal-700 px-2 py-0.5 rounded-full">STEP 2</span>
-                    <h2 className="font-bold text-base">결제하기</h2>
-                  </div>
-                  <p className="text-sm text-muted-foreground">견적서 번호로 조회 후 카드 또는 계좌이체로 결제합니다.</p>
+                <div>
+                  <h2 className="font-bold text-lg mb-2">결제하기</h2>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    견적서 번호로 조회 후<br />카드 또는 계좌이체로<br />결제합니다
+                  </p>
                 </div>
-                <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-teal-500 shrink-0 mt-1" />
               </button>
 
               {/* 이용권 발송 */}
               <button type="button" onClick={() => { setMode('license-stage'); setLSub('lookup'); }}
-                className="group bg-white rounded-2xl border-2 border-border hover:border-purple-500 shadow-sm p-6 text-left transition-all hover:shadow-md flex items-start gap-5">
-                <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center shrink-0 group-hover:bg-purple-100 transition-colors">
-                  <Gift className="h-6 w-6 text-purple-600" />
+                className="group bg-white rounded-2xl border-2 border-border hover:border-purple-500 shadow-sm hover:shadow-lg transition-all flex flex-col items-center text-center p-8 gap-4">
+                <div className="w-20 h-20 rounded-2xl bg-purple-50 flex items-center justify-center group-hover:bg-purple-100 transition-colors">
+                  <Gift className="h-10 w-10 text-purple-600" />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-bold bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">STEP 3</span>
-                    <h2 className="font-bold text-base">이용권 발송</h2>
-                  </div>
-                  <p className="text-sm text-muted-foreground">입금 완료 후 견적서 번호로 이용권을 발급받습니다.</p>
+                <div>
+                  <h2 className="font-bold text-lg mb-2">이용권 발송</h2>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    결제 완료 후<br />선생님들에게<br />이용권을 발송하세요
+                  </p>
                 </div>
-                <ChevronRight className="h-5 w-5 text-muted-foreground group-hover:text-purple-500 shrink-0 mt-1" />
               </button>
             </div>
 
-            <div className="text-center text-xs text-muted-foreground space-y-1 pt-4">
-              <p>구매 관련 문의: 042-864-5566 · contact@tebahsoft.com</p>
+            {/* 하단 안내 */}
+            <div className="text-center space-y-2 pt-2">
+              <div className="flex justify-center gap-4 text-xs text-muted-foreground">
+                <a href="/docs/사업자등록증.pdf" className="hover:text-primary hover:underline">사업자등록증</a>
+                <span>·</span>
+                <a href="/docs/통장사본.pdf" className="hover:text-primary hover:underline">통장사본</a>
+              </div>
+              <p className="text-xs text-muted-foreground">구매 문의: 042-864-5566 · sales@tebahsoft.com</p>
             </div>
           </div>
         )}
