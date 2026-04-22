@@ -18,9 +18,9 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 const BANK_INFO = {
-  bank: '국민은행',
-  account: '940701-00-000000', // TODO: 실제 계좌번호로 변경
-  holder: '테바소프트(주)',
+  bank: '하나은행',
+  account: '679-910046-01704',
+  holder: '테바소프트 주식회사',
 };
 
 // ── 플랜 정의 ──────────────────────────────────────
@@ -599,9 +599,16 @@ export default function OrderTest() {
               <p style="margin: 0 0 4px; font-size: 13px; color: #374151;">① <strong>온라인 카드 결제:</strong> <a href="${payUrl}" style="color: #0f766e;">${payUrl}</a> → 결제하기</p>
               <p style="margin: 0; font-size: 13px; color: #374151;">② <strong>계좌이체:</strong> ${BANK_INFO.bank} ${BANK_INFO.account} (예금주: ${BANK_INFO.holder})</p>
             </div>
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
+              <p style="margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #374151;">📋 구매 서류</p>
+              <p style="margin: 0; font-size: 12px;">
+                <a href="${window.location.origin}/docs/사업자등록증.pdf" style="color: #0f766e; text-decoration: underline; margin-right: 16px;">사업자등록증 다운로드</a>
+                <a href="${window.location.origin}/docs/통장사본.pdf" style="color: #0f766e; text-decoration: underline;">통장사본 다운로드</a>
+              </p>
+            </div>
             <div style="border-top: 1px solid #e2e8f0; padding-top: 16px; font-size: 12px; color: #94a3b8;">
               <p style="margin: 0 0 4px;">Tebahsoft, Inc. (테바소프트 주식회사)</p>
-              <p style="margin: 0 0 4px;">고객센터: 042-864-5566 · contact@tebahsoft.com</p>
+              <p style="margin: 0 0 4px;">고객센터: 042-864-5566 · sales@tebahsoft.com</p>
               <p style="margin: 0;">견적 유효기간: 발급일로부터 30일</p>
             </div>
           </div>
