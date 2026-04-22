@@ -39,10 +39,10 @@ export default function ShopProductDetail() {
   const options = product.options as string[] | null;
   const needsOption = options && options.length > 0;
 
-  const handleAddToCart = () => {
+  const handleAddToCart = (): boolean => {
     if (needsOption && !selectedOption) {
       toast.error('옵션을 선택해주세요');
-      return;
+      return false;
     }
     addToCart({
       productId: product.id,
@@ -52,11 +52,11 @@ export default function ShopProductDetail() {
       unitPrice: product.price,
     });
     toast.success('장바구니에 담았습니다');
+    return true;
   };
 
   const handleBuyNow = () => {
-    handleAddToCart();
-    navigate('/shop/cart');
+    if (handleAddToCart()) navigate('/shop/cart');
   };
 
   return (
