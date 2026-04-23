@@ -43,7 +43,7 @@ export default function Shop() {
         {isLoading ? (
           <div className="text-center py-16 text-muted-foreground">로딩 중...</div>
         ) : (
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Link to="/shop/keyring" className="group text-center">
               <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-2">
                 <img src="/banner/keyring(Thmb).png" alt="감정 키링 10종" className="w-full group-hover:scale-105 transition-transform duration-300" />

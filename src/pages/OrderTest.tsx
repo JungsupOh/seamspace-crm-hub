@@ -783,7 +783,7 @@ export default function OrderTest() {
             <img src="/logo2.png" alt="Seamspace" className="h-8 w-auto" />
             <span className="font-semibold text-base">심스페이스</span>
           </div>
-          <a href="https://seamspace.co.kr" target="_blank" rel="noopener noreferrer"
+          <a href="https://www.seamspace.me" target="_blank" rel="noopener noreferrer"
             className="text-xs text-muted-foreground hover:text-foreground transition-colors">서비스 소개 →</a>
         </div>
       </header>
@@ -796,8 +796,8 @@ export default function OrderTest() {
         </div>
       )}
 
-      <div className="max-w-6xl mx-auto px-4 py-10 flex gap-6">
-      {/* 사이드 배너 (데스크톱만) */}
+      <div className="max-w-6xl mx-auto px-4 py-10 lg:flex lg:gap-6">
+      {/* 사이드 배너 (데스크톱: 좌측, 모바일: 숨김 — 하단에 스택으로 표시) */}
       <aside className="hidden lg:flex flex-col gap-3 w-[180px] shrink-0 pt-16">
         <a href="/shop/keyring" className="rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow border border-border">
           <img src="/banner/keyring(Thmb).png" alt="심스페이스 감정 키링" className="w-full" />
@@ -1799,7 +1799,7 @@ export default function OrderTest() {
                 </div>
                 <div className="flex gap-3">
                   <Button asChild variant="outline" className="flex-1 h-11">
-                    <a href="https://seamspace.co.kr" target="_blank" rel="noopener noreferrer">서비스 바로가기</a>
+                    <a href="https://www.seamspace.me" target="_blank" rel="noopener noreferrer">서비스 바로가기</a>
                   </Button>
                   <Button className="flex-1 h-11" onClick={goEntry}>처음으로</Button>
                 </div>
@@ -1829,11 +1829,12 @@ export default function OrderTest() {
       </main>
 
       {/* 모바일 배너 (하단) */}
-      <div className="lg:hidden flex gap-2 overflow-x-auto pb-2 px-1 shrink-0">
-        <a href="/shop/keyring" className="rounded-lg overflow-hidden shadow-sm border border-border shrink-0 w-48">
+      <div className="lg:hidden flex flex-col gap-3 mt-8 px-1">
+        <p className="text-xs text-muted-foreground text-center">다른 상품도 둘러보세요</p>
+        <a href="/shop/keyring" className="rounded-xl overflow-hidden shadow-sm border border-border">
           <img src="/banner/keyring(Thmb).png" alt="심스페이스 감정 키링" className="w-full" />
         </a>
-        <a href="/shop/boardgame" className="rounded-lg overflow-hidden shadow-sm border border-border shrink-0 w-48">
+        <a href="/shop/boardgame" className="rounded-xl overflow-hidden shadow-sm border border-border">
           <img src="/banner/boardgame(Thmb).png" alt="심스페이스 보드게임" className="w-full" />
         </a>
       </div>

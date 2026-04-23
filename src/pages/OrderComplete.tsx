@@ -178,7 +178,7 @@ export default function OrderComplete() {
                   <Link to="/order">추가 구매</Link>
                 </Button>
                 <Button asChild className="flex-1 h-11">
-                  <a href="https://seamspace.co.kr" target="_blank" rel="noopener noreferrer">
+                  <a href="https://www.seamspace.me" target="_blank" rel="noopener noreferrer">
                     서비스 바로가기
                     <ArrowRight className="h-4 w-4 ml-1" />
                   </a>
