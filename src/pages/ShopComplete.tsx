@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { clearCart, incrementCouponUsage } from '@/lib/shop';
+import { clearCart, markCouponUsed } from '@/lib/shop';
 import { notifyShopOrder } from '@/lib/telegram';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -106,9 +106,9 @@ export default function ShopComplete() {
           address: `${orderData.shipping.address} ${orderData.shipping.addressDetail || ''}`.trim(),
         });
 
-        // 쿠폰 사용 횟수 증가
+        // 쿠폰 사용 처리 (일련번호 + 주문ID + 전화번호 기록)
         if (orderData.couponCode) {
-          await incrementCouponUsage(orderData.couponCode);
+          await markCouponUsed(orderData.couponCode, tossOrderId!, orderData.customer.phone);
         }
 
         // 장바구니 비우기 + sessionStorage 정리

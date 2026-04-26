@@ -152,18 +152,17 @@ export async function lookupShopOrder(orderId: string, phone: string): Promise<{
   return { order: orders[0], items };
 }
 
-// ── 쿠폰 검증 ────────────────────────────────────
+// ── 쿠폰 검증 (개별 일련번호, 1회용) ────────────────
 export interface ShopCoupon {
   id: number;
   code: string;
+  batch_name: string;
   campaign_id?: string;
-  name?: string;
   discount_type: 'amount' | 'percent';
   discount_value: number;
   min_order: number;
-  max_uses?: number;
-  used_count: number;
-  expires_at?: string;
+  expires_at: string;
+  is_used: boolean;
   active: boolean;
 }
 
@@ -189,11 +188,11 @@ export async function validateShopCoupon(code: string, subtotal: number): Promis
 
   const coupon = rows[0];
 
-  if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
-    return { valid: false, discount: 0, error: '만료된 쿠폰입니다.' };
+  if (coupon.is_used) {
+    return { valid: false, discount: 0, error: '이미 사용된 쿠폰입니다.' };
   }
-  if (coupon.max_uses != null && coupon.used_count >= coupon.max_uses) {
-    return { valid: false, discount: 0, error: '사용 횟수가 소진된 쿠폰입니다.' };
+  if (new Date(coupon.expires_at) < new Date()) {
+    return { valid: false, discount: 0, error: '만료된 쿠폰입니다.' };
   }
   if (subtotal < coupon.min_order) {
     return { valid: false, discount: 0, error: `${coupon.min_order.toLocaleString()}원 이상 주문 시 사용 가능합니다.` };
@@ -205,18 +204,51 @@ export async function validateShopCoupon(code: string, subtotal: number): Promis
   } else {
     discount = Math.round(subtotal * coupon.discount_value / 100);
   }
-  discount = Math.min(discount, subtotal); // 할인이 주문금액 초과 방지
+  discount = Math.min(discount, subtotal);
 
-  return { valid: true, discount, couponName: coupon.name || coupon.code };
+  return { valid: true, discount, couponName: coupon.batch_name };
 }
 
-// 쿠폰 사용 횟수 증가 (Supabase RPC)
-export async function incrementCouponUsage(code: string): Promise<void> {
-  await fetch(`${SUPABASE_URL}/rest/v1/rpc/increment_coupon_usage`, {
+// 쿠폰 사용 처리 (Supabase RPC — 주문ID + 전화번호 기록)
+export async function markCouponUsed(code: string, orderId: string, phone: string): Promise<void> {
+  await fetch(`${SUPABASE_URL}/rest/v1/rpc/use_shop_coupon`, {
     method: 'POST',
     headers: HEADERS,
-    body: JSON.stringify({ coupon_code: code }),
+    body: JSON.stringify({ p_code: code, p_order_id: orderId, p_phone: phone }),
   }).catch(() => {});
+}
+
+// 쿠폰 배치 생성 (관리자용)
+export async function createCouponBatch(params: {
+  batchName: string;
+  prefix: string;
+  count: number;
+  campaignId?: string;
+  discountType: 'amount' | 'percent';
+  discountValue: number;
+  minOrder: number;
+  expiresAt: string;
+}): Promise<ShopCoupon[]> {
+  const coupons = [];
+  for (let i = 1; i <= params.count; i++) {
+    const code = `${params.prefix}-${String(i).padStart(3, '0')}`;
+    coupons.push({
+      code,
+      batch_name: params.batchName,
+      campaign_id: params.campaignId || null,
+      discount_type: params.discountType,
+      discount_value: params.discountValue,
+      min_order: params.minOrder,
+      expires_at: params.expiresAt,
+    });
+  }
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/shop_coupons`, {
+    method: 'POST',
+    headers: { ...HEADERS, Prefer: 'return=representation' },
+    body: JSON.stringify(coupons),
+  });
+  if (!r.ok) throw new Error('쿠폰 배치 생성 실패');
+  return r.json();
 }
 
 // 고객용: 이름+전화번호로 최근 1개월 주문 목록 조회
