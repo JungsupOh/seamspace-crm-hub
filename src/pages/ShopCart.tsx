@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Minus, Plus, Trash2, ShoppingCart, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { getCart, saveCart, getCartTotal, clearCart, type CartItem } from '@/lib/shop';
+import { getCart, saveCart, getCartTotal, clearCart, validateShopCoupon, type CartItem } from '@/lib/shop';
 
 export default function ShopCart() {
   const navigate = useNavigate();
@@ -30,11 +30,32 @@ export default function ShopCart() {
   const { subtotal, shippingFee, total, needsShipping } = getCartTotal(items);
   const finalTotal = Math.max(0, total - couponDiscount);
 
-  const handleApplyCoupon = () => {
-    // TODO: 쿠폰 검증 API 연동
+  const [couponApplying, setCouponApplying] = useState(false);
+  const handleApplyCoupon = async () => {
     if (!couponCode.trim()) return;
-    setCouponError('유효하지 않은 쿠폰 코드입니다.');
-    setCouponDiscount(0);
+    setCouponApplying(true);
+    setCouponError('');
+    try {
+      const result = await validateShopCoupon(couponCode.trim(), subtotal);
+      if (result.valid) {
+        setCouponDiscount(result.discount);
+        setCouponError('');
+        // 체크아웃으로 전달하기 위해 sessionStorage에 저장
+        sessionStorage.setItem('shop_coupon', JSON.stringify({
+          code: couponCode.trim().toUpperCase(),
+          discount: result.discount,
+          name: result.couponName,
+        }));
+      } else {
+        setCouponDiscount(0);
+        setCouponError(result.error || '유효하지 않은 쿠폰입니다.');
+        sessionStorage.removeItem('shop_coupon');
+      }
+    } catch {
+      setCouponError('쿠폰 확인 중 오류가 발생했습니다.');
+    } finally {
+      setCouponApplying(false);
+    }
   };
 
   if (items.length === 0) {
@@ -107,7 +128,9 @@ export default function ShopCart() {
           <div className="flex gap-2">
             <Input value={couponCode} onChange={e => { setCouponCode(e.target.value); setCouponError(''); }}
               placeholder="쿠폰 코드 입력" className="h-10 text-sm" />
-            <Button variant="outline" className="h-10 shrink-0" onClick={handleApplyCoupon}>적용</Button>
+            <Button variant="outline" className="h-10 shrink-0" onClick={handleApplyCoupon} disabled={couponApplying}>
+              {couponApplying ? '확인 중...' : '적용'}
+            </Button>
           </div>
           {couponError && <p className="text-xs text-destructive mt-1.5">{couponError}</p>}
           {couponDiscount > 0 && <p className="text-xs text-teal-600 mt-1.5">-{couponDiscount.toLocaleString()}원 할인 적용됨</p>}

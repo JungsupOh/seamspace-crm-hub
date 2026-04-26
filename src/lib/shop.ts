@@ -152,6 +152,73 @@ export async function lookupShopOrder(orderId: string, phone: string): Promise<{
   return { order: orders[0], items };
 }
 
+// ── 쿠폰 검증 ────────────────────────────────────
+export interface ShopCoupon {
+  id: number;
+  code: string;
+  campaign_id?: string;
+  name?: string;
+  discount_type: 'amount' | 'percent';
+  discount_value: number;
+  min_order: number;
+  max_uses?: number;
+  used_count: number;
+  expires_at?: string;
+  active: boolean;
+}
+
+export interface CouponValidation {
+  valid: boolean;
+  discount: number;
+  couponName?: string;
+  error?: string;
+}
+
+export async function validateShopCoupon(code: string, subtotal: number): Promise<CouponValidation> {
+  if (!code.trim()) return { valid: false, discount: 0, error: '쿠폰 코드를 입력해주세요.' };
+
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/shop_coupons?code=eq.${encodeURIComponent(code.trim().toUpperCase())}&active=eq.true&limit=1`,
+    { headers: HEADERS }
+  );
+  if (!r.ok) return { valid: false, discount: 0, error: '쿠폰 조회 실패' };
+  const rows: ShopCoupon[] = await r.json();
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { valid: false, discount: 0, error: '유효하지 않은 쿠폰 코드입니다.' };
+  }
+
+  const coupon = rows[0];
+
+  if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+    return { valid: false, discount: 0, error: '만료된 쿠폰입니다.' };
+  }
+  if (coupon.max_uses != null && coupon.used_count >= coupon.max_uses) {
+    return { valid: false, discount: 0, error: '사용 횟수가 소진된 쿠폰입니다.' };
+  }
+  if (subtotal < coupon.min_order) {
+    return { valid: false, discount: 0, error: `${coupon.min_order.toLocaleString()}원 이상 주문 시 사용 가능합니다.` };
+  }
+
+  let discount = 0;
+  if (coupon.discount_type === 'amount') {
+    discount = coupon.discount_value;
+  } else {
+    discount = Math.round(subtotal * coupon.discount_value / 100);
+  }
+  discount = Math.min(discount, subtotal); // 할인이 주문금액 초과 방지
+
+  return { valid: true, discount, couponName: coupon.name || coupon.code };
+}
+
+// 쿠폰 사용 횟수 증가 (Supabase RPC)
+export async function incrementCouponUsage(code: string): Promise<void> {
+  await fetch(`${SUPABASE_URL}/rest/v1/rpc/increment_coupon_usage`, {
+    method: 'POST',
+    headers: HEADERS,
+    body: JSON.stringify({ coupon_code: code }),
+  }).catch(() => {});
+}
+
 // 고객용: 이름+전화번호로 최근 1개월 주문 목록 조회
 export async function lookupMyOrders(name: string, phone: string): Promise<{ order: ShopOrder; items: ShopOrderItem[] }[]> {
   const phoneNorm = phone.replace(/\D/g, '');

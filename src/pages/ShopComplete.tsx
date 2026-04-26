@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { clearCart } from '@/lib/shop';
+import { clearCart, incrementCouponUsage } from '@/lib/shop';
 import { notifyShopOrder } from '@/lib/telegram';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -57,7 +57,8 @@ export default function ShopComplete() {
             delivery_memo: orderData.shipping?.memo || null,
             subtotal: orderData.subtotal,
             shipping_fee: orderData.shippingFee,
-            discount: 0,
+            discount: orderData.discount ?? 0,
+            coupon_code: orderData.couponCode || null,
             total_amount: parseInt(amount),
             payment_key: paymentKey,
             toss_method: '카드',
@@ -105,9 +106,15 @@ export default function ShopComplete() {
           address: `${orderData.shipping.address} ${orderData.shipping.addressDetail || ''}`.trim(),
         });
 
+        // 쿠폰 사용 횟수 증가
+        if (orderData.couponCode) {
+          await incrementCouponUsage(orderData.couponCode);
+        }
+
         // 장바구니 비우기 + sessionStorage 정리
         clearCart();
         sessionStorage.removeItem('shop_order');
+        sessionStorage.removeItem('shop_coupon');
 
         setOrderId(tossOrderId);
         setStatus('success');

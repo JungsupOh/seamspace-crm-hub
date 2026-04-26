@@ -35,6 +35,16 @@ export default function ShopCheckout() {
   }, [navigate]);
 
   const { subtotal, shippingFee, total, needsShipping } = getCartTotal(items);
+
+  // 쿠폰 할인 정보 (장바구니에서 전달)
+  const [couponInfo] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('shop_coupon');
+      return raw ? JSON.parse(raw) as { code: string; discount: number; name: string } : null;
+    } catch { return null; }
+  });
+  const finalTotal = Math.max(0, total - (couponInfo?.discount ?? 0));
+
   const f = (k: keyof typeof form, v: string) => setForm(p => ({ ...p, [k]: v }));
 
   // Daum 우편번호 검색
@@ -71,8 +81,8 @@ export default function ShopCheckout() {
         orderId,
         items,
         customer: { name: form.name, phone: form.phone.replace(/\D/g, ''), email: form.email },
-        shipping: { zipcode: form.zipcode, address: form.address, addressDetail: form.addressDetail, memo: form.memo },
-        subtotal, shippingFee, total,
+        shipping: needsShipping ? { zipcode: form.zipcode, address: form.address, addressDetail: form.addressDetail, memo: form.memo } : null,
+        subtotal, shippingFee, discount: couponInfo?.discount ?? 0, couponCode: couponInfo?.code ?? null, total: finalTotal,
       }));
 
       // Toss Payments 결제
@@ -84,7 +94,7 @@ export default function ShopCheckout() {
 
       const toss = window.TossPayments(TOSS_CLIENT_KEY);
       await toss.requestPayment('카드', {
-        amount: total,
+        amount: finalTotal,
         orderId,
         orderName,
         customerName: form.name,
@@ -130,9 +140,15 @@ export default function ShopCheckout() {
             <span className="text-muted-foreground">배송비</span>
             <span>{shippingFee === 0 ? '무료' : `${shippingFee.toLocaleString()}원`}</span>
           </div>
+          {couponInfo && couponInfo.discount > 0 && (
+            <div className="flex justify-between text-sm text-teal-600">
+              <span>쿠폰 할인 ({couponInfo.name})</span>
+              <span>-{couponInfo.discount.toLocaleString()}원</span>
+            </div>
+          )}
           <div className="border-t mt-2 pt-2 flex justify-between font-bold">
             <span>총 결제금액</span>
-            <span>{total.toLocaleString()}원</span>
+            <span>{finalTotal.toLocaleString()}원</span>
           </div>
         </div>
 
@@ -176,7 +192,7 @@ export default function ShopCheckout() {
         {/* 결제 버튼 */}
         <Button className="w-full h-12 text-base" disabled={!canSubmit || submitting} onClick={handlePayment}>
           {submitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-          {total.toLocaleString()}원 결제하기
+          {finalTotal.toLocaleString()}원 결제하기
         </Button>
 
         <p className="text-[10px] text-muted-foreground text-center">
