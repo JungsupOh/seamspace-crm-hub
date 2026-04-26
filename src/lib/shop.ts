@@ -229,9 +229,16 @@ export async function createCouponBatch(params: {
   minOrder: number;
   expiresAt: string;
 }): Promise<ShopCoupon[]> {
+  const randomCode = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 혼동 문자 제외 (0O1I)
+    return Array.from(crypto.getRandomValues(new Uint8Array(6)), b => chars[b % chars.length]).join('');
+  };
   const coupons = [];
-  for (let i = 1; i <= params.count; i++) {
-    const code = `${params.prefix}-${String(i).padStart(3, '0')}`;
+  const usedCodes = new Set<string>();
+  for (let i = 0; i < params.count; i++) {
+    let code: string;
+    do { code = `${params.prefix}-${randomCode()}`; } while (usedCodes.has(code));
+    usedCodes.add(code);
     coupons.push({
       code,
       batch_name: params.batchName,
