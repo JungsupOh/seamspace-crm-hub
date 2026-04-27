@@ -28,3 +28,8 @@ dist-ssr
 
 # Supabase CLI 로컬 임시 파일
 supabase/.temp/
+
+# 외부 SDK 예제, 데이터 백업 (로컬 보관용)
+node.js_alim_example/
+node.js_alim_example.zip
+mDiary_app_coupon_*.csv
