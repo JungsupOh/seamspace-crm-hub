@@ -1,10 +1,14 @@
+import { useState } from 'react';
 import { useContacts, useDeals } from '@/hooks/use-airtable';
-import { useQuery } from '@tanstack/react-query';
-import { getAllLicenses } from '@/lib/storage';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { getAllLicenses, type DealLicenseRecord } from '@/lib/storage';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
-import { FlaskConical, Briefcase, TrendingUp, AlertCircle, Clock, ArrowRight, CheckCircle2, LogIn, Phone, Users } from 'lucide-react';
+import { FlaskConical, Briefcase, TrendingUp, AlertCircle, Clock, ArrowRight, CheckCircle2, LogIn, Phone, Users, Send, ChevronDown } from 'lucide-react';
 import { DEAL_STAGE_LABELS, STAGE_COLOR, normalizeStage } from '@/lib/grades';
 import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
+import { getRecentSendLogs, buildSentMap, isAlreadySent, type AlimtalkRecipient } from '@/lib/alimtalk';
 
 const fmt = (n: number) =>
   n >= 100_000_000 ? `${(n / 100_000_000).toFixed(1)}억`
@@ -21,13 +25,55 @@ function daysSince(dateStr: string): number {
   return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 
+type ExpiringLic = DealLicenseRecord & { dd: number; sentStage?: string };
+type GroupKey = 'urgent' | 'soon' | 'warn' | 'warnLate' | 'rest';
+
+const GROUP_META: Record<GroupKey, { label: string; range: string; stage: string; color: string; bg: string }> = {
+  urgent:   { label: '🔴 긴급',    range: 'D-1 (오늘 ~ 1일)', stage: 'D-1', color: 'text-red-700',    bg: 'bg-red-50/50' },
+  soon:     { label: '🟠 임박',    range: 'D-2 ~ D-3',        stage: 'D-3', color: 'text-orange-700', bg: 'bg-orange-50/50' },
+  warn:     { label: '🟡 경고',    range: 'D-6 ~ D-7',        stage: 'D-7', color: 'text-amber-700',  bg: 'bg-amber-50/50' },
+  warnLate: { label: '🟡 경고-폴백', range: 'D-4 ~ D-5',       stage: 'D-7', color: 'text-amber-600',  bg: 'bg-amber-50/30' },
+  rest:     { label: '⚪ 관찰',    range: 'D-8 ~ D-30',       stage: '',    color: 'text-slate-600',  bg: 'bg-slate-50/50' },
+};
+
+const groupOf = (dd: number): GroupKey => {
+  if (dd <= 1) return 'urgent';
+  if (dd <= 3) return 'soon';
+  if (dd <= 5) return 'warnLate';
+  if (dd <= 7) return 'warn';
+  return 'rest';
+};
+
+const toRecipient = (l: ExpiringLic): AlimtalkRecipient => ({
+  license_id:     l.id,
+  license_source: l.deal_id === 'mdiary' ? 'mdiary' : 'deal',
+  name:           l.admin_name ?? '',
+  phone:          l.admin_phone ?? '',
+  group_name:     l.group_name ?? l.org_name ?? null,
+  user_limit:     String(l.user_count ?? ''),
+  duration:       String(l.duration ?? ''),
+  expiry_date:    l.service_expire_at ?? null,
+  coupon_code:    null,
+});
+
 export default function Dashboard() {
+  const qc = useQueryClient();
   const { data: contacts, isLoading: cl } = useContacts();
   const { data: deals,    isLoading: dl } = useDeals();
   const { data: licenses, isLoading: ll } = useQuery({
     queryKey: ['licenses'],
     queryFn: getAllLicenses,
   });
+  const { data: sendLogs } = useQuery({
+    queryKey: ['alimtalk_logs_recent'],
+    queryFn:  getRecentSendLogs,
+    staleTime: 30 * 1000,
+  });
+
+  // 발송 다이얼로그 state
+  const [sendOpen, setSendOpen] = useState(false);
+  const [sendGroup, setSendGroup] = useState<GroupKey | null>(null);
+  const [restOpen, setRestOpen] = useState(false);
 
   const today     = new Date().toISOString().split('T')[0];
   const thisMonth = new Date().getMonth();
@@ -39,15 +85,45 @@ export default function Dashboard() {
   // 사용중 체험권
   const activeTrials = allLics.filter(l => l.status === '사용중');
 
-  // 만료 임박 D-30 이내 (만료일 있는 사용중)
-  const expiringSoon = activeTrials
-    .filter(l => l.service_expire_at && l.service_expire_at >= today)
-    .map(l => ({ ...l, dd: dday(l.service_expire_at!) }))
-    .filter(l => l.dd <= 30)
+  // 만료 임박 D-30 이내 (만료일 있는 사용중) — D-0(당일 만료)도 포함하기 위해 dd >= 0
+  const sentMap = sendLogs ? buildSentMap(sendLogs) : new Set<string>();
+  const expiringSoon: ExpiringLic[] = activeTrials
+    .filter(l => l.service_expire_at)
+    .map(l => ({ ...l, dd: dday(l.service_expire_at!) } as ExpiringLic))
+    .filter(l => l.dd >= 0 && l.dd <= 30)
+    .map(l => {
+      const source = l.deal_id === 'mdiary' ? 'mdiary' : 'deal';
+      // 어떤 stage가 발송됐는지 확인 (D-1 / D-3 / D-7 순으로 가장 강한 stage)
+      let sentStage: string | undefined;
+      for (const s of ['D-1', 'D-3', 'D-7']) {
+        if (isAlreadySent(sentMap, source, l.id, 'UD_5369', s)) { sentStage = s; break; }
+      }
+      return { ...l, sentStage };
+    })
     .sort((a, b) => a.dd - b.dd);
 
   // D-7 이내 긴급
   const urgentCount = expiringSoon.filter(l => l.dd <= 7).length;
+
+  // 그룹별 분류
+  const groups: Record<GroupKey, ExpiringLic[]> = {
+    urgent: [], soon: [], warn: [], warnLate: [], rest: [],
+  };
+  expiringSoon.forEach(l => groups[groupOf(l.dd)].push(l));
+
+  // 그룹별 발송 대상 (이미 해당 stage 발송된 사람 + 연락처 없는 사람 제외)
+  const targetsForGroup = (key: GroupKey): { send: ExpiringLic[]; skipped: number } => {
+    const list = groups[key];
+    if (key === 'rest') return { send: [], skipped: list.length };
+    const stage = GROUP_META[key].stage;
+    const valid = list.filter(l => l.admin_name && l.admin_phone);
+    const send = valid.filter(l => l.sentStage !== stage);
+    const skipped = (list.length - valid.length) + (valid.length - send.length);
+    return { send, skipped };
+  };
+
+  const handleOpenSend = (key: GroupKey) => { setSendGroup(key); setSendOpen(true); };
+  const sendTargets = sendGroup ? targetsForGroup(sendGroup) : null;
 
   // 만료됐지만 구매 미전환 (체험권 출처)
   const expiredUnconverted = allLics.filter(
@@ -135,22 +211,21 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 영업 액션 필요 — 핵심 섹션 */}
+      {/* 영업 액션 필요 — 그룹별 만기 알림 */}
       <div className="surface-card ring-container overflow-hidden">
         <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
           <div>
             <h2 className="font-semibold flex items-center gap-2">
               <AlertCircle className="h-4 w-4 text-amber-500" />
-              영업 액션 필요
+              영업 액션 필요 — 만기 알림
               {expiringSoon.length > 0 && (
                 <span className="ml-1 rounded-full bg-amber-100 text-amber-700 text-[11px] font-semibold px-2 py-0.5">
                   {expiringSoon.length}건
                 </span>
               )}
             </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">만료 D-30 이내 체험권 — 갱신/구매 전환 영업 필요</p>
+            <p className="text-xs text-muted-foreground mt-0.5">D-day 그룹별 만기 알림 일괄 발송 (단계별 1회 보장)</p>
           </div>
-          <div />
         </div>
 
         {expiringSoon.length === 0 ? (
@@ -159,79 +234,57 @@ export default function Dashboard() {
             <p className="text-muted-foreground text-sm">D-30 이내 만료 예정 없음</p>
           </div>
         ) : (
-          <div className="overflow-y-auto max-h-[520px] grid grid-cols-1 lg:grid-cols-2">
-            {expiringSoon.map(l => {
-              const urgent = l.dd <= 7;
-              const soon   = l.dd <= 14;
-              const loginDays = l.admin_last_login ? daysSince(l.admin_last_login) : null;
-              const loginColor =
-                loginDays === null ? 'text-muted-foreground'
-                : loginDays <= 7  ? 'text-teal-600'
-                : loginDays <= 30 ? 'text-amber-600'
-                : 'text-red-500';
-              return (
-                <div key={l.id} className={`px-4 py-3 flex gap-3 border-b border-border hover:bg-muted/30 transition-colors ${urgent ? 'bg-red-50/30' : ''}`}>
-                  {/* D-day 뱃지 */}
-                  <div className={`shrink-0 w-12 text-center rounded-lg py-1.5 h-fit ${
-                    urgent ? 'bg-red-100 text-red-700' : soon ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
-                  }`}>
-                    <div className="text-[10px] font-semibold">D-{l.dd}</div>
-                    <div className="text-[10px] opacity-70">{l.service_expire_at?.slice(5)}</div>
+          <div className="divide-y divide-border">
+            {(['urgent', 'soon', 'warn', 'warnLate'] as GroupKey[]).map(key => (
+              <ExpiryGroupSection
+                key={key}
+                groupKey={key}
+                items={groups[key]}
+                onSend={() => handleOpenSend(key)}
+              />
+            ))}
+            {/* 관찰 그룹 (D-8~D-30) — 접힘 */}
+            {groups.rest.length > 0 && (
+              <div className={GROUP_META.rest.bg}>
+                <button
+                  onClick={() => setRestOpen(o => !o)}
+                  className="w-full px-5 py-2.5 flex items-center justify-between hover:bg-slate-100/50">
+                  <div className="flex items-center gap-2 text-xs">
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${restOpen ? '' : '-rotate-90'}`} />
+                    <span className={`font-medium ${GROUP_META.rest.color}`}>{GROUP_META.rest.label}</span>
+                    <span className="text-muted-foreground">{GROUP_META.rest.range}</span>
+                    <span className="ml-1 rounded-full bg-slate-200 text-slate-700 text-[10px] font-semibold px-1.5">
+                      {groups.rest.length}
+                    </span>
                   </div>
-
-                  {/* 메인 정보 */}
-                  <div className="flex-1 min-w-0 space-y-1">
-                    {/* 그룹명 */}
-                    <p className="font-medium text-sm truncate">
-                      {l.group_name || l.org_name || '-'}
-                    </p>
-                    {/* 쿠폰 설명 (학교명 등) — group_name 있을 때 서브텍스트로 */}
-                    {l.group_name && l.org_name && (
-                      <p className="text-[11px] text-muted-foreground truncate">{l.org_name}</p>
-                    )}
-                    {/* 교육청 */}
-                    {l.edu_office_name && (
-                      <p className="text-[11px] text-muted-foreground truncate">{l.edu_office_name}</p>
-                    )}
-                    {/* 관리자 정보 */}
-                    {(l.admin_name || l.admin_phone) && (
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {l.admin_name && (
-                          <span className="text-xs font-medium text-foreground">{l.admin_name} 선생님</span>
-                        )}
-                        {l.admin_phone && (
-                          <a href={`tel:${l.admin_phone}`}
-                            className="text-xs text-primary flex items-center gap-0.5 hover:underline">
-                            <Phone className="h-3 w-3" />{l.admin_phone}
-                          </a>
-                        )}
-                      </div>
-                    )}
-                    {/* 사용 현황 */}
-                    <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-                      {(l.member_count ?? 0) > 0 && (
-                        <span className="flex items-center gap-0.5 text-teal-700 font-medium">
-                          <Users className="h-3 w-3" />{l.member_count}명 등록
-                        </span>
-                      )}
-                      {l.duration && <span>{l.duration}개월 · {l.user_count}명</span>}
-                    </div>
+                  <span className="text-[10px] text-muted-foreground">발송 대상 아님</span>
+                </button>
+                {restOpen && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 max-h-[400px] overflow-y-auto">
+                    {groups.rest.map(l => <ExpiringCard key={l.id} l={l} />)}
                   </div>
-
-                  {/* 최근 로그인 */}
-                  <div className="shrink-0 text-right">
-                    <p className={`text-xs font-medium flex items-center gap-0.5 justify-end ${loginColor}`}>
-                      <LogIn className="h-3 w-3" />
-                      {loginDays !== null ? `${loginDays}일 전` : '미확인'}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground">최근 접속</p>
-                  </div>
-                </div>
-              );
-            })}
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      {/* 일괄 발송 다이얼로그 */}
+      {sendGroup && sendTargets && (
+        <AlimtalkSendDialog
+          open={sendOpen}
+          onOpenChange={setSendOpen}
+          title={`만기 알림 일괄 발송 — ${GROUP_META[sendGroup].label} (${GROUP_META[sendGroup].range})`}
+          recipients={sendTargets.send.map(toRecipient)}
+          alreadySentCount={sendTargets.skipped}
+          tpl_code="UD_5369"
+          stage={GROUP_META[sendGroup].stage}
+          onSent={() => {
+            qc.invalidateQueries({ queryKey: ['alimtalk_logs_recent'] });
+          }}
+        />
+      )}
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* 체험 파이프라인 */}
@@ -301,6 +354,129 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 만기 임박 그룹 섹션 ──────────────────────────────
+function ExpiryGroupSection({
+  groupKey, items, onSend,
+}: { groupKey: GroupKey; items: ExpiringLic[]; onSend: () => void }) {
+  const [open, setOpen] = useState(true);
+  const meta = GROUP_META[groupKey];
+  const stage = meta.stage;
+
+  const validForSend = items.filter(l => l.admin_name && l.admin_phone);
+  const sendable = validForSend.filter(l => l.sentStage !== stage);
+  const alreadySent = validForSend.filter(l => l.sentStage === stage).length;
+  const noContact = items.length - validForSend.length;
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className={meta.bg}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full px-5 py-3 flex items-center justify-between hover:bg-black/[0.02]">
+        <div className="flex items-center gap-2 text-xs">
+          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? '' : '-rotate-90'}`} />
+          <span className={`font-medium text-sm ${meta.color}`}>{meta.label}</span>
+          <span className="text-muted-foreground">{meta.range}</span>
+          <span className="ml-1 rounded-full bg-white text-foreground text-[10px] font-semibold px-1.5 py-0.5 ring-1 ring-border">
+            {items.length}
+          </span>
+          {alreadySent > 0 && (
+            <span className="text-[10px] text-muted-foreground">· 발송 {alreadySent}건</span>
+          )}
+          {noContact > 0 && (
+            <span className="text-[10px] text-red-500">· 연락처없음 {noContact}건</span>
+          )}
+        </div>
+        <Button
+          size="sm"
+          variant={sendable.length > 0 ? 'default' : 'outline'}
+          disabled={sendable.length === 0}
+          onClick={(e) => { e.stopPropagation(); onSend(); }}
+          className="h-7 text-[11px]">
+          <Send className="h-3 w-3 mr-1" />
+          {sendable.length > 0 ? `${sendable.length}명 일괄 발송` : (alreadySent > 0 ? '전원 발송 완료' : '대상 없음')}
+        </Button>
+      </button>
+      {open && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 max-h-[420px] overflow-y-auto border-t border-border/50">
+          {items.map(l => <ExpiringCard key={l.id} l={l} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 만기 임박 카드 (그룹 안에서 한 항목) ──────────────────
+function ExpiringCard({ l }: { l: ExpiringLic }) {
+  const loginDays = l.admin_last_login ? daysSince(l.admin_last_login) : null;
+  const loginColor =
+    loginDays === null ? 'text-muted-foreground'
+    : loginDays <= 7  ? 'text-teal-600'
+    : loginDays <= 30 ? 'text-amber-600'
+    : 'text-red-500';
+
+  return (
+    <div className="px-4 py-3 flex gap-3 border-b border-border hover:bg-muted/30 transition-colors">
+      <div className={`shrink-0 w-12 text-center rounded-lg py-1.5 h-fit ${
+        l.dd <= 1 ? 'bg-red-100 text-red-700'
+        : l.dd <= 3 ? 'bg-orange-100 text-orange-700'
+        : l.dd <= 7 ? 'bg-amber-100 text-amber-700'
+        : 'bg-slate-100 text-slate-600'
+      }`}>
+        <div className="text-[10px] font-semibold">D-{l.dd}</div>
+        <div className="text-[10px] opacity-70">{l.service_expire_at?.slice(5)}</div>
+      </div>
+
+      <div className="flex-1 min-w-0 space-y-1">
+        <p className="font-medium text-sm truncate">
+          {l.group_name || l.org_name || '-'}
+          {l.sentStage && (
+            <span className="ml-1.5 inline-flex items-center gap-0.5 rounded bg-teal-100 text-teal-700 text-[10px] font-semibold px-1.5 py-0.5">
+              <CheckCircle2 className="h-2.5 w-2.5" />{l.sentStage} 발송됨
+            </span>
+          )}
+        </p>
+        {l.group_name && l.org_name && (
+          <p className="text-[11px] text-muted-foreground truncate">{l.org_name}</p>
+        )}
+        {l.edu_office_name && (
+          <p className="text-[11px] text-muted-foreground truncate">{l.edu_office_name}</p>
+        )}
+        {(l.admin_name || l.admin_phone) && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {l.admin_name && (
+              <span className="text-xs font-medium text-foreground">{l.admin_name} 선생님</span>
+            )}
+            {l.admin_phone && (
+              <a href={`tel:${l.admin_phone}`}
+                className="text-xs text-primary flex items-center gap-0.5 hover:underline">
+                <Phone className="h-3 w-3" />{l.admin_phone}
+              </a>
+            )}
+          </div>
+        )}
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          {(l.member_count ?? 0) > 0 && (
+            <span className="flex items-center gap-0.5 text-teal-700 font-medium">
+              <Users className="h-3 w-3" />{l.member_count}명 등록
+            </span>
+          )}
+          {l.duration && <span>{l.duration}개월 · {l.user_count}명</span>}
+        </div>
+      </div>
+
+      <div className="shrink-0 text-right">
+        <p className={`text-xs font-medium flex items-center gap-0.5 justify-end ${loginColor}`}>
+          <LogIn className="h-3 w-3" />
+          {loginDays !== null ? `${loginDays}일 전` : '미확인'}
+        </p>
+        <p className="text-[10px] text-muted-foreground">최근 접속</p>
       </div>
     </div>
   );
