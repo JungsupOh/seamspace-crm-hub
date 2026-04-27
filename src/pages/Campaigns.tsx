@@ -37,6 +37,8 @@ interface Campaign {
   start_date?: string;
   end_date?: string;
   status: 'active' | 'ended' | 'planned';
+  budget?: number;
+  actual_cost?: number;
   created_at: string;
 }
 
@@ -290,6 +292,8 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
     start_date:  initial?.start_date  ?? '',
     end_date:    initial?.end_date    ?? '',
     status:      (initial?.status     ?? 'active') as Campaign['status'],
+    budget:      initial?.budget      ?? '',
+    actual_cost: initial?.actual_cost ?? '',
   });
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -312,7 +316,13 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
 
   const save = useMutation({
     mutationFn: async () => {
-      const body: Partial<Campaign> = { ...form, status: form.status as Campaign['status'] };
+      const { budget, actual_cost, ...rest } = form;
+      const body: Partial<Campaign> = {
+        ...rest,
+        status: form.status as Campaign['status'],
+        budget: budget ? Number(budget) : undefined,
+        actual_cost: actual_cost ? Number(actual_cost) : undefined,
+      };
       if (isEdit) {
         // 기존 캠페인에 slug 없으면 자동 생성 (구 events에서 마이그레이션된 경우 대응)
         if (!initial!.slug) body.slug = generateSlug();
@@ -331,76 +341,93 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? '캠페인 수정' : '캠페인 추가'}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 py-2">
-          <div className="space-y-1.5">
-            <Label className="text-xs">캠페인명 * <span className="text-muted-foreground">(내부 관리용)</span></Label>
-            <Input value={form.name} onChange={e => f('name', e.target.value)} placeholder="예: 2026 봄학기 체험" className="h-9" />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">공개 폼 제목 <span className="text-muted-foreground">(사용자 노출)</span></Label>
-            <Input value={form.title} onChange={e => f('title', e.target.value)} placeholder="예: 2026 봄학기 심스페이스 체험 신청" className="h-9" />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">공개 폼 이미지</Label>
-            <div className="flex items-start gap-2">
-              {form.image_url ? (
-                <div className="relative group">
-                  <img src={form.image_url} alt="캠페인 이미지" className="w-20 h-20 object-cover rounded border border-border" />
-                  <button type="button" onClick={() => f('image_url', '')}
-                    className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </div>
-              ) : (
-                <button type="button" disabled={uploading} onClick={() => fileRef.current?.click()}
-                  className="w-20 h-20 border-2 border-dashed border-border rounded flex items-center justify-center hover:border-primary/50 transition-colors disabled:opacity-50">
-                  {uploading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : <ImageIcon className="h-5 w-5 text-muted-foreground" />}
-                </button>
-              )}
-              <div className="flex-1 text-xs text-muted-foreground pt-1">
-                공개 폼 상단에 표시됩니다. 권장 크기: 600×600px 이상.<br />
-                JPG, PNG, WebP (5MB 이하)
-              </div>
-              <input ref={fileRef} type="file" accept="image/*" className="hidden"
-                onChange={e => { const file = e.target.files?.[0]; if (file) handleImageUpload(file); }} />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">설명</Label>
-            <Input value={form.description} onChange={e => f('description', e.target.value)} placeholder="간략한 설명" className="h-9" />
-          </div>
+        <div className="space-y-3 py-2">
+          {/* 기본 정보 */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
+            <div className="space-y-1">
+              <Label className="text-xs">캠페인명 *</Label>
+              <Input value={form.name} onChange={e => f('name', e.target.value)} placeholder="2026 봄학기 체험" className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">상태</Label>
+              <Select value={form.status} onValueChange={v => f('status', v)}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="planned">예정</SelectItem>
+                  <SelectItem value="active">진행중</SelectItem>
+                  <SelectItem value="ended">종료</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">공개 폼 제목 <span className="text-muted-foreground">(사용자 노출)</span></Label>
+            <Input value={form.title} onChange={e => f('title', e.target.value)} placeholder="2026 봄학기 심스페이스 체험 신청" className="h-8 text-sm" />
+          </div>
+
+          {/* 이미지 — 컴팩트 */}
+          <div className="flex items-center gap-3">
+            <Label className="text-xs shrink-0">폼 이미지</Label>
+            {form.image_url ? (
+              <div className="relative group">
+                <img src={form.image_url} alt="" className="w-12 h-12 object-cover rounded border border-border" />
+                <button type="button" onClick={() => f('image_url', '')}
+                  className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Trash2 className="h-2.5 w-2.5" />
+                </button>
+              </div>
+            ) : (
+              <button type="button" disabled={uploading} onClick={() => fileRef.current?.click()}
+                className="w-12 h-12 border-2 border-dashed border-border rounded flex items-center justify-center hover:border-primary/50 disabled:opacity-50">
+                {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : <ImageIcon className="h-4 w-4 text-muted-foreground" />}
+              </button>
+            )}
+            <span className="text-[10px] text-muted-foreground">600×600px 이상, 5MB 이하</span>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden"
+              onChange={e => { const file = e.target.files?.[0]; if (file) handleImageUpload(file); }} />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">설명</Label>
+            <Input value={form.description} onChange={e => f('description', e.target.value)} placeholder="간략한 설명" className="h-8 text-sm" />
+          </div>
+
+          {/* 기간 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
               <Label className="text-xs">시작일</Label>
-              <Input type="date" value={form.start_date} onChange={e => f('start_date', e.target.value)} className="h-9" />
+              <Input type="date" value={form.start_date} onChange={e => f('start_date', e.target.value)} className="h-8 text-sm" />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label className="text-xs">종료일</Label>
-              <Input type="date" value={form.end_date} onChange={e => f('end_date', e.target.value)} className="h-9" />
+              <Input type="date" value={form.end_date} onChange={e => f('end_date', e.target.value)} className="h-8 text-sm" />
             </div>
           </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">상태</Label>
-            <Select value={form.status} onValueChange={v => f('status', v)}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="planned">예정</SelectItem>
-                <SelectItem value="active">진행중</SelectItem>
-                <SelectItem value="ended">종료</SelectItem>
-              </SelectContent>
-            </Select>
+
+          {/* 비용 (CAC 계산용) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">예산 (원)</Label>
+              <Input type="number" value={form.budget} onChange={e => f('budget', e.target.value)} placeholder="0" className="h-8 text-sm" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">집행 비용 (원)</Label>
+              <Input type="number" value={form.actual_cost} onChange={e => f('actual_cost', e.target.value)} placeholder="0" className="h-8 text-sm" />
+            </div>
           </div>
-          <Button className="w-full" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()}>
+
+          <Button className="w-full h-9" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()}>
             {save.isPending ? '저장 중...' : (isEdit ? '수정 저장' : '캠페인 추가')}
           </Button>
 
           {/* 수정 모드에서만 공개 URL + QR 노출 */}
           {isEdit && initial?.slug && (
-            <div className="pt-3 border-t border-border">
+            <div className="pt-2 border-t border-border">
               <CampaignShareSection campaign={initial} />
             </div>
           )}
@@ -523,10 +550,14 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
     refetchOnWindowFocus: false,
   });
 
-  // 동기화 후 라이선스 통계 (동기화 완료 시만 표시)
+  // 동기화 후 라이선스 통계
   const { data: syncedLicenses } = useQuery({
     queryKey: ['campaign_licenses', campaign.id],
     queryFn: () => getCampaignLicenses(campaign.id),
+  });
+  const { data: leads } = useQuery({
+    queryKey: ['campaign_leads', campaign.id],
+    queryFn: () => getCampaignLeads(campaign.id),
   });
   const normalize = (p?: string) => (p ?? '').replace(/\D/g, '');
   const licTotal    = syncedLicenses?.length ?? 0;
@@ -537,15 +568,33 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
 
   return (
     <div>
-      {/* 동기화 후 이용권 통계 */}
-      {syncDone && licTotal > 0 && (
-        <div className="flex items-center gap-5 px-2 py-2.5 mb-3 rounded-lg bg-muted/20 border border-border">
-          <Stat icon={<Ticket className="h-3.5 w-3.5" />} label="발송" value={licTotal} />
-          <Stat icon={<Clock className="h-3.5 w-3.5" />} label="사용중" value={licActive} accent="teal" />
-          <Stat icon={<XCircle className="h-3.5 w-3.5" />} label="만료" value={licExpired} accent="orange" />
-          <Stat icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="딜 전환" value={`${licConverted} (${convRate}%)`} accent="blue" />
-        </div>
-      )}
+      {/* 동기화 후 이용권 통계 + CAC */}
+      {syncDone && licTotal > 0 && (() => {
+        const cost = campaign.actual_cost ?? 0;
+        const leadCount = syncedLicenses ? (syncedLicenses.length + (leads?.length ?? 0)) : 0;
+        const cacLead = cost && leadCount ? Math.round(cost / leadCount) : 0;
+        const cacTrial = cost && licTotal ? Math.round(cost / licTotal) : 0;
+        const cacDeal = cost && licConverted ? Math.round(cost / licConverted) : 0;
+        return (
+          <div className="mb-3 space-y-2">
+            <div className="flex items-center gap-5 px-2 py-2.5 rounded-lg bg-muted/20 border border-border">
+              <Stat icon={<Ticket className="h-3.5 w-3.5" />} label="발송" value={licTotal} />
+              <Stat icon={<Clock className="h-3.5 w-3.5" />} label="사용중" value={licActive} accent="teal" />
+              <Stat icon={<XCircle className="h-3.5 w-3.5" />} label="만료" value={licExpired} accent="orange" />
+              <Stat icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="딜 전환" value={`${licConverted} (${convRate}%)`} accent="blue" />
+            </div>
+            {cost > 0 && (
+              <div className="flex items-center gap-4 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs">
+                <span className="text-amber-700 font-medium">CAC</span>
+                <span className="text-muted-foreground">리드 <strong className="text-foreground">{cacLead ? `${cacLead.toLocaleString()}원` : '-'}</strong></span>
+                <span className="text-muted-foreground">체험발송 <strong className="text-foreground">{cacTrial ? `${cacTrial.toLocaleString()}원` : '-'}</strong></span>
+                <span className="text-muted-foreground">딜전환 <strong className="text-foreground">{cacDeal ? `${cacDeal.toLocaleString()}원` : '-'}</strong></span>
+                <span className="ml-auto text-muted-foreground">집행 {cost.toLocaleString()}원{campaign.budget ? ` / 예산 ${campaign.budget.toLocaleString()}원` : ''}</span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
       <div className="flex border-b border-border mb-3">
         <button onClick={() => setActiveTab('leads')}
           className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5
