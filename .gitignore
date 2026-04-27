@@ -25,3 +25,6 @@ dist-ssr
 .env
 .vercel
 .claude/settings.local.json
+
+# Supabase CLI 로컬 임시 파일
+supabase/.temp/

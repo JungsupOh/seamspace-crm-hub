@@ -1,0 +1,2 @@
+ALTER TABLE deal_quotes ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE deal_quotes ADD COLUMN IF NOT EXISTS discount_amount NUMERIC DEFAULT 0;
