@@ -17,8 +17,11 @@ import {
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { apiCreateCoupon, apiSendCoupon } from '@/lib/coupons';
+import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
+import { getRecentSendLogs, buildSentMap, isAlreadySent, type AlimtalkRecipient } from '@/lib/alimtalk';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
+import { MessageSquare } from 'lucide-react';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -1207,7 +1210,15 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editRow, setEditRow] = useState<Partial<CampaignLicense>>({});
   const [importing, setImporting] = useState(false);
+  const [unregOpen, setUnregOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // 알림톡 발송 이력 (UH_2821 stage='UH_initial' 1회 보장)
+  const { data: sendLogs } = useQuery({
+    queryKey: ['alimtalk_logs_recent'],
+    queryFn:  getRecentSendLogs,
+    staleTime: 30 * 1000,
+  });
 
   const handleImport = async (file: File) => {
     setImporting(true);
@@ -1258,12 +1269,54 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
 
   if (isLoading) return <div className="py-6 text-center text-sm text-muted-foreground">로딩 중...</div>;
 
+  // 미등록 알림 대상자 추출 (status === '대기' + 연락처/쿠폰 보유 + UH_initial 미발송)
+  const sentMap = sendLogs ? buildSentMap(sendLogs) : new Set<string>();
+  const unregisteredAll = (licenses ?? []).filter(l => l.status === '대기');
+  const unregisteredEligible = unregisteredAll.filter(l =>
+    l.contact_name && l.contact_phone && l.coupon_code,
+  );
+  const unregisteredToSend = unregisteredEligible.filter(l =>
+    !isAlreadySent(sentMap, 'campaign', l.id, 'UH_2821', 'UH_initial'),
+  );
+  const unregisteredAlreadySent = unregisteredEligible.length - unregisteredToSend.length;
+
+  const unregisteredRecipients: AlimtalkRecipient[] = unregisteredToSend.map(l => ({
+    license_id:     l.id,
+    license_source: 'campaign',
+    name:           l.contact_name!,
+    phone:          l.contact_phone!,
+    group_name:     null,
+    user_limit:     String(l.user_count ?? ''),
+    duration:       String(l.duration ?? ''),
+    expiry_date:    null,
+    coupon_code:    l.coupon_code ?? null,
+  }));
+
   return (
     <div className="space-y-1.5 py-1">
       {/* 툴바 */}
       <div className="flex justify-between items-center px-1 pb-1">
-        <span className="text-xs text-muted-foreground">{licenses?.length ?? 0}명</span>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">{licenses?.length ?? 0}명</span>
+          {unregisteredAll.length > 0 && (
+            <span className="text-amber-600">· 미등록 {unregisteredAll.length}명</span>
+          )}
+        </div>
         <div className="flex gap-1.5">
+          {unregisteredEligible.length > 0 && (
+            <Button
+              size="sm"
+              variant={unregisteredToSend.length > 0 ? 'default' : 'outline'}
+              disabled={unregisteredToSend.length === 0}
+              className="h-7 text-xs px-3"
+              onClick={() => setUnregOpen(true)}
+              title={unregisteredAlreadySent > 0 ? `이미 ${unregisteredAlreadySent}명 발송됨` : undefined}>
+              <MessageSquare className="h-3.5 w-3.5 mr-1" />
+              {unregisteredToSend.length > 0
+                ? `미등록자 ${unregisteredToSend.length}명 알림`
+                : '미등록자 전원 발송완료'}
+            </Button>
+          )}
           <Button size="sm" variant="outline" className="h-7 text-xs px-3"
             disabled={importing}
             onClick={() => fileRef.current?.click()}>
@@ -1278,6 +1331,20 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
           </Button>
         </div>
       </div>
+
+      {/* 미등록 알림 발송 다이얼로그 */}
+      <AlimtalkSendDialog
+        open={unregOpen}
+        onOpenChange={setUnregOpen}
+        title={`미등록 알림 일괄 발송 — ${campaign.name ?? '캠페인'}`}
+        recipients={unregisteredRecipients}
+        alreadySentCount={unregisteredAlreadySent}
+        tpl_code="UH_2821"
+        stage="UH_initial"
+        onSent={() => {
+          qc.invalidateQueries({ queryKey: ['alimtalk_logs_recent'] });
+        }}
+      />
 
       {/* 추가 폼 */}
       {adding && <AddLicenseRow campaignId={campaign.id} onDone={() => setAdding(false)} />}
