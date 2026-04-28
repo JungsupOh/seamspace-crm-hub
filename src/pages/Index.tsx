@@ -9,7 +9,7 @@ import { getAllLicenses, getSleepingCampaignLicenses, getAllCampaignLicenses, ge
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
 import { FlaskConical, Briefcase, TrendingUp, AlertCircle, Clock, ArrowRight, CheckCircle2, LogIn, Phone, Users, Send, ChevronDown, MessageSquare, Moon } from 'lucide-react';
 import { DEAL_STAGES, DEAL_STAGE_LABELS, STAGE_COLOR, isClosedDeal } from '@/lib/grades';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
 import { getRecentSendLogs, buildSentMap, isAlreadySent, canSendUH2821, lastUH2821SentAt, nextUH2821ResendAt, todayUHStage, type AlimtalkRecipient } from '@/lib/alimtalk';
@@ -715,6 +715,7 @@ function ActiveDealsSection({ deals }: { deals: AirtableRecordOfDeal[] }) {
 }
 
 function ActiveDealRow({ d }: { d: AirtableRecordOfDeal }) {
+  const navigate = useNavigate();
   const f = d.fields;
   const stageLabel = DEAL_STAGE_LABELS[f.Deal_Stage ?? ''] ?? f.Deal_Stage ?? '-';
   const stageColor = STAGE_COLOR[f.Deal_Stage ?? ''] ?? 'bg-muted text-muted-foreground';
@@ -728,7 +729,9 @@ function ActiveDealRow({ d }: { d: AirtableRecordOfDeal }) {
   const expired = isQuoteStage && quoteAge !== null && quoteAge > 28;
 
   return (
-    <div className={`px-5 py-2 flex items-center gap-3 hover:bg-muted/30 transition-colors ${expired ? 'bg-red-50/40' : ''}`}>
+    <div
+      onClick={() => navigate(`/deals?id=${d.id}`)}
+      className={`px-5 py-2 flex items-center gap-3 hover:bg-muted/40 transition-colors cursor-pointer ${expired ? 'bg-red-50/40' : ''}`}>
       {/* 1. 변경일 (좌측 주요 지표) */}
       <div className="w-24 shrink-0">
         {lastDate ? (
@@ -748,6 +751,7 @@ function ActiveDealRow({ d }: { d: AirtableRecordOfDeal }) {
           {f.Contact_Name && <span className="text-xs text-muted-foreground">· {f.Contact_Name}</span>}
           {f.Contact_Phone && (
             <a href={`tel:${f.Contact_Phone}`}
+              onClick={e => e.stopPropagation()}
               className="text-xs text-primary hover:underline flex items-center gap-0.5">
               <Phone className="h-3 w-3" />{f.Contact_Phone}
             </a>

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { formatPhone } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import * as XLSX from 'xlsx';
@@ -2707,6 +2708,9 @@ export default function Deals() {
   const createDeal = useCreateDeal();
   const updateDeal = useUpdateDeal();
   const deleteDeal = useDeleteDeal();
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusDealId = searchParams.get('focus');
 
   const [search, setSearch]             = useState('');
   const [stageFilter, setStageFilter]   = useState('all');
