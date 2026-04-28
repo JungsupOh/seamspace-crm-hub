@@ -214,14 +214,15 @@ export interface UnusedCouponRow {
 }
 
 // 최근 N일 발급된 미사용 체험권 (link_confirmed=false 제외, 즉 매칭 실패 명시 마킹된 건 제외)
+// PostgREST에서 NOT.EQ.FALSE는 NULL을 제외하므로 OR로 명시 (NULL 또는 TRUE)
 export async function getRecentUnusedCoupons(daysBack = 180): Promise<UnusedCouponRow[]> {
   const since = new Date(Date.now() - daysBack * 86400_000).toISOString();
   const url = `${SUPABASE_URL}/rest/v1/mdiary_coupons`
     + `?select=id,coupon_code,created_at,duration,user_limit,descript,extracted_name,link_confirmed,admin_name,admin_phone`
     + `&is_used=eq.false`
-    + `&link_confirmed=not.eq.false`
+    + `&or=(link_confirmed.is.null,link_confirmed.eq.true)`
     + `&created_at=gte.${since}`
-    + `&order=created_at.desc&limit=500`;
+    + `&order=created_at.desc&limit=1000`;
   const res = await fetch(url, { headers: DB_HEADERS });
   if (!res.ok) return [];
   return res.json();
