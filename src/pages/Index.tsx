@@ -9,7 +9,8 @@ import { getAllLicenses, getSleepingCampaignLicenses, getAllCampaignLicenses, ge
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
 import { FlaskConical, Briefcase, TrendingUp, AlertCircle, Clock, ArrowRight, CheckCircle2, LogIn, Phone, Users, Send, ChevronDown, MessageSquare, Moon } from 'lucide-react';
 import { DEAL_STAGES, DEAL_STAGE_LABELS, STAGE_COLOR, isClosedDeal } from '@/lib/grades';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import { DealQuickView } from '@/components/DealQuickView';
 import { Button } from '@/components/ui/button';
 import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
 import { getRecentSendLogs, buildSentMap, isAlreadySent, canSendUH2821, lastUH2821SentAt, nextUH2821ResendAt, todayUHStage, type AlimtalkRecipient } from '@/lib/alimtalk';
@@ -95,8 +96,24 @@ export default function Dashboard() {
   const [sendOpen, setSendOpen] = useState(false);
   const [sendGroup, setSendGroup] = useState<GroupKey | null>(null);
   const [restOpen, setRestOpen] = useState(false);
-  const [sleepingOpen, setSleepingOpen] = useState(false);
+  const [sleepingOpen, setSleepingOpen] = useState(true);          // 기본 펼침
   const [sleepingSendOpen, setSleepingSendOpen] = useState(false);
+
+  // 딜 빠른 보기 state
+  const [quickDeal, setQuickDeal] = useState<AirtableRecordOfDeal | null>(null);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const openDealQuickView = (deal: AirtableRecordOfDeal) => {
+    setQuickDeal(deal);
+    setQuickOpen(true);
+  };
+
+  // license → deal 매칭 (영업 액션 클릭 처리)
+  const dealMap = new Map((deals ?? []).map(d => [d.id, d]));
+  const openLicenseDeal = (l: ExpiringLic) => {
+    if (l.deal_id === 'mdiary' || !l.deal_id) return;
+    const d = dealMap.get(l.deal_id);
+    if (d) openDealQuickView(d);
+  };
 
   const today     = new Date().toISOString().split('T')[0];
   const thisMonth = new Date().getMonth();
@@ -286,6 +303,7 @@ export default function Dashboard() {
                 groupKey={key}
                 items={groups[key]}
                 onSend={() => handleOpenSend(key)}
+                onLicenseClick={openLicenseDeal}
               />
             ))}
             {/* 관찰 그룹 (D-8~D-30) — 접힘 */}
@@ -306,7 +324,7 @@ export default function Dashboard() {
                 </button>
                 {restOpen && (
                   <div className="grid grid-cols-1 lg:grid-cols-2 max-h-[400px] overflow-y-auto">
-                    {groups.rest.map(l => <ExpiringCard key={l.id} l={l} />)}
+                    {groups.rest.map(l => <ExpiringCard key={l.id} l={l} onClick={() => openLicenseDeal(l)} />)}
                   </div>
                 )}
               </div>
@@ -345,8 +363,11 @@ export default function Dashboard() {
         }}
       />
 
+      {/* 딜 빠른 보기 다이얼로그 (진행중 딜 / 영업 액션 항목 클릭 시) */}
+      <DealQuickView open={quickOpen} onOpenChange={setQuickOpen} deal={quickDeal} />
+
       {/* 진행중 딜 — full-width 강조, 가장 자주 보는 영역 */}
-      <ActiveDealsSection deals={activeDeals} />
+      <ActiveDealsSection deals={activeDeals} onDealClick={openDealQuickView} />
 
       {/* 체험 파이프라인 — 캠페인 등록 체험권 기준 (full-width) */}
       <div className="space-y-6">
@@ -486,8 +507,13 @@ export default function Dashboard() {
 
 // ── 만기 임박 그룹 섹션 ──────────────────────────────
 function ExpiryGroupSection({
-  groupKey, items, onSend,
-}: { groupKey: GroupKey; items: ExpiringLic[]; onSend: () => void }) {
+  groupKey, items, onSend, onLicenseClick,
+}: {
+  groupKey: GroupKey;
+  items: ExpiringLic[];
+  onSend: () => void;
+  onLicenseClick: (l: ExpiringLic) => void;
+}) {
   const [open, setOpen] = useState(true);
   const meta = GROUP_META[groupKey];
   const stage = meta.stage;
@@ -530,7 +556,7 @@ function ExpiryGroupSection({
       </button>
       {open && (
         <div className="grid grid-cols-1 lg:grid-cols-2 max-h-[420px] overflow-y-auto border-t border-border/50">
-          {items.map(l => <ExpiringCard key={l.id} l={l} />)}
+          {items.map(l => <ExpiringCard key={l.id} l={l} onClick={() => onLicenseClick(l)} />)}
         </div>
       )}
     </div>
@@ -538,7 +564,7 @@ function ExpiryGroupSection({
 }
 
 // ── 만기 임박 카드 (그룹 안에서 한 항목) ──────────────────
-function ExpiringCard({ l }: { l: ExpiringLic }) {
+function ExpiringCard({ l, onClick }: { l: ExpiringLic; onClick?: () => void }) {
   const loginDays = l.admin_last_login ? daysSince(l.admin_last_login) : null;
   const loginColor =
     loginDays === null ? 'text-muted-foreground'
@@ -546,8 +572,11 @@ function ExpiringCard({ l }: { l: ExpiringLic }) {
     : loginDays <= 30 ? 'text-amber-600'
     : 'text-red-500';
 
+  const clickable = onClick && l.deal_id && l.deal_id !== 'mdiary';
   return (
-    <div className="px-4 py-3 flex gap-3 border-b border-border hover:bg-muted/30 transition-colors">
+    <div
+      onClick={clickable ? onClick : undefined}
+      className={`px-4 py-3 flex gap-3 border-b border-border hover:bg-muted/30 transition-colors ${clickable ? 'cursor-pointer' : ''}`}>
       <div className={`shrink-0 w-12 text-center rounded-lg py-1.5 h-fit ${
         l.dd <= 1 ? 'bg-red-100 text-red-700'
         : l.dd <= 3 ? 'bg-orange-100 text-orange-700'
@@ -580,6 +609,7 @@ function ExpiringCard({ l }: { l: ExpiringLic }) {
             )}
             {l.admin_phone && (
               <a href={`tel:${l.admin_phone}`}
+                onClick={e => e.stopPropagation()}
                 className="text-xs text-primary flex items-center gap-0.5 hover:underline">
                 <Phone className="h-3 w-3" />{l.admin_phone}
               </a>
@@ -625,7 +655,12 @@ function getDealLastDate(d: AirtableRecordOfDeal): string | null {
     : (d.createdTime?.split('T')[0] ?? null);
 }
 
-function ActiveDealsSection({ deals }: { deals: AirtableRecordOfDeal[] }) {
+function ActiveDealsSection({
+  deals, onDealClick,
+}: {
+  deals: AirtableRecordOfDeal[];
+  onDealClick: (d: AirtableRecordOfDeal) => void;
+}) {
   const [sortKey, setSortKey] = useState<DealSortKey>('date');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
 
@@ -706,7 +741,7 @@ function ActiveDealsSection({ deals }: { deals: AirtableRecordOfDeal[] }) {
           </div>
 
           <div className="divide-y divide-border max-h-[480px] overflow-y-auto">
-            {sortedDeals.map(d => <ActiveDealRow key={d.id} d={d} />)}
+            {sortedDeals.map(d => <ActiveDealRow key={d.id} d={d} onClick={() => onDealClick(d)} />)}
           </div>
         </>
       )}
@@ -714,8 +749,7 @@ function ActiveDealsSection({ deals }: { deals: AirtableRecordOfDeal[] }) {
   );
 }
 
-function ActiveDealRow({ d }: { d: AirtableRecordOfDeal }) {
-  const navigate = useNavigate();
+function ActiveDealRow({ d, onClick }: { d: AirtableRecordOfDeal; onClick: () => void }) {
   const f = d.fields;
   const stageLabel = DEAL_STAGE_LABELS[f.Deal_Stage ?? ''] ?? f.Deal_Stage ?? '-';
   const stageColor = STAGE_COLOR[f.Deal_Stage ?? ''] ?? 'bg-muted text-muted-foreground';
@@ -730,7 +764,7 @@ function ActiveDealRow({ d }: { d: AirtableRecordOfDeal }) {
 
   return (
     <div
-      onClick={() => navigate(`/deals?id=${d.id}`)}
+      onClick={onClick}
       className={`px-5 py-2 flex items-center gap-3 hover:bg-muted/40 transition-colors cursor-pointer ${expired ? 'bg-red-50/40' : ''}`}>
       {/* 1. 변경일 (좌측 주요 지표) */}
       <div className="w-24 shrink-0">
