@@ -6,15 +6,25 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const APP_URL = window.location.origin;
 
+// 시스템 정책: 모든 이메일 발송에 영업팀 cc (호출자가 명시적으로 null 주면 제외)
+const DEFAULT_CC = 'sales@tebahsoft.com';
+
 async function sendEmail(
   to: string,
   subject: string,
   html: string,
   options?: {
     reply_to?: string;
+    cc?: string | string[] | null;
     attachments?: Array<{ filename: string; content: string }>;
   }
 ): Promise<void> {
+  const cc = options?.cc === undefined ? DEFAULT_CC : options.cc;
+  const body: Record<string, unknown> = { to, subject, html };
+  if (options?.reply_to) body.reply_to = options.reply_to;
+  if (options?.attachments) body.attachments = options.attachments;
+  if (cc) body.cc = cc;
+
   const res = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
     method: 'POST',
     headers: {
@@ -22,7 +32,7 @@ async function sendEmail(
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
     },
-    body: JSON.stringify({ to, subject, html, ...options }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
