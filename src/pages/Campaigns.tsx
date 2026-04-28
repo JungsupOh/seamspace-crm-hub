@@ -18,7 +18,7 @@ import {
 import { QRCodeCanvas } from 'qrcode.react';
 import { apiCreateCoupon, apiSendCoupon } from '@/lib/coupons';
 import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
-import { getRecentSendLogs, buildSentMap, isAlreadySent, type AlimtalkRecipient } from '@/lib/alimtalk';
+import { getRecentSendLogs, canSendUH2821, todayUHStage, type AlimtalkRecipient } from '@/lib/alimtalk';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { MessageSquare } from 'lucide-react';
@@ -1269,16 +1269,17 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
 
   if (isLoading) return <div className="py-6 text-center text-sm text-muted-foreground">로딩 중...</div>;
 
-  // 미등록 알림 대상자 추출 (status === '대기' + 연락처/쿠폰 보유 + UH_initial 미발송)
-  const sentMap = sendLogs ? buildSentMap(sendLogs) : new Set<string>();
+  // 미등록 알림 대상자 추출 (status === '대기' + 연락처/쿠폰 보유)
+  // 재발송 정책: 매주 월요일 또는 매월 1일이 마지막 발송 후 한 번이라도 지났을 때 활성화
+  const allLogs = sendLogs ?? [];
   const unregisteredAll = (licenses ?? []).filter(l => l.status === '대기');
   const unregisteredEligible = unregisteredAll.filter(l =>
     l.contact_name && l.contact_phone && l.coupon_code,
   );
   const unregisteredToSend = unregisteredEligible.filter(l =>
-    !isAlreadySent(sentMap, 'campaign', l.id, 'UH_2821', 'UH_initial'),
+    canSendUH2821(allLogs, 'campaign', l.id),
   );
-  const unregisteredAlreadySent = unregisteredEligible.length - unregisteredToSend.length;
+  const unregisteredPaused = unregisteredEligible.length - unregisteredToSend.length;
 
   const unregisteredRecipients: AlimtalkRecipient[] = unregisteredToSend.map(l => ({
     license_id:     l.id,
@@ -1310,11 +1311,11 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
               disabled={unregisteredToSend.length === 0}
               className="h-7 text-xs px-3"
               onClick={() => setUnregOpen(true)}
-              title={unregisteredAlreadySent > 0 ? `이미 ${unregisteredAlreadySent}명 발송됨` : undefined}>
+              title={unregisteredPaused > 0 ? `${unregisteredPaused}명은 다음 월요일/매월 1일까지 대기 중` : undefined}>
               <MessageSquare className="h-3.5 w-3.5 mr-1" />
               {unregisteredToSend.length > 0
-                ? `미등록자 ${unregisteredToSend.length}명 알림`
-                : '미등록자 전원 발송완료'}
+                ? `미등록자 ${unregisteredToSend.length.toLocaleString()}명 알림`
+                : '미등록자 전원 대기 중'}
             </Button>
           )}
           <Button size="sm" variant="outline" className="h-7 text-xs px-3"
@@ -1338,9 +1339,9 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
         onOpenChange={setUnregOpen}
         title={`미등록 알림 일괄 발송 — ${campaign.name ?? '캠페인'}`}
         recipients={unregisteredRecipients}
-        alreadySentCount={unregisteredAlreadySent}
+        alreadySentCount={unregisteredPaused}
         tpl_code="UH_2821"
-        stage="UH_initial"
+        stage={todayUHStage()}
         onSent={() => {
           qc.invalidateQueries({ queryKey: ['alimtalk_logs_recent'] });
         }}

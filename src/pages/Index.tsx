@@ -8,7 +8,7 @@ import { DEAL_STAGE_LABELS, STAGE_COLOR, normalizeStage } from '@/lib/grades';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
-import { getRecentSendLogs, buildSentMap, isAlreadySent, type AlimtalkRecipient } from '@/lib/alimtalk';
+import { getRecentSendLogs, buildSentMap, isAlreadySent, canSendUH2821, lastUH2821SentAt, nextUH2821ResendAt, todayUHStage, type AlimtalkRecipient } from '@/lib/alimtalk';
 
 const fmt = (n: number) =>
   n >= 100_000_000 ? `${(n / 100_000_000).toFixed(1)}억`
@@ -141,10 +141,10 @@ export default function Dashboard() {
     return Date.now() - d <= 30 * 86400_000;
   });
 
-  const sleepingSendable = sleeping.filter(c =>
-    !isAlreadySent(sentMap, 'campaign', c.id, 'UH_2821', 'UH_initial')
-  );
-  const sleepingAlreadySent = sleeping.length - sleepingSendable.length;
+  // 재발송 정책: 매주 월요일 또는 매월 1일이 마지막 발송 후 한 번이라도 지났을 때 활성화
+  const allLogs = sendLogs ?? [];
+  const sleepingSendable = sleeping.filter(c => canSendUH2821(allLogs, 'campaign', c.id));
+  const sleepingPaused   = sleeping.length - sleepingSendable.length;
 
   const sleepingRecipients: AlimtalkRecipient[] = sleepingSendable.map(c => ({
     license_id:     c.id,
@@ -325,9 +325,9 @@ export default function Dashboard() {
         onOpenChange={setSleepingSendOpen}
         title="잠자는 체험권 미등록 알림 일괄 발송"
         recipients={sleepingRecipients}
-        alreadySentCount={sleepingAlreadySent}
+        alreadySentCount={sleepingPaused}
         tpl_code="UH_2821"
-        stage="UH_initial"
+        stage={todayUHStage()}
         onSent={() => {
           qc.invalidateQueries({ queryKey: ['alimtalk_logs_recent'] });
         }}
@@ -379,7 +379,7 @@ export default function Dashboard() {
               </div>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              캠페인을 통해 발급되었지만 아직 사용 시작 안 한 체험권 (전체 캠페인 통합)
+              캠페인을 통해 발급되었지만 아직 사용 시작 안 한 체험권 (전체 캠페인 통합) · 매주 월요일/매월 1일 재발송 가능
             </p>
             <div className="flex items-center gap-2">
               <Button
@@ -390,13 +390,13 @@ export default function Dashboard() {
                 <MessageSquare className="h-3.5 w-3.5 mr-1" />
                 {sleepingSendable.length > 0
                   ? `미등록 알림 ${num(sleepingSendable.length)}명 발송`
-                  : (sleepingAlreadySent > 0 ? '전원 발송 완료' : '대상 없음')}
+                  : (sleepingPaused > 0 ? '대기 중 (다음 월요일/1일)' : '대상 없음')}
               </Button>
               <Link to="/campaigns" className="text-[11px] text-primary hover:underline">
                 캠페인별 보기 →
               </Link>
-              {sleepingAlreadySent > 0 && (
-                <span className="text-[10px] text-muted-foreground ml-auto">이미 {num(sleepingAlreadySent)}명 발송됨</span>
+              {sleepingPaused > 0 && (
+                <span className="text-[10px] text-muted-foreground ml-auto">{num(sleepingPaused)}명 다음 트리거 대기</span>
               )}
             </div>
             {sleepingOpen && (
@@ -405,9 +405,11 @@ export default function Dashboard() {
                   <div className="px-3 py-6 text-center text-xs text-muted-foreground">잠자는 체험권 없음</div>
                 ) : sleeping.slice(0, 50).map(c => {
                   const days = Math.floor((Date.now() - new Date(c.created_at).getTime()) / 86400_000);
-                  const sent = isAlreadySent(sentMap, 'campaign', c.id, 'UH_2821', 'UH_initial');
+                  const last = lastUH2821SentAt(allLogs, 'campaign', c.id);
+                  const sendable = canSendUH2821(allLogs, 'campaign', c.id);
+                  const nextAt = last && !sendable ? nextUH2821ResendAt(last) : null;
                   return (
-                    <div key={c.id} className={`px-3 py-1.5 text-[11px] flex items-center gap-2 ${sent ? 'opacity-50' : ''}`}>
+                    <div key={c.id} className={`px-3 py-1.5 text-[11px] flex items-center gap-2 ${!sendable ? 'opacity-60' : ''}`}>
                       <span className="font-mono text-muted-foreground shrink-0">{c.coupon_code}</span>
                       <span className="text-muted-foreground shrink-0">D+{num(days)}</span>
                       <span className="font-medium truncate">{c.contact_name}</span>
@@ -416,10 +418,14 @@ export default function Dashboard() {
                         <span className="text-[10px] text-indigo-600 truncate shrink-0 max-w-[180px]">[{c.campaign_name}]</span>
                       )}
                       <span className="ml-auto text-muted-foreground shrink-0 whitespace-nowrap">{c.duration}개월·{num(Number(c.user_count))}명</span>
-                      {sent ? (
-                        <span className="text-teal-600 shrink-0 whitespace-nowrap" title="이미 발송됨">✓</span>
+                      {sendable ? (
+                        last ? (
+                          <span className="text-teal-600 shrink-0 whitespace-nowrap" title={`마지막 발송: ${last.toLocaleDateString()}`}>🔁</span>
+                        ) : (
+                          <span className="text-teal-600 shrink-0 whitespace-nowrap" title="첫 발송 가능">📞</span>
+                        )
                       ) : (
-                        <span className="text-teal-600 shrink-0 whitespace-nowrap">📞</span>
+                        <span className="text-amber-600 shrink-0 whitespace-nowrap" title={nextAt ? `다음 발송: ${nextAt.toLocaleDateString()}` : ''}>⏳</span>
                       )}
                     </div>
                   );
