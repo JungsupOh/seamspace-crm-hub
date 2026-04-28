@@ -506,15 +506,22 @@ export default function LuckySevenForm() {
         </div>
 
         <div className="px-6 py-5 space-y-4">
-          {/* ── Step 1 — 대표자 ── */}
+          {/* ── Step 1 — 대표자 선생님 ── */}
           {step === 1 && (
             <>
               {campaign.description && (
                 <p className="text-sm text-muted-foreground whitespace-pre-wrap mb-2">{campaign.description}</p>
               )}
 
+              <div className="bg-primary/5 border border-primary/20 rounded-lg p-3">
+                <h2 className="text-sm font-semibold text-primary">👤 대표자 선생님 정보</h2>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  먼저 신청을 주도하시는 <strong>대표자 선생님</strong>의 정보를 입력해주세요. 다음 단계에서 함께 신청하실 동료 선생님을 추가하게 됩니다.
+                </p>
+              </div>
+
               <div ref={schoolRef} className="relative space-y-1.5">
-                <Label className="text-xs">학교명 <span className="text-destructive">*</span></Label>
+                <Label className="text-xs">대표자 선생님 학교명 <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <Input
                     value={schoolQuery}
@@ -546,22 +553,22 @@ export default function LuckySevenForm() {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs">담당업무 <span className="text-destructive">*</span></Label>
+                <Label className="text-xs">대표자 선생님 담당업무 <span className="text-destructive">*</span></Label>
                 <Input value={position} onChange={(e) => setPosition(e.target.value)} placeholder="예: 담임, 생활부, 상담교사" className="h-10 text-sm" />
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs">성함 <span className="text-destructive">*</span></Label>
+                <Label className="text-xs">대표자 선생님 성함 <span className="text-destructive">*</span></Label>
                 <Input value={leaderName} onChange={(e) => setLeaderName(e.target.value)} placeholder="홍길동" className="h-10 text-sm" />
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs">연락처 <span className="text-destructive">*</span></Label>
+                <Label className="text-xs">대표자 선생님 연락처 <span className="text-destructive">*</span></Label>
                 <Input value={leaderPhone} onChange={(e) => setLeaderPhone(formatPhone(e.target.value))} placeholder="010-0000-0000" type="tel" className="h-10 text-sm" />
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs">이메일 <span className="text-destructive">*</span></Label>
+                <Label className="text-xs">대표자 선생님 이메일 <span className="text-destructive">*</span></Label>
                 <Input value={leaderEmail} onChange={(e) => setLeaderEmail(e.target.value)} placeholder="email@example.com" type="email" className="h-10 text-sm" />
               </div>
 
@@ -594,7 +601,7 @@ export default function LuckySevenForm() {
                   <div key={idx} className={`rounded-lg border p-3 space-y-2 ${idx === 0 ? 'bg-primary/5 border-primary/30' : 'border-border'}`}>
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold">
-                        {idx === 0 ? <span className="text-primary">대표 · 1번 선생님</span> : `${idx + 1}번 선생님`}
+                        {idx === 0 ? <span className="text-primary">대표자 선생님 (1번)</span> : `${idx + 1}번 선생님`}
                       </span>
                       {idx > 0 && members.length > MIN_MEMBERS && (
                         <button type="button" onClick={() => removeMember(idx)} className="text-destructive hover:opacity-80">
@@ -748,7 +755,7 @@ export default function LuckySevenForm() {
               <div className="rounded-lg border border-border p-3 space-y-2">
                 <h3 className="text-sm font-semibold">📋 그룹 정보</h3>
                 <div className="text-xs space-y-1">
-                  <div>대표: <strong>{leaderName}</strong> ({schoolInfo?.name || schoolQuery.trim()})</div>
+                  <div>대표자 선생님: <strong>{leaderName}</strong> ({schoolInfo?.name || schoolQuery.trim()})</div>
                   <div>멤버 {members.length}명 / 총 {total.toLocaleString()}원</div>
                 </div>
               </div>
