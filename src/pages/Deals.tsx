@@ -3547,15 +3547,15 @@ export default function Deals() {
               <button onClick={() => setStageFilter(stageFilter === p.stage ? 'all' : p.stage)}
                 className={`flex flex-col items-center rounded-lg px-3 py-2 min-w-[72px] transition-colors border
                   ${stageFilter === p.stage ? 'border-primary ring-1 ring-primary bg-primary/5' : 'border-transparent hover:border-border bg-muted/50'}`}>
-                <span className={`text-lg font-bold ${p.count === 0 ? 'text-muted-foreground/40' : ''}`}>{p.count}</span>
+                <span className={`text-lg font-bold tabular-nums ${p.count === 0 ? 'text-muted-foreground/40' : ''}`}>{p.count.toLocaleString()}</span>
                 <span className={`text-[10px] mt-0.5 whitespace-nowrap ${stageFilter === p.stage ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
                   {p.label}
                 </span>
                 {p.total > 0 && STAGES_WITH_AMOUNT.has(p.stage) && (
-                  <span className={`text-[10px] font-medium mt-0.5 ${stageFilter === p.stage ? 'text-primary/80' : 'text-muted-foreground/70'}`}>
+                  <span className={`text-[10px] font-medium mt-0.5 tabular-nums ${stageFilter === p.stage ? 'text-primary/80' : 'text-muted-foreground/70'}`}>
                     {p.total >= 100_000_000
                       ? `${(p.total / 100_000_000).toFixed(1)}억`
-                      : `${Math.round(p.total / 10_000)}만`}
+                      : `${Math.round(p.total / 10_000).toLocaleString()}만`}
                   </span>
                 )}
               </button>

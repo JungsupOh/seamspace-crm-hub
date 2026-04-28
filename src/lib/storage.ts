@@ -199,6 +199,74 @@ export async function getAllLicenses(): Promise<DealLicenseRecord[]> {
   );
 }
 
+// ── 미사용(잠자는) 체험권 조회 ─────────────────────
+export interface UnusedCouponRow {
+  id:               number;
+  coupon_code:      string;
+  created_at:       string;
+  duration:         number;
+  user_limit:       number;
+  descript:         string | null;
+  extracted_name:   string | null;
+  link_confirmed:   boolean | null;
+  admin_name:       string | null;
+  admin_phone:      string | null;
+}
+
+// 최근 N일 발급된 미사용 체험권 (link_confirmed=false 제외, 즉 매칭 실패 명시 마킹된 건 제외)
+export async function getRecentUnusedCoupons(daysBack = 180): Promise<UnusedCouponRow[]> {
+  const since = new Date(Date.now() - daysBack * 86400_000).toISOString();
+  const url = `${SUPABASE_URL}/rest/v1/mdiary_coupons`
+    + `?select=id,coupon_code,created_at,duration,user_limit,descript,extracted_name,link_confirmed,admin_name,admin_phone`
+    + `&is_used=eq.false`
+    + `&link_confirmed=not.eq.false`
+    + `&created_at=gte.${since}`
+    + `&order=created_at.desc&limit=500`;
+  const res = await fetch(url, { headers: DB_HEADERS });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+// 미사용 체험권 — campaign_licenses와 매핑해서 contact_phone 보강
+export interface UnusedWithContact extends UnusedCouponRow {
+  contact_name?:  string;
+  contact_phone?: string;
+  org_name?:      string;
+  campaign_id?:   string;
+}
+
+export async function getUnusedCouponsWithContact(daysBack = 180): Promise<UnusedWithContact[]> {
+  const unused = await getRecentUnusedCoupons(daysBack);
+  if (unused.length === 0) return [];
+
+  // coupon_code 목록으로 campaign_licenses 매핑
+  const codes = unused.map(u => u.coupon_code).filter(Boolean);
+  const codeChunks: string[][] = [];
+  for (let i = 0; i < codes.length; i += 100) codeChunks.push(codes.slice(i, i + 100));
+
+  const matchMap = new Map<string, { contact_name?: string; contact_phone?: string; org_name?: string; campaign_id?: string }>();
+  for (const chunk of codeChunks) {
+    const inList = chunk.map(c => `"${c}"`).join(',');
+    const url = `${SUPABASE_URL}/rest/v1/campaign_licenses`
+      + `?select=coupon_code,contact_name,contact_phone,org_name,campaign_id`
+      + `&coupon_code=in.(${encodeURIComponent(inList)})`;
+    const res = await fetch(url, { headers: DB_HEADERS });
+    if (!res.ok) continue;
+    const rows: Array<{ coupon_code: string; contact_name?: string; contact_phone?: string; org_name?: string; campaign_id?: string }> = await res.json();
+    rows.forEach(r => matchMap.set(r.coupon_code, {
+      contact_name:  r.contact_name,
+      contact_phone: r.contact_phone,
+      org_name:      r.org_name,
+      campaign_id:   r.campaign_id,
+    }));
+  }
+
+  return unused.map(u => ({
+    ...u,
+    ...(matchMap.get(u.coupon_code) ?? {}),
+  }));
+}
+
 // ── Supabase DB — deal_quotes 테이블 ─────────────
 export interface DealQuote {
   id: string;

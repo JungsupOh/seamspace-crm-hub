@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useContacts, useDeals } from '@/hooks/use-airtable';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getAllLicenses, type DealLicenseRecord } from '@/lib/storage';
+import { getAllLicenses, getUnusedCouponsWithContact, type DealLicenseRecord, type UnusedWithContact } from '@/lib/storage';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
-import { FlaskConical, Briefcase, TrendingUp, AlertCircle, Clock, ArrowRight, CheckCircle2, LogIn, Phone, Users, Send, ChevronDown } from 'lucide-react';
+import { FlaskConical, Briefcase, TrendingUp, AlertCircle, Clock, ArrowRight, CheckCircle2, LogIn, Phone, Users, Send, ChevronDown, MessageSquare, Moon } from 'lucide-react';
 import { DEAL_STAGE_LABELS, STAGE_COLOR, normalizeStage } from '@/lib/grades';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -12,8 +12,10 @@ import { getRecentSendLogs, buildSentMap, isAlreadySent, type AlimtalkRecipient 
 
 const fmt = (n: number) =>
   n >= 100_000_000 ? `${(n / 100_000_000).toFixed(1)}억`
-  : n >= 10_000    ? `${Math.round(n / 10_000)}만`
+  : n >= 10_000    ? `${Math.round(n / 10_000).toLocaleString()}만`
   : n.toLocaleString();
+
+const num = (n: number) => n.toLocaleString();
 
 function dday(dateStr: string): number {
   const diff = new Date(dateStr).getTime() - Date.now();
@@ -69,11 +71,18 @@ export default function Dashboard() {
     queryFn:  getRecentSendLogs,
     staleTime: 30 * 1000,
   });
+  const { data: unusedCoupons } = useQuery({
+    queryKey: ['unused_coupons'],
+    queryFn:  () => getUnusedCouponsWithContact(180),
+    staleTime: 60 * 1000,
+  });
 
   // 발송 다이얼로그 state
   const [sendOpen, setSendOpen] = useState(false);
   const [sendGroup, setSendGroup] = useState<GroupKey | null>(null);
   const [restOpen, setRestOpen] = useState(false);
+  const [sleepingOpen, setSleepingOpen] = useState(false);
+  const [sleepingSendOpen, setSleepingSendOpen] = useState(false);
 
   const today     = new Date().toISOString().split('T')[0];
   const thisMonth = new Date().getMonth();
@@ -125,6 +134,39 @@ export default function Dashboard() {
   const handleOpenSend = (key: GroupKey) => { setSendGroup(key); setSendOpen(true); };
   const sendTargets = sendGroup ? targetsForGroup(sendGroup) : null;
 
+  // ── 잠자는 (미사용) 체험권 ────────────────────────
+  const sleeping: UnusedWithContact[] = unusedCoupons ?? [];
+  const sleepingRecent30 = sleeping.filter(c => {
+    const d = new Date(c.created_at).getTime();
+    return Date.now() - d <= 30 * 86400_000;
+  });
+
+  // 발송 가능 = (admin_phone 또는 campaign 매핑된 contact_phone) 보유 + UH_initial 미발송
+  const sleepingSendable = sleeping.filter(c => {
+    const phone = c.admin_phone ?? c.contact_phone ?? '';
+    if (!phone) return false;
+    const id = `mdiary_${c.id}`;
+    return !isAlreadySent(sentMap, 'mdiary', id, 'UH_2821', 'UH_initial');
+  });
+  const sleepingAlreadySent = sleeping.filter(c => {
+    const phone = c.admin_phone ?? c.contact_phone ?? '';
+    if (!phone) return false;
+    const id = `mdiary_${c.id}`;
+    return isAlreadySent(sentMap, 'mdiary', id, 'UH_2821', 'UH_initial');
+  }).length;
+
+  const sleepingRecipients: AlimtalkRecipient[] = sleepingSendable.map(c => ({
+    license_id:     `mdiary_${c.id}`,
+    license_source: 'mdiary',
+    name:           c.extracted_name ?? c.contact_name ?? c.admin_name ?? '선생님',
+    phone:          c.contact_phone ?? c.admin_phone ?? '',
+    group_name:     c.org_name ?? null,
+    user_limit:     String(c.user_limit),
+    duration:       String(c.duration),
+    expiry_date:    null,
+    coupon_code:    c.coupon_code,
+  }));
+
   // 만료됐지만 구매 미전환 (체험권 출처)
   const expiredUnconverted = allLics.filter(
     l => l.status === '만료' && l.deal_id === 'mdiary'
@@ -173,8 +215,8 @@ export default function Dashboard() {
             <p className="text-xs text-muted-foreground font-medium">체험 활성</p>
             <FlaskConical className="h-4 w-4 text-amber-500" />
           </div>
-          <p className="text-3xl font-bold tabular-nums">{activeTrials.length}</p>
-          <p className="text-xs text-muted-foreground mt-1">이번 달 +{newTrialsThisMonth}건 신규</p>
+          <p className="text-3xl font-bold tabular-nums">{num(activeTrials.length)}</p>
+          <p className="text-xs text-muted-foreground mt-1">이번 달 +{num(newTrialsThisMonth)}건 신규</p>
         </div>
 
         <div className={`surface-card ring-container p-5 ${urgentCount > 0 ? 'border-red-200 bg-red-50/40' : ''}`}>
@@ -183,10 +225,10 @@ export default function Dashboard() {
             <AlertCircle className={`h-4 w-4 ${urgentCount > 0 ? 'text-red-500' : 'text-amber-500'}`} />
           </div>
           <p className={`text-3xl font-bold tabular-nums ${urgentCount > 0 ? 'text-red-600' : ''}`}>
-            {expiringSoon.length}
+            {num(expiringSoon.length)}
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            {urgentCount > 0 ? <span className="text-red-500 font-medium">D-7 이내 {urgentCount}건 긴급</span> : 'D-30 이내'}
+            {urgentCount > 0 ? <span className="text-red-500 font-medium">D-7 이내 {num(urgentCount)}건 긴급</span> : 'D-30 이내'}
           </p>
         </div>
 
@@ -195,7 +237,7 @@ export default function Dashboard() {
             <p className="text-xs text-muted-foreground font-medium">미전환 만료</p>
             <Clock className="h-4 w-4 text-slate-400" />
           </div>
-          <p className="text-3xl font-bold tabular-nums text-muted-foreground">{expiredUnconverted.length}</p>
+          <p className="text-3xl font-bold tabular-nums text-muted-foreground">{num(expiredUnconverted.length)}</p>
           <p className="text-xs text-muted-foreground mt-1">구매 전환 대기</p>
         </div>
 
@@ -205,9 +247,9 @@ export default function Dashboard() {
             <TrendingUp className="h-4 w-4 text-teal-500" />
           </div>
           <p className="text-3xl font-bold tabular-nums">
-            {thisMonthRevenue > 0 ? fmt(thisMonthRevenue) : thisMonthDeals.length + '건'}
+            {thisMonthRevenue > 0 ? fmt(thisMonthRevenue) : num(thisMonthDeals.length) + '건'}
           </p>
-          <p className="text-xs text-muted-foreground mt-1">계약 {thisMonthDeals.length}건</p>
+          <p className="text-xs text-muted-foreground mt-1">계약 {num(thisMonthDeals.length)}건</p>
         </div>
       </div>
 
@@ -270,7 +312,7 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* 일괄 발송 다이얼로그 */}
+      {/* 일괄 발송 다이얼로그 — 만기 알림 */}
       {sendGroup && sendTargets && (
         <AlimtalkSendDialog
           open={sendOpen}
@@ -285,6 +327,20 @@ export default function Dashboard() {
           }}
         />
       )}
+
+      {/* 일괄 발송 다이얼로그 — 잠자는 체험권 미등록 알림 */}
+      <AlimtalkSendDialog
+        open={sleepingSendOpen}
+        onOpenChange={setSleepingSendOpen}
+        title="잠자는 체험권 미등록 알림 일괄 발송"
+        recipients={sleepingRecipients}
+        alreadySentCount={sleepingAlreadySent}
+        tpl_code="UH_2821"
+        stage="UH_initial"
+        onSent={() => {
+          qc.invalidateQueries({ queryKey: ['alimtalk_logs_recent'] });
+        }}
+      />
 
       <div className="grid lg:grid-cols-2 gap-6">
         {/* 체험 파이프라인 */}
@@ -307,12 +363,81 @@ export default function Dashboard() {
                   <div className="flex-1 bg-muted/40 rounded-full h-5 overflow-hidden">
                     <div className={`h-full rounded-full flex items-center justify-end pr-2 ${row.color} transition-all`}
                       style={{ width: `${pct}%` }}>
-                      {row.count > 0 && <span className={`text-[11px] font-semibold ${row.text}`}>{row.count}</span>}
+                      {row.count > 0 && <span className={`text-[11px] font-semibold ${row.text}`}>{num(row.count)}</span>}
                     </div>
                   </div>
                 </div>
               );
             })}
+          </div>
+
+          {/* 잠자는 체험권 액션 바 — 발급 후 사용 미시작 추적 */}
+          <div className="mt-4 pt-4 border-t border-border space-y-2">
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setSleepingOpen(o => !o)}
+                className="flex items-center gap-2 text-left">
+                <Moon className="h-4 w-4 text-indigo-500" />
+                <span className="text-sm font-medium">잠자는 체험권</span>
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform text-muted-foreground ${sleepingOpen ? '' : '-rotate-90'}`} />
+              </button>
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="text-muted-foreground">총 <strong className="text-foreground tabular-nums">{num(sleeping.length)}</strong>건</span>
+                <span className="text-muted-foreground">· 최근 30일 <strong className="text-amber-600 tabular-nums">{num(sleepingRecent30.length)}</strong></span>
+                <span className="text-muted-foreground">· 발송가능 <strong className="text-teal-600 tabular-nums">{num(sleepingSendable.length)}</strong></span>
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              발급되었지만 아직 사용 시작 안 한 체험권 (link_confirmed≠false 한정 · 매칭 실패 명시 항목 제외)
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                className="h-7 text-[11px]"
+                disabled={sleepingSendable.length === 0}
+                onClick={() => setSleepingSendOpen(true)}>
+                <MessageSquare className="h-3.5 w-3.5 mr-1" />
+                {sleepingSendable.length > 0
+                  ? `미등록 알림 ${num(sleepingSendable.length)}명 발송`
+                  : '발송 가능 대상 없음'}
+              </Button>
+              <Link to="/licenses" className="text-[11px] text-primary hover:underline">
+                이용권 관리 → 자동 매칭
+              </Link>
+              {sleepingAlreadySent > 0 && (
+                <span className="text-[10px] text-muted-foreground ml-auto">이미 {num(sleepingAlreadySent)}명 발송됨</span>
+              )}
+            </div>
+            {sleepingOpen && (
+              <div className="mt-2 max-h-[260px] overflow-y-auto rounded border border-border divide-y divide-border">
+                {sleeping.length === 0 ? (
+                  <div className="px-3 py-6 text-center text-xs text-muted-foreground">잠자는 체험권 없음</div>
+                ) : sleeping.slice(0, 50).map(c => {
+                  const phone = c.contact_phone ?? c.admin_phone ?? '';
+                  const name  = c.extracted_name ?? c.contact_name ?? c.admin_name ?? '-';
+                  const days = Math.floor((Date.now() - new Date(c.created_at).getTime()) / 86400_000);
+                  return (
+                    <div key={c.id} className="px-3 py-1.5 text-[11px] flex items-center gap-2">
+                      <span className="font-mono text-muted-foreground shrink-0">{c.coupon_code}</span>
+                      <span className="text-muted-foreground shrink-0">D+{num(days)}</span>
+                      <span className="font-medium truncate">{name}</span>
+                      <span className="text-muted-foreground truncate">{c.org_name ?? c.descript ?? ''}</span>
+                      <span className="ml-auto text-muted-foreground shrink-0 whitespace-nowrap">{c.duration}개월·{num(c.user_limit)}명</span>
+                      {phone ? (
+                        <span className="text-teal-600 shrink-0 whitespace-nowrap">📞</span>
+                      ) : (
+                        <span className="text-red-400 shrink-0 whitespace-nowrap" title="연락처 미매칭 — 자동 매칭 필요">⚠️</span>
+                      )}
+                    </div>
+                  );
+                })}
+                {sleeping.length > 50 && (
+                  <div className="px-3 py-2 text-center text-[10px] text-muted-foreground">
+                    ... 외 {num(sleeping.length - 50)}건 (이용권 관리 페이지에서 전체 보기)
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

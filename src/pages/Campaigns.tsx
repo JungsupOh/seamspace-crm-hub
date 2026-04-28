@@ -584,7 +584,7 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
               <Stat icon={<Ticket className="h-3.5 w-3.5" />} label="발송" value={licTotal} />
               <Stat icon={<Clock className="h-3.5 w-3.5" />} label="사용중" value={licActive} accent="teal" />
               <Stat icon={<XCircle className="h-3.5 w-3.5" />} label="만료" value={licExpired} accent="orange" />
-              <Stat icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="딜 전환" value={`${licConverted} (${convRate}%)`} accent="blue" />
+              <Stat icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="딜 전환" value={`${licConverted.toLocaleString()} (${convRate}%)`} accent="blue" />
             </div>
             {cost > 0 && (
               <div className="flex items-center gap-4 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs">
@@ -1592,11 +1592,12 @@ function Stat({ icon, label, value, accent }: {
               : accent === 'blue'   ? 'text-blue-600'
               : accent === 'purple' ? 'text-purple-600'
               : 'text-foreground';
+  const display = typeof value === 'number' ? value.toLocaleString() : value;
   return (
     <div className="flex flex-col items-center gap-0.5 min-w-[52px]">
       <div className={`flex items-center gap-1 ${color}`}>
         {icon}
-        <span className="text-sm font-semibold">{value}</span>
+        <span className="text-sm font-semibold tabular-nums">{display}</span>
       </div>
       <span className="text-[10px] text-muted-foreground">{label}</span>
     </div>

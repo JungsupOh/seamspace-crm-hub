@@ -1177,7 +1177,7 @@ export default function Licenses() {
           <button onClick={() => setStatusFilter('all')}
             className={`flex flex-col items-center rounded-lg px-4 py-2.5 min-w-[72px] transition-colors
               ${statusFilter === 'all' ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80'}`}>
-            <span className="text-lg font-bold">{all.length}</span>
+            <span className="text-lg font-bold tabular-nums">{all.length.toLocaleString()}</span>
             <span className="text-[10px] mt-0.5">전체</span>
           </button>
           {pipelineCounts.map(p => (
@@ -1189,8 +1189,8 @@ export default function Licenses() {
                   ${statusFilter === p.status
                     ? 'border-primary ring-1 ring-primary bg-primary/5'
                     : 'border-transparent hover:border-border bg-muted/50'}`}>
-                <span className={`text-lg font-bold ${p.count === 0 ? 'text-muted-foreground/40' : ''}`}>
-                  {p.count}
+                <span className={`text-lg font-bold tabular-nums ${p.count === 0 ? 'text-muted-foreground/40' : ''}`}>
+                  {p.count.toLocaleString()}
                 </span>
                 <span className={`text-[10px] mt-0.5 whitespace-nowrap
                   ${statusFilter === p.status ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
@@ -1228,7 +1228,7 @@ export default function Licenses() {
             <SelectItem value="month">이번 달</SelectItem>
           </SelectContent>
         </Select>
-        <span className="ml-auto text-xs text-muted-foreground self-center">{filtered.length}건</span>
+        <span className="ml-auto text-xs text-muted-foreground self-center tabular-nums">{filtered.length.toLocaleString()}건</span>
       </div>
 
       {/* 테이블 */}
