@@ -1005,7 +1005,7 @@ function DealForm({
     return 0;
   });
 
-  const upTab = (key: keyof QuoteTab, value: number | undefined) => {
+  const upTab = <K extends keyof QuoteTab>(key: K, value: QuoteTab[K]) => {
     setLocalTabs(prev => {
       const next = [...prev];
       next[activeTabIdx] = { ...next[activeTabIdx], [key]: value };
@@ -1017,13 +1017,15 @@ function DealForm({
     const tab = localTabs[activeTabIdx];
     const items = tab?.items ?? [];
     const primaryPlan = items[0]?.plan;
+    // 견적 식별/요청 정보(quote_number, quote_date, qty, duration)는 활성 탭 자체값 우선.
+    // form 값은 fallback (legacy 호환).
     return {
       ...tab,
-      quote_number: f.Quote_Number ?? undefined,
-      quote_date: f.Quote_Date ?? undefined,
+      quote_number: tab?.quote_number ?? f.Quote_Number ?? undefined,
+      quote_date:   tab?.quote_date   ?? f.Quote_Date   ?? undefined,
       plan: primaryPlan ?? f.Quote_Plan ?? undefined,
-      qty: f.Quote_Qty ?? undefined,
-      duration: f.License_Duration ?? undefined,
+      qty:      tab?.qty      ?? f.Quote_Qty       ?? undefined,
+      duration: tab?.duration ?? f.License_Duration ?? undefined,
       unit_price: items[0]?.unit_price ?? f.Unit_Price ?? undefined,
       final_value: f.Final_Contract_Value ?? undefined,
       supply_price: f.Supply_Price ?? undefined,
@@ -1321,7 +1323,10 @@ function DealForm({
       const localNums = localTabs
         .filter((_, i) => i !== activeTabIdx)
         .flatMap(t => t.quote_number ? [t.quote_number] : []);
-      up('Quote_Number', generateQuoteNumber([...airtableNums, ...dbNums, ...localNums]));
+      const newNum = generateQuoteNumber([...airtableNums, ...dbNums, ...localNums]);
+      // 활성 탭 + form 동시 update (탭 간 데이터 격리)
+      upTab('quote_number', newNum);
+      up('Quote_Number', newNum);
     } finally { setQuoteNumGenerating(false); }
   };
 
@@ -1732,7 +1737,7 @@ function DealForm({
           </div>
 
         <div className="p-3 space-y-3">
-          {/* 견적서번호 | 견적일 */}
+          {/* 견적서번호 | 견적일 — 활성 탭 직접 binding (탭 간 데이터 격리) */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <div className="flex items-center justify-between">
@@ -1742,23 +1747,34 @@ function DealForm({
                   {quoteNumGenerating && <Loader2 className="h-3 w-3 animate-spin" />}생성
                 </button>
               </div>
-              <Input value={n('Quote_Number')} onChange={e => up('Quote_Number', e.target.value)}
+              <Input
+                value={localTabs[activeTabIdx]?.quote_number ?? ''}
+                onChange={e => { upTab('quote_number', e.target.value); up('Quote_Number', e.target.value); }}
                 className="h-8 text-sm" placeholder="견적서 번호" />
             </div>
             <Field label="견적일">
-              <DateInput value={n('Quote_Date')} onChange={v => up('Quote_Date', v)} className="h-8 text-sm" />
+              <DateInput
+                value={localTabs[activeTabIdx]?.quote_date ?? ''}
+                onChange={v => { upTab('quote_date', v); up('Quote_Date', v); }}
+                className="h-8 text-sm" />
             </Field>
           </div>
-          {/* 총인원 | 이용권수량 | 이용기간 */}
+          {/* 총인원 | 이용권수량 | 이용기간 — 활성 탭 직접 binding */}
           <div className="grid grid-cols-3 gap-3">
             <Field label="총인원 (명)">
-              <NumericInput value={num('Quote_Qty')} onChange={v => up('Quote_Qty', v)} className="h-8 text-sm" />
+              <NumericInput
+                value={localTabs[activeTabIdx]?.qty ?? undefined}
+                onChange={v => { upTab('qty', v); up('Quote_Qty', v); }}
+                className="h-8 text-sm" />
             </Field>
             <Field label="이용권 수 (장)">
               <NumericInput value={localTabs[activeTabIdx]?.license_qty ?? undefined} onChange={v => upTab('license_qty', v)} className="h-8 text-sm" />
             </Field>
             <Field label="이용기간 (개월)">
-              <NumericInput value={num('License_Duration')} onChange={v => up('License_Duration', v)} className="h-8 text-sm" />
+              <NumericInput
+                value={localTabs[activeTabIdx]?.duration ?? undefined}
+                onChange={v => { upTab('duration', v); up('License_Duration', v); }}
+                className="h-8 text-sm" />
             </Field>
           </div>
           {/* 상품 */}
