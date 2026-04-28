@@ -2,9 +2,16 @@
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-const HEADERS = {
+// REST API 조회용 (apikey + Authorization)
+const REST_HEADERS = {
   apikey:        SUPABASE_KEY,
   Authorization: `Bearer ${SUPABASE_KEY}`,
+  "Content-Type": "application/json",
+};
+
+// Edge Function 호출용 (Authorization만 — send-coupon과 동일 패턴)
+const FN_HEADERS = {
+  Authorization:  `Bearer ${SUPABASE_KEY}`,
   "Content-Type": "application/json",
 };
 
@@ -38,7 +45,7 @@ export async function apiSendAlimtalk(params: {
 }): Promise<SendResult> {
   const res = await fetch(`${SUPABASE_URL}/functions/v1/send-alimtalk`, {
     method:  'POST',
-    headers: HEADERS,
+    headers: FN_HEADERS,
     body:    JSON.stringify(params),
   });
   const data = await res.json();
@@ -64,7 +71,7 @@ export async function getRecentSendLogs(): Promise<SendLogEntry[]> {
     + `?success=eq.true&sent_at=gte.${since}`
     + `&select=id,license_id,license_source,tpl_code,stage,sent_at,success`
     + `&order=sent_at.desc`;
-  const res = await fetch(url, { headers: HEADERS });
+  const res = await fetch(url, { headers: REST_HEADERS });
   if (!res.ok) return [];
   return await res.json();
 }

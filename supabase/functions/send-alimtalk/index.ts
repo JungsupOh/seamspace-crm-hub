@@ -7,7 +7,7 @@
 const CORS = {
   "Access-Control-Allow-Origin":  "https://seamspace-crm-hub.vercel.app",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
 };
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
