@@ -11,6 +11,7 @@ import { FlaskConical, Briefcase, TrendingUp, AlertCircle, Clock, ArrowRight, Ch
 import { DEAL_STAGES, DEAL_STAGE_LABELS, STAGE_COLOR, isClosedDeal } from '@/lib/grades';
 import { Link } from 'react-router-dom';
 import { DealQuickView } from '@/components/DealQuickView';
+import { LicenseQuickView, type LicenseQuickViewData } from '@/components/LicenseQuickView';
 import { Button } from '@/components/ui/button';
 import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
 import { getRecentSendLogs, buildSentMap, isAlreadySent, canSendUH2821, lastUH2821SentAt, nextUH2821ResendAt, todayUHStage, type AlimtalkRecipient } from '@/lib/alimtalk';
@@ -113,12 +114,20 @@ export default function Dashboard() {
     setQuickOpen(true);
   };
 
-  // license → deal 매칭 (영업 액션 클릭 처리)
+  // 라이선스 빠른 보기 state (CRM Deal 매핑 없는 직접 발급 라이선스용)
+  const [quickLicense, setQuickLicense] = useState<LicenseQuickViewData | null>(null);
+  const [quickLicenseOpen, setQuickLicenseOpen] = useState(false);
+
+  // license 클릭 처리 — deal 매핑 있으면 DealQuickView, 없으면 LicenseQuickView
   const dealMap = new Map((deals ?? []).map(d => [d.id, d]));
   const openLicenseDeal = (l: ExpiringLic) => {
-    if (l.deal_id === 'mdiary' || !l.deal_id) return;
-    const d = dealMap.get(l.deal_id);
-    if (d) openDealQuickView(d);
+    const matched = l.deal_id !== 'mdiary' && l.deal_id ? dealMap.get(l.deal_id) : undefined;
+    if (matched) {
+      openDealQuickView(matched);
+    } else {
+      setQuickLicense(l as LicenseQuickViewData);
+      setQuickLicenseOpen(true);
+    }
   };
 
   const today     = new Date().toISOString().split('T')[0];
@@ -380,6 +389,9 @@ export default function Dashboard() {
       {/* 딜 빠른 보기 다이얼로그 (진행중 딜 / 영업 액션 항목 클릭 시) */}
       <DealQuickView open={quickOpen} onOpenChange={setQuickOpen} deal={quickDeal} />
 
+      {/* 라이선스 빠른 보기 (CRM Deal 매핑 없는 직접 발급 — 5-2반하다 같은 케이스) */}
+      <LicenseQuickView open={quickLicenseOpen} onOpenChange={setQuickLicenseOpen} license={quickLicense} />
+
       {/* 진행중 딜 — full-width 강조, 가장 자주 보는 영역 */}
       <ActiveDealsSection deals={activeDeals} onDealClick={openDealQuickView} />
 
@@ -586,7 +598,7 @@ function ExpiringCard({ l, onClick }: { l: ExpiringLic; onClick?: () => void }) 
     : loginDays <= 30 ? 'text-amber-600'
     : 'text-red-500';
 
-  const clickable = onClick && l.deal_id && l.deal_id !== 'mdiary';
+  const clickable = !!onClick;
   return (
     <div
       onClick={clickable ? onClick : undefined}
