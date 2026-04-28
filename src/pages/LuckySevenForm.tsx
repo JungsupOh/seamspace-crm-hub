@@ -6,7 +6,7 @@ import { formatPhone } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Search, CheckCircle2, AlertTriangle, Plus, Trash2, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Loader2, Search, CheckCircle2, AlertTriangle, Plus, Trash2, ArrowLeft, ArrowRight, Upload, FileCheck2 } from 'lucide-react';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
 import { notifyLuckySevenGroup } from '@/lib/telegram';
 import {
@@ -15,6 +15,7 @@ import {
   validatePaymentGroups,
   isValidEmail,
   normalizePhone,
+  uploadSchoolIdFile,
   LS_UNIT_PRICE,
   type LSMemberInput,
   type LSPaymentGroupInput,
@@ -35,15 +36,15 @@ interface MemberRow {
 }
 
 interface PaymentGroupDraft {
-  payerName: string;
-  payerPhone: string;
-  payerEmail: string;
+  payerMemberIdx: number | null;   // 묶음 멤버 중 결제자로 선택된 인덱스
   taxInvoiceRequired: boolean;
   buyerOrgName: string;
   buyerBusinessNo: string;
   buyerOrgAddr: string;
   buyerOrgCeo: string;
   buyerContact: string;
+  schoolIdUrl: string | null;       // 업로드 완료된 고유번호증 URL
+  schoolIdFileName: string | null;  // 업로드된 파일명 표시용
   memberIndices: number[];
 }
 
@@ -53,15 +54,15 @@ function emptyMember(): MemberRow {
 
 function emptyPaymentGroup(memberIndices: number[]): PaymentGroupDraft {
   return {
-    payerName: '',
-    payerPhone: '',
-    payerEmail: '',
+    payerMemberIdx: memberIndices.length === 1 ? memberIndices[0] : null,
     taxInvoiceRequired: false,
     buyerOrgName: '',
     buyerBusinessNo: '',
     buyerOrgAddr: '',
     buyerOrgCeo: '',
     buyerContact: '',
+    schoolIdUrl: null,
+    schoolIdFileName: null,
     memberIndices,
   };
 }
@@ -229,33 +230,25 @@ export default function LuckySevenForm() {
     });
   };
 
-  // ── 결제 묶음 자동 생성 (모드 변경 시) ──
+  // ── 결제 묶음 자동 생성 ──
+  // - 첫 Step 3 진입 시 1회 초기화
+  // - 라디오로 paymentMode 변경 시 재초기화
+  // - Step 4에서 뒤로 → Step 3 돌아오면 데이터 보존 (재초기화 X)
+  const lastInitModeRef = useRef<PaymentMode | null>(null);
   useEffect(() => {
     if (step !== 3) return;
+    if (lastInitModeRef.current === paymentMode) return;  // 이미 이 모드로 초기화됨 → skip
+    lastInitModeRef.current = paymentMode;
+
     if (paymentMode === 'leader_all') {
       const all = members.map((_, i) => i);
-      setPaymentGroups([
-        {
-          ...emptyPaymentGroup(all),
-          payerName: members[0]?.name || '',
-          payerPhone: members[0]?.phone || '',
-          payerEmail: members[0]?.email || '',
-        },
-      ]);
+      setPaymentGroups([{ ...emptyPaymentGroup(all), payerMemberIdx: 0 }]);
     } else if (paymentMode === 'each_alone') {
-      setPaymentGroups(
-        members.map((m, i) => ({
-          ...emptyPaymentGroup([i]),
-          payerName: m.name,
-          payerPhone: m.phone,
-          payerEmail: m.email,
-        })),
-      );
+      setPaymentGroups(members.map((_, i) => emptyPaymentGroup([i])));
     } else {
-      // custom: 빈 묶음 1개로 시작
       setPaymentGroups([emptyPaymentGroup([])]);
     }
-  }, [paymentMode, step]);  // members는 의존성 X — 모드 변경 시에만 리셋
+  }, [paymentMode, step, members]);
 
   const updatePaymentGroup = (idx: number, patch: Partial<PaymentGroupDraft>) => {
     setPaymentGroups((prev) => {
@@ -270,13 +263,21 @@ export default function LuckySevenForm() {
       const next = prev.map((g, gi) => {
         if (gi === groupIdx) {
           const has = g.memberIndices.includes(memberIdx);
-          return {
-            ...g,
-            memberIndices: has ? g.memberIndices.filter((m) => m !== memberIdx) : [...g.memberIndices, memberIdx].sort((a, b) => a - b),
-          };
+          const newIndices = has
+            ? g.memberIndices.filter((m) => m !== memberIdx)
+            : [...g.memberIndices, memberIdx].sort((a, b) => a - b);
+          // 결제자: 1명이면 자동, 결제자가 묶음에서 빠졌으면 리셋
+          let payerIdx = g.payerMemberIdx;
+          if (newIndices.length === 1) payerIdx = newIndices[0];
+          else if (payerIdx !== null && !newIndices.includes(payerIdx)) payerIdx = null;
+          return { ...g, memberIndices: newIndices, payerMemberIdx: payerIdx };
         }
         // 다른 묶음에서 제거 (한 멤버는 한 묶음만)
-        return { ...g, memberIndices: g.memberIndices.filter((m) => m !== memberIdx) };
+        const filtered = g.memberIndices.filter((m) => m !== memberIdx);
+        let payerIdx = g.payerMemberIdx;
+        if (payerIdx !== null && !filtered.includes(payerIdx)) payerIdx = null;
+        if (filtered.length === 1) payerIdx = filtered[0];
+        return { ...g, memberIndices: filtered, payerMemberIdx: payerIdx };
       });
       return next;
     });
@@ -323,25 +324,41 @@ export default function LuckySevenForm() {
     return null;
   }
 
+  function buildPaymentGroupInputs(): LSPaymentGroupInput[] {
+    return paymentGroups.map((g) => {
+      const payer = g.payerMemberIdx !== null ? members[g.payerMemberIdx] : null;
+      return {
+        payerName: payer?.name?.trim() || '',
+        payerPhone: payer?.phone?.trim() || '',
+        payerEmail: payer?.email?.trim() || '',
+        buyerOrgName: g.taxInvoiceRequired ? g.buyerOrgName.trim() || null : null,
+        buyerBusinessNo: g.taxInvoiceRequired ? g.buyerBusinessNo.trim() || null : null,
+        buyerOrgAddr: g.taxInvoiceRequired ? g.buyerOrgAddr.trim() || null : null,
+        buyerOrgCeo: g.taxInvoiceRequired ? g.buyerOrgCeo.trim() || null : null,
+        buyerContact: g.taxInvoiceRequired ? g.buyerContact.trim() || null : null,
+        schoolIdUrl: g.taxInvoiceRequired ? g.schoolIdUrl : null,
+        taxInvoiceRequired: g.taxInvoiceRequired,
+        memberIndices: g.memberIndices,
+      };
+    });
+  }
+
   function validateStep3(): string | null {
-    const inputs: LSPaymentGroupInput[] = paymentGroups.map((g) => ({
-      payerName: g.payerName,
-      payerPhone: g.payerPhone,
-      payerEmail: g.payerEmail,
-      buyerOrgName: g.taxInvoiceRequired ? g.buyerOrgName || null : null,
-      buyerBusinessNo: g.taxInvoiceRequired ? g.buyerBusinessNo || null : null,
-      buyerOrgAddr: g.taxInvoiceRequired ? g.buyerOrgAddr || null : null,
-      buyerOrgCeo: g.taxInvoiceRequired ? g.buyerOrgCeo || null : null,
-      buyerContact: g.taxInvoiceRequired ? g.buyerContact || null : null,
-      taxInvoiceRequired: g.taxInvoiceRequired,
-      memberIndices: g.memberIndices,
-    }));
+    // payerMemberIdx 누락 사전 검증
+    for (let i = 0; i < paymentGroups.length; i++) {
+      const g = paymentGroups[i];
+      if (g.payerMemberIdx === null) return `묶음 ${i + 1}: 결제자를 선택해주세요.`;
+      if (!g.memberIndices.includes(g.payerMemberIdx)) return `묶음 ${i + 1}: 결제자가 묶음에 포함되지 않았습니다.`;
+    }
+    const inputs = buildPaymentGroupInputs();
     const err = validatePaymentGroups(members.length, inputs);
     if (err) return err;
-    for (const g of paymentGroups) {
+    for (let i = 0; i < paymentGroups.length; i++) {
+      const g = paymentGroups[i];
       if (g.taxInvoiceRequired) {
-        if (!g.buyerOrgName.trim()) return '세금계산서 발급을 선택한 묶음의 인수자명을 입력해주세요.';
-        if (!g.buyerBusinessNo.trim()) return '세금계산서 발급을 선택한 묶음의 사업자등록번호를 입력해주세요.';
+        if (!g.buyerOrgName.trim()) return `묶음 ${i + 1}: 인수자명을 입력해주세요.`;
+        if (!g.buyerBusinessNo.trim()) return `묶음 ${i + 1}: 사업자등록번호를 입력해주세요.`;
+        if (!g.schoolIdUrl) return `묶음 ${i + 1}: 고유번호증을 업로드해주세요.`;
       }
     }
     return null;
@@ -384,18 +401,7 @@ export default function LuckySevenForm() {
         email: m.email.trim(),
         schoolName: m.schoolName.trim(),
       }));
-      const pgInputs: LSPaymentGroupInput[] = paymentGroups.map((g) => ({
-        payerName: g.payerName.trim(),
-        payerPhone: g.payerPhone.trim(),
-        payerEmail: g.payerEmail.trim(),
-        buyerOrgName: g.taxInvoiceRequired ? g.buyerOrgName.trim() || null : null,
-        buyerBusinessNo: g.taxInvoiceRequired ? g.buyerBusinessNo.trim() || null : null,
-        buyerOrgAddr: g.taxInvoiceRequired ? g.buyerOrgAddr.trim() || null : null,
-        buyerOrgCeo: g.taxInvoiceRequired ? g.buyerOrgCeo.trim() || null : null,
-        buyerContact: g.taxInvoiceRequired ? g.buyerContact.trim() || null : null,
-        taxInvoiceRequired: g.taxInvoiceRequired,
-        memberIndices: g.memberIndices,
-      }));
+      const pgInputs: LSPaymentGroupInput[] = buildPaymentGroupInputs();
 
       const result = await submitLuckySevenGroup(
         {
@@ -788,9 +794,37 @@ export default function LuckySevenForm() {
                       </div>
                     )}
 
-                    <Input value={pg.payerName} onChange={(e) => updatePaymentGroup(gi, { payerName: e.target.value })} placeholder="결제자 이름" className="h-9 text-sm" />
-                    <Input value={pg.payerPhone} onChange={(e) => updatePaymentGroup(gi, { payerPhone: formatPhone(e.target.value) })} placeholder="결제자 휴대폰" type="tel" className="h-9 text-sm" />
-                    <Input value={pg.payerEmail} onChange={(e) => updatePaymentGroup(gi, { payerEmail: e.target.value })} placeholder="결제자 이메일 (견적서 수신)" type="email" className="h-9 text-sm" />
+                    {/* 결제자 선택 — 묶음 멤버 중에서만. 1명이면 자동 표시. */}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">결제자 선택 <span className="text-destructive">*</span></Label>
+                      {pg.memberIndices.length === 0 ? (
+                        <p className="text-[11px] text-muted-foreground italic">먼저 묶음 멤버를 선택해주세요.</p>
+                      ) : pg.memberIndices.length === 1 ? (
+                        <div className="text-xs px-2 py-1.5 rounded bg-muted/50 border border-border">
+                          {(() => {
+                            const m = members[pg.memberIndices[0]];
+                            return <span><strong>{m?.name || '(이름 없음)'}</strong> · {m?.phone} · {m?.email}</span>;
+                          })()}
+                        </div>
+                      ) : (
+                        <select
+                          value={pg.payerMemberIdx ?? ''}
+                          onChange={(e) => updatePaymentGroup(gi, { payerMemberIdx: e.target.value === '' ? null : Number(e.target.value) })}
+                          className="w-full h-9 text-sm rounded-md border border-input bg-background px-2"
+                        >
+                          <option value="">결제자를 선택해주세요</option>
+                          {pg.memberIndices.map((mi) => {
+                            const m = members[mi];
+                            return <option key={mi} value={mi}>{m?.name || `(${mi + 1}번)`} · {m?.phone}</option>;
+                          })}
+                        </select>
+                      )}
+                      {pg.payerMemberIdx !== null && (
+                        <p className="text-[10px] text-muted-foreground">
+                          견적서는 <strong>{members[pg.payerMemberIdx]?.email}</strong>로 발송됩니다.
+                        </p>
+                      )}
+                    </div>
 
                     <label className="flex items-center gap-2 cursor-pointer pt-1">
                       <input type="checkbox" checked={pg.taxInvoiceRequired} onChange={(e) => updatePaymentGroup(gi, { taxInvoiceRequired: e.target.checked })} className="accent-primary" />
@@ -804,6 +838,14 @@ export default function LuckySevenForm() {
                         <Input value={pg.buyerOrgAddr} onChange={(e) => updatePaymentGroup(gi, { buyerOrgAddr: e.target.value })} placeholder="주소" className="h-9 text-sm" />
                         <Input value={pg.buyerOrgCeo} onChange={(e) => updatePaymentGroup(gi, { buyerOrgCeo: e.target.value })} placeholder="대표자" className="h-9 text-sm" />
                         <Input value={pg.buyerContact} onChange={(e) => updatePaymentGroup(gi, { buyerContact: e.target.value })} placeholder="담당자 (선택)" className="h-9 text-sm" />
+
+                        {/* 고유번호증 업로드 */}
+                        <SchoolIdUploader
+                          schoolIdUrl={pg.schoolIdUrl}
+                          schoolIdFileName={pg.schoolIdFileName}
+                          onUploaded={(url, fileName) => updatePaymentGroup(gi, { schoolIdUrl: url, schoolIdFileName: fileName })}
+                          onClear={() => updatePaymentGroup(gi, { schoolIdUrl: null, schoolIdFileName: null })}
+                        />
                       </div>
                     )}
                   </div>
@@ -823,6 +865,8 @@ export default function LuckySevenForm() {
             <>
               <div className="bg-muted/30 rounded-lg p-3 text-xs text-muted-foreground leading-relaxed">
                 신청 직후 각 결제자분 이메일로 견적서가 자동 발송됩니다. 견적서의 <strong>"결제하러 가기"</strong> 버튼으로 결제를 진행해 주세요.
+                <br />
+                <strong className="text-foreground">결제는 카드 결제만 가능합니다.</strong>
               </div>
 
               <div className="rounded-lg border border-border p-3 space-y-2">
@@ -835,12 +879,15 @@ export default function LuckySevenForm() {
 
               <div className="rounded-lg border border-border p-3 space-y-2">
                 <h3 className="text-sm font-semibold">💳 결제 묶음 ({paymentGroups.length}건)</h3>
-                {paymentGroups.map((g, gi) => (
-                  <div key={gi} className="text-xs border-t border-border pt-2 first:border-0 first:pt-0">
-                    <div><strong>{g.payerName}</strong> ({g.payerEmail})</div>
-                    <div>멤버 {g.memberIndices.length}명 / {(g.memberIndices.length * LS_UNIT_PRICE).toLocaleString()}원 {g.taxInvoiceRequired && <span className="text-primary">· 세금계산서</span>}</div>
-                  </div>
-                ))}
+                {paymentGroups.map((g, gi) => {
+                  const payer = g.payerMemberIdx !== null ? members[g.payerMemberIdx] : null;
+                  return (
+                    <div key={gi} className="text-xs border-t border-border pt-2 first:border-0 first:pt-0">
+                      <div><strong>{payer?.name || '(미선택)'}</strong> {payer?.email && `(${payer.email})`}</div>
+                      <div>멤버 {g.memberIndices.length}명 / {(g.memberIndices.length * LS_UNIT_PRICE).toLocaleString()}원 {g.taxInvoiceRequired && <span className="text-primary">· 세금계산서</span>}</div>
+                    </div>
+                  );
+                })}
               </div>
 
               <label className="flex items-start gap-2 cursor-pointer">
@@ -877,6 +924,81 @@ export default function LuckySevenForm() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// 고유번호증 업로더 (인라인 컴포넌트)
+function SchoolIdUploader({
+  schoolIdUrl,
+  schoolIdFileName,
+  onUploaded,
+  onClear,
+}: {
+  schoolIdUrl: string | null;
+  schoolIdFileName: string | null;
+  onUploaded: (url: string, fileName: string) => void;
+  onClear: () => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = async (file: File) => {
+    setUploading(true);
+    setError(null);
+    try {
+      const url = await uploadSchoolIdFile(file);
+      onUploaded(url, file.name);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '업로드 실패');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      <Label className="text-[11px] text-muted-foreground">고유번호증 (또는 사업자등록증) <span className="text-destructive">*</span></Label>
+      {schoolIdUrl ? (
+        <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded border border-teal-300 bg-teal-50 dark:bg-teal-950/20">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <FileCheck2 className="h-3.5 w-3.5 text-teal-600 shrink-0" />
+            <a href={schoolIdUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-teal-700 truncate hover:underline">
+              {schoolIdFileName || '업로드 완료'}
+            </a>
+          </div>
+          <button type="button" onClick={onClear} className="text-destructive shrink-0">
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={uploading}
+          onClick={() => fileRef.current?.click()}
+          className="w-full h-9 text-xs border border-dashed border-border rounded flex items-center justify-center gap-1.5 hover:border-primary/50 disabled:opacity-50"
+        >
+          {uploading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> 업로드 중...</> : <><Upload className="h-3.5 w-3.5" /> 파일 선택 (PDF/JPG/PNG, 5MB 이하)</>}
+        </button>
+      )}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*,application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          if (file.size > 5 * 1024 * 1024) {
+            setError('파일은 5MB 이하만 가능합니다.');
+            return;
+          }
+          handleFile(file);
+        }}
+      />
+      {error && <p className="text-[10px] text-destructive">{error}</p>}
     </div>
   );
 }

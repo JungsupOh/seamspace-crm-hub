@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS lucky_seven_payment_groups (
   buyer_org_addr           TEXT,
   buyer_org_ceo            TEXT,
   buyer_contact            TEXT,
+  school_id_url            TEXT,                    -- 고유번호증 파일 URL (세금계산서 발급 시)
   amount                   INT  NOT NULL,
   tax_invoice_required     BOOLEAN NOT NULL DEFAULT false,
   status                   TEXT NOT NULL DEFAULT '대기',
@@ -61,6 +62,10 @@ CREATE TABLE IF NOT EXISTS lucky_seven_payment_groups (
   created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- 기존 테이블이 있는 경우 컬럼 추가 (재실행 안전)
+ALTER TABLE lucky_seven_payment_groups
+  ADD COLUMN IF NOT EXISTS school_id_url TEXT;
 CREATE INDEX IF NOT EXISTS idx_ls_pay_groups_group ON lucky_seven_payment_groups(group_id);
 CREATE INDEX IF NOT EXISTS idx_ls_pay_groups_quote ON lucky_seven_payment_groups(quote_number);
 CREATE INDEX IF NOT EXISTS idx_ls_pay_groups_status ON lucky_seven_payment_groups(status);
@@ -96,10 +101,14 @@ CREATE POLICY "all_ls_groups"         ON lucky_seven_groups         FOR ALL USIN
 CREATE POLICY "all_ls_payment_groups" ON lucky_seven_payment_groups FOR ALL USING (true) WITH CHECK (true);
 
 -- ================================================================
--- 5. Storage 버킷 — 견적서 PDF (anon 업로드/읽기 허용)
+-- 5. Storage 버킷 — 견적서 PDF + 고유번호증 (anon 업로드/읽기 허용)
 -- ================================================================
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('lucky_seven_quote_pdfs', 'lucky_seven_quote_pdfs', true)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('lucky_seven_school_id_files', 'lucky_seven_school_id_files', true)
 ON CONFLICT (id) DO NOTHING;
 
 DROP POLICY IF EXISTS "ls_quote_pdfs_anon_insert" ON storage.objects;
@@ -112,21 +121,14 @@ CREATE POLICY "ls_quote_pdfs_public_read"
   ON storage.objects FOR SELECT
   USING (bucket_id = 'lucky_seven_quote_pdfs');
 
--- ================================================================
--- 6. group_code 시퀀스 (LS{YY}-{seq:04d})
--- ================================================================
-CREATE SEQUENCE IF NOT EXISTS lucky_seven_group_code_seq START 1;
+DROP POLICY IF EXISTS "ls_school_id_anon_insert" ON storage.objects;
+CREATE POLICY "ls_school_id_anon_insert"
+  ON storage.objects FOR INSERT
+  WITH CHECK (bucket_id = 'lucky_seven_school_id_files');
 
-CREATE OR REPLACE FUNCTION generate_ls_group_code()
-RETURNS TEXT
-LANGUAGE plpgsql
-AS $$
-DECLARE
-  yy   TEXT;
-  seq  INT;
-BEGIN
-  yy  := to_char(now(), 'YY');
-  seq := nextval('lucky_seven_group_code_seq');
-  RETURN format('LS%s-%s', yy, lpad(seq::text, 4, '0'));
-END;
-$$;
+DROP POLICY IF EXISTS "ls_school_id_public_read" ON storage.objects;
+CREATE POLICY "ls_school_id_public_read"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'lucky_seven_school_id_files');
+
+-- (group_code는 클라이언트(JS)에서 생성. RPC/시퀀스 불필요.)

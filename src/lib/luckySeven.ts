@@ -50,6 +50,7 @@ export interface LSPaymentGroupInput {
   buyerOrgAddr: string | null;
   buyerOrgCeo: string | null;
   buyerContact: string | null;
+  schoolIdUrl: string | null;
   taxInvoiceRequired: boolean;
   memberIndices: number[];  // Step 2의 멤버 인덱스 (0-based, 0번이 대표자)
 }
@@ -81,6 +82,7 @@ export interface LSPaymentGroupRow {
   buyer_org_addr: string | null;
   buyer_org_ceo: string | null;
   buyer_contact: string | null;
+  school_id_url: string | null;
   amount: number;
   tax_invoice_required: boolean;
   status: string;
@@ -120,6 +122,42 @@ export function normalizePhone(phone: string): string {
 
 export function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// 그룹 코드 생성 (JS) — LS{YY}-{6 alphanum} 형식.
+// 충돌 방지를 위해 호출 측에서 INSERT 실패 시 재시도하도록 설계.
+export function generateGroupCode(): string {
+  const yy = String(new Date().getFullYear()).slice(-2);
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // 헷갈리는 0/O/I/L/1 제외
+  let rand = '';
+  const buf = new Uint8Array(6);
+  crypto.getRandomValues(buf);
+  for (let i = 0; i < 6; i++) rand += alphabet[buf[i] % alphabet.length];
+  return `LS${yy}-${rand}`;
+}
+
+// 고유번호증 파일 업로드 (Supabase Storage — lucky_seven_school_id_files 버킷)
+export async function uploadSchoolIdFile(file: File): Promise<string> {
+  const ts = Date.now();
+  const dotIdx = file.name.lastIndexOf('.');
+  const rawExt = dotIdx >= 0 ? file.name.slice(dotIdx + 1) : 'pdf';
+  const ext = rawExt.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'pdf';
+  const path = `${ts}-${crypto.randomUUID()}.${ext}`;
+  const r = await fetch(`${SUPABASE_URL}/storage/v1/object/lucky_seven_school_id_files/${path}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      apikey: SUPABASE_KEY,
+      'Content-Type': file.type || 'application/octet-stream',
+      'x-upsert': 'true',
+    },
+    body: file,
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    throw new Error(err.message || `파일 업로드 실패 (${r.status})`);
+  }
+  return `${SUPABASE_URL}/storage/v1/object/public/lucky_seven_school_id_files/${path}`;
 }
 
 // 묶음 검증: 모든 멤버가 정확히 한 묶음에 속하고, 묶음 합 = member_count
@@ -221,31 +259,35 @@ export async function submitLuckySevenGroup(input: {
   const validationError = validatePaymentGroups(memberCount, paymentGroups);
   if (validationError) throw new Error(validationError);
 
-  // 1) 그룹 코드 생성 (DB function 호출)
-  const codeRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/generate_ls_group_code`, {
-    method: 'POST',
-    headers: HEADERS,
-    body: '{}',
-  });
-  if (!codeRes.ok) throw new Error('그룹 코드 생성 실패');
-  const groupCode = (await codeRes.json()) as string;
+  // 1) 그룹 코드 생성 (JS) + 그룹 행 생성 (충돌 시 재시도)
   const leaderPhoneNorm = normalizePhone(input.leader.phone);
-
-  // 2) 그룹 행 생성 (leader_lead_id는 잠시 null, 멤버 insert 후 업데이트)
-  const groupInsRes = await fetch(`${SUPABASE_URL}/rest/v1/lucky_seven_groups`, {
-    method: 'POST',
-    headers: { ...HEADERS, Prefer: 'return=representation' },
-    body: JSON.stringify({
-      campaign_id: input.campaignId,
-      group_code: groupCode,
-      leader_phone_normalized: leaderPhoneNorm,
-      member_count: memberCount,
-      total_amount: memberCount * LS_UNIT_PRICE,
-      status: '신청',
-    }),
-  });
-  if (!groupInsRes.ok) throw new Error('그룹 생성 실패');
-  const group: LSGroupRow = (await groupInsRes.json())[0];
+  let group: LSGroupRow | null = null;
+  let groupCode = '';
+  for (let attempt = 0; attempt < 5 && !group; attempt++) {
+    groupCode = generateGroupCode();
+    const groupInsRes = await fetch(`${SUPABASE_URL}/rest/v1/lucky_seven_groups`, {
+      method: 'POST',
+      headers: { ...HEADERS, Prefer: 'return=representation' },
+      body: JSON.stringify({
+        campaign_id: input.campaignId,
+        group_code: groupCode,
+        leader_phone_normalized: leaderPhoneNorm,
+        member_count: memberCount,
+        total_amount: memberCount * LS_UNIT_PRICE,
+        status: '신청',
+      }),
+    });
+    if (groupInsRes.ok) {
+      group = (await groupInsRes.json())[0];
+      break;
+    }
+    // 23505 unique violation은 재시도, 그 외는 에러
+    const err = await groupInsRes.json().catch(() => ({}));
+    if (err.code !== '23505') {
+      throw new Error(err.message || `그룹 생성 실패 (${groupInsRes.status})`);
+    }
+  }
+  if (!group) throw new Error('그룹 코드 생성 재시도 실패');
 
   // 3) 멤버별 contacts upsert + campaign_leads insert
   const leadIds: string[] = [];
@@ -321,6 +363,7 @@ export async function submitLuckySevenGroup(input: {
         buyer_org_addr: pg.buyerOrgAddr,
         buyer_org_ceo: pg.buyerOrgCeo,
         buyer_contact: pg.buyerContact,
+        school_id_url: pg.schoolIdUrl,
         amount: pg.memberIndices.length * LS_UNIT_PRICE,
         tax_invoice_required: pg.taxInvoiceRequired,
         status: '대기',
