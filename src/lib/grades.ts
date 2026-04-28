@@ -24,6 +24,7 @@ export const STAGE_COLOR: Record<string, string> = {
   '입금대기':        'bg-amber-100 text-amber-700',
   '입금완료':        'bg-green-100 text-green-700',
   '딜취소':          'bg-red-100 text-red-700',
+  '계약파기':        'bg-rose-100 text-rose-700',
 };
 
 // ── 교사 유형 (Contact_Type) ──────────────────────
@@ -77,10 +78,24 @@ export const DEAL_STAGES = [
 ] as const;
 
 export const ALL_DEAL_STAGES = [
-  '체험권', '견적', '계약체결/구매', '템플릿 회신대기', '이용권 발송완료', '결제예정', '입금대기', '입금완료', '딜취소',
+  '체험권', '견적', '계약체결/구매', '템플릿 회신대기', '이용권 발송완료', '결제예정', '입금대기', '입금완료', '딜취소', '계약파기',
 ] as const;
 
 export type DealStage = typeof DEAL_STAGES[number];
+
+// ── 딜 종료 단계 (진행중에서 제외) ────────────────
+// 입금완료: 정상 완료 / 딜취소: 견적 단계에서 종료 / 계약파기: 계약 후 환불·세금계산서 취소 등
+export const CLOSED_DEAL_STAGES = ['입금완료', '딜취소', '계약파기'] as const;
+// Airtable 레거시 호환 포함 (Closed_Won/Lost, Active_User 등)
+export const CLOSED_DEAL_STAGES_ALL = [
+  ...CLOSED_DEAL_STAGES,
+  'Closed_Won', 'Closed_Lost', 'Active_User', '완료', 'Won', '이탈', 'Lost',
+] as const;
+
+export function isClosedDeal(stage: string | undefined): boolean {
+  if (!stage) return false;
+  return (CLOSED_DEAL_STAGES_ALL as readonly string[]).includes(stage);
+}
 
 export const DEAL_STAGE_LABELS: Record<string, string> = {
   '체험권':          '체험권',
@@ -92,6 +107,7 @@ export const DEAL_STAGE_LABELS: Record<string, string> = {
   '입금대기':        '입금대기',
   '입금완료':        '입금완료',
   '딜취소':          '딜취소',
+  '계약파기':        '계약파기',
   // 레거시 Airtable 값 호환
   Lead:        '체험권',
   Proposal:    '견적',

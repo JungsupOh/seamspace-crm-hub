@@ -59,6 +59,7 @@ const STAGE_META: Record<string, { label: string; color: string }> = {
   '입금대기':        { label: '입금대기',        color: 'bg-amber-100 text-amber-700'    },
   '입금완료':        { label: '입금완료',        color: 'bg-green-100 text-green-700'    },
   '딜취소':          { label: '딜취소',          color: 'bg-red-100 text-red-700'        },
+  '계약파기':        { label: '계약파기',        color: 'bg-rose-100 text-rose-700'      },
   // 레거시 Airtable 값 호환
   Lead:        { label: '체험권',          color: 'bg-yellow-100 text-yellow-700' },
   Proposal:    { label: '견적',            color: 'bg-blue-100 text-blue-700'    },
