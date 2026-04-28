@@ -29,6 +29,11 @@ import ShopCheckout from "./pages/ShopCheckout";
 import ShopComplete from "./pages/ShopComplete";
 import ShopFail from "./pages/ShopFail";
 import ShopOrderLookup from "./pages/ShopOrderLookup";
+import LuckySevenForm from "./pages/LuckySevenForm";
+import LuckySevenPay from "./pages/LuckySevenPay";
+import LuckySevenPayComplete from "./pages/LuckySevenPayComplete";
+import LuckySevenPayFail from "./pages/LuckySevenPayFail";
+import LuckySevenStatus from "./pages/LuckySevenStatus";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -133,6 +138,12 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       {/* 공개 캠페인 신청 폼 — 로그인 불필요 */}
       <Route path="/c/:slug" element={<CampaignForm />} />
+      {/* 럭키세븐 이벤트 — 로그인 불필요 */}
+      <Route path="/event/lucky-seven" element={<LuckySevenForm />} />
+      <Route path="/event/lucky-seven/pay/complete" element={<LuckySevenPayComplete />} />
+      <Route path="/event/lucky-seven/pay/fail" element={<LuckySevenPayFail />} />
+      <Route path="/event/lucky-seven/pay/:quoteNumber" element={<LuckySevenPay />} />
+      <Route path="/event/lucky-seven/status" element={<LuckySevenStatus />} />
       {/* /order는 일반 사용자용 — 정식 오픈 전까지 '준비중' 페이지 */}
       <Route path="/order" element={<Order />} />
       <Route path="/order/complete" element={<OrderComplete />} />

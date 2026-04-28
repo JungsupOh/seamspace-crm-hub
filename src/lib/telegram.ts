@@ -121,6 +121,53 @@ export function notifyWebLicenseIssued(params: {
   );
 }
 
+// ── 럭키세븐 그룹 신청 접수 알림 ──────────────────────────────
+export function notifyLuckySevenGroup(params: {
+  groupCode: string;
+  campaignName: string;
+  leaderName: string;
+  leaderSchoolName: string;
+  memberCount: number;
+  paymentGroupCount: number;
+  totalAmount: number;
+}): void {
+  const { groupCode, campaignName, leaderName, leaderSchoolName, memberCount, paymentGroupCount, totalAmount } = params;
+  sendTelegramNotification(
+    `🎯 <b>럭키세븐 그룹 신청</b>\n\n` +
+    `📋 ${campaignName}\n` +
+    `🆔 ${groupCode}\n` +
+    `🏫 대표 ${leaderName} (${leaderSchoolName})\n` +
+    `👥 멤버 ${memberCount}명 / 결제 묶음 ${paymentGroupCount}건\n` +
+    `💰 ${totalAmount.toLocaleString()}원`
+  );
+}
+
+// ── 럭키세븐 결제 완료 알림 ──────────────────────────────
+export function notifyLuckySevenPayment(params: {
+  groupCode: string;
+  campaignName: string;
+  leaderName: string;
+  leaderSchoolName: string;
+  payerName: string;
+  payerOrgName?: string | null;
+  amount: number;
+  paidCount: number;
+  totalCount: number;
+  manual?: boolean;
+}): void {
+  const { groupCode, campaignName, leaderName, leaderSchoolName, payerName, payerOrgName, amount, paidCount, totalCount, manual } = params;
+  const tag = manual ? ' (수동확인)' : '';
+  const orgStr = payerOrgName ? ` (${payerOrgName})` : '';
+  sendTelegramNotification(
+    `💰 <b>럭키세븐 결제 완료${tag}</b>\n\n` +
+    `📋 ${campaignName}\n` +
+    `🆔 ${groupCode} / 대표 ${leaderName} (${leaderSchoolName})\n` +
+    `🧾 결제자: ${payerName}${orgStr}\n` +
+    `💳 ${amount.toLocaleString()}원\n` +
+    `📊 진행: ${paidCount}/${totalCount} 묶음 완료`
+  );
+}
+
 // ── 상품 주문 알림 ──────────────────────────────────
 export function notifyShopOrder(params: {
   orderId: string;

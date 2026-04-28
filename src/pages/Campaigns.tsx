@@ -18,6 +18,7 @@ import {
 import { QRCodeCanvas } from 'qrcode.react';
 import { apiCreateCoupon, apiSendCoupon } from '@/lib/coupons';
 import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
+import { LuckySevenGroupDialog } from '@/components/LuckySevenGroupDialog';
 import { getRecentSendLogs, canSendUH2821, todayUHStage, type AlimtalkRecipient } from '@/lib/alimtalk';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -292,6 +293,7 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
     title:       initial?.title       ?? '',
     description: initial?.description ?? '',
     image_url:   initial?.image_url   ?? '',
+    slug:        initial?.slug        ?? '',
     start_date:  initial?.start_date  ?? '',
     end_date:    initial?.end_date    ?? '',
     status:      (initial?.status     ?? 'active') as Campaign['status'],
@@ -319,7 +321,8 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
 
   const save = useMutation({
     mutationFn: async () => {
-      const { budget, actual_cost, ...rest } = form;
+      const { budget, actual_cost, slug: rawSlug, ...rest } = form;
+      const userSlug = rawSlug.trim();
       const body: Partial<Campaign> = {
         ...rest,
         status: form.status as Campaign['status'],
@@ -327,11 +330,12 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
         actual_cost: actual_cost ? Number(actual_cost) : undefined,
       };
       if (isEdit) {
-        // 기존 캠페인에 slug 없으면 자동 생성 (구 events에서 마이그레이션된 경우 대응)
-        if (!initial!.slug) body.slug = generateSlug();
+        // slug 입력 있으면 사용, 없으면 기존 slug 유지 (없을 시 자동 생성 — 구 events 마이그레이션 대응)
+        body.slug = userSlug || initial!.slug || generateSlug();
         await updateCampaign(initial!.id, body);
       } else {
-        await createCampaign({ ...(body as Omit<Campaign, 'id' | 'created_at'>), slug: generateSlug() });
+        // 신규: slug 입력 있으면 사용, 없으면 랜덤 생성
+        await createCampaign({ ...(body as Omit<Campaign, 'id' | 'created_at'>), slug: userSlug || generateSlug() });
       }
     },
     onSuccess: () => {
@@ -371,6 +375,24 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
           <div className="space-y-1">
             <Label className="text-xs">공개 폼 제목 <span className="text-muted-foreground">(사용자 노출)</span></Label>
             <Input value={form.title} onChange={e => f('title', e.target.value)} placeholder="2026 봄학기 심스페이스 체험 신청" className="h-8 text-sm" />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">
+              슬러그 (URL 키)
+              <span className="text-muted-foreground ml-1">— 비우면 자동 생성, 럭키세븐은 <code className="text-[10px] bg-muted px-1 rounded">lucky-seven</code></span>
+            </Label>
+            <Input
+              value={form.slug}
+              onChange={e => f('slug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+              placeholder="lucky-seven"
+              className="h-8 text-sm font-mono"
+            />
+            {form.slug && (
+              <p className="text-[10px] text-muted-foreground">
+                공개 URL: {form.slug === 'lucky-seven' ? `${window.location.origin}/event/lucky-seven` : `${window.location.origin}/c/${form.slug}`}
+              </p>
+            )}
           </div>
 
           {/* 이미지 — 컴팩트 */}
@@ -1464,6 +1486,8 @@ interface CampaignCardProps {
 
 function CampaignCard({ campaign, convertedPhones, onEdit, onDelete, canEdit }: CampaignCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [lsDialogOpen, setLsDialogOpen] = useState(false);
+  const isLuckySeven = campaign.slug === 'lucky-seven';
 
   const { data: leads } = useQuery({
     queryKey: ['campaign_leads', campaign.id],
@@ -1517,12 +1541,25 @@ function CampaignCard({ campaign, convertedPhones, onEdit, onDelete, canEdit }: 
         {/* 수정/삭제 */}
         {canEdit && (
           <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+            {isLuckySeven && (
+              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setLsDialogOpen(true)}>
+                럭키세븐 그룹
+              </Button>
+            )}
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => onEdit(campaign)}>수정</Button>
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-red-500 hover:text-red-600 hover:bg-red-50"
               onClick={() => onDelete(campaign.id)}>삭제</Button>
           </div>
         )}
       </div>
+      {isLuckySeven && lsDialogOpen && (
+        <LuckySevenGroupDialog
+          open={lsDialogOpen}
+          onClose={() => setLsDialogOpen(false)}
+          campaignId={campaign.id}
+          campaignName={campaign.name}
+        />
+      )}
 
       {/* 펼쳐진 수신자 목록 */}
       {expanded && (
@@ -1538,7 +1575,9 @@ function CampaignCard({ campaign, convertedPhones, onEdit, onDelete, canEdit }: 
 // 공개 폼 URL + QR 섹션
 function CampaignShareSection({ campaign }: { campaign: Campaign }) {
   const [qrOpen, setQrOpen] = useState(false);
-  const formUrl = `${window.location.origin}/c/${campaign.slug}`;
+  const formUrl = campaign.slug === 'lucky-seven'
+    ? `${window.location.origin}/event/lucky-seven`
+    : `${window.location.origin}/c/${campaign.slug}`;
   const qrCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const copyUrl = async () => {
