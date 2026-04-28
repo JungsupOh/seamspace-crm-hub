@@ -199,6 +199,41 @@ export async function getAllLicenses(): Promise<DealLicenseRecord[]> {
   );
 }
 
+// ── 캠페인 라이선스 전체 조회 (체험 파이프라인용) ────
+export interface CampaignLicensePipelineRow {
+  id:                 string;
+  campaign_id:        string;
+  status:             '대기' | '사용중' | '만료' | '이탈' | '삭제';
+  service_expire_at:  string | null;
+  created_at:         string;
+  contact_phone:      string | null;
+  contact_name:       string | null;
+  org_name:           string | null;
+  duration:           string | null;
+  user_count:         string | null;
+  coupon_code:        string | null;
+}
+
+export async function getAllCampaignLicenses(): Promise<CampaignLicensePipelineRow[]> {
+  const url = `${SUPABASE_URL}/rest/v1/campaign_licenses`
+    + `?select=id,campaign_id,status,service_expire_at,created_at,contact_phone,contact_name,org_name,duration,user_count,coupon_code`
+    + `&order=created_at.desc&limit=5000`;
+  const res = await fetch(url, { headers: DB_HEADERS });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+// 딜로 전환된 phone 집합 (캠페인 라이선스 → deal_licenses 매칭)
+export async function getConvertedPhonesSet(): Promise<Set<string>> {
+  const url = `${SUPABASE_URL}/rest/v1/deal_licenses?select=contact_phone&contact_phone=not.is.null&limit=5000`;
+  const res = await fetch(url, { headers: DB_HEADERS });
+  if (!res.ok) return new Set();
+  const data: { contact_phone: string }[] = await res.json();
+  const phones = new Set<string>();
+  data.forEach(d => { if (d.contact_phone) phones.add(d.contact_phone.replace(/\D/g, '')); });
+  return phones;
+}
+
 // ── 잠자는 체험권 — 캠페인 등록된 미등록 체험권 ─────
 // 정의: campaign_licenses 중 status='대기' (발급됐지만 사용 시작 안 함)
 //       + contact_phone, coupon_code 보유 (발송 가능 조건)

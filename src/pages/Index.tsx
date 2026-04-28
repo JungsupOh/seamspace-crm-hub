@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useContacts, useDeals } from '@/hooks/use-airtable';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getAllLicenses, getSleepingCampaignLicenses, type DealLicenseRecord, type SleepingCampaignLicense } from '@/lib/storage';
+import { getAllLicenses, getSleepingCampaignLicenses, getAllCampaignLicenses, getConvertedPhonesSet, type DealLicenseRecord, type SleepingCampaignLicense } from '@/lib/storage';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
 import { FlaskConical, Briefcase, TrendingUp, AlertCircle, Clock, ArrowRight, CheckCircle2, LogIn, Phone, Users, Send, ChevronDown, MessageSquare, Moon } from 'lucide-react';
-import { DEAL_STAGE_LABELS, STAGE_COLOR, normalizeStage } from '@/lib/grades';
+import { DEAL_STAGE_LABELS, STAGE_COLOR } from '@/lib/grades';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
@@ -60,7 +60,7 @@ const toRecipient = (l: ExpiringLic): AlimtalkRecipient => ({
 
 export default function Dashboard() {
   const qc = useQueryClient();
-  const { data: contacts, isLoading: cl } = useContacts();
+  const { isLoading: cl } = useContacts();
   const { data: deals,    isLoading: dl } = useDeals();
   const { data: licenses, isLoading: ll } = useQuery({
     queryKey: ['licenses'],
@@ -74,6 +74,16 @@ export default function Dashboard() {
   const { data: sleepingLicenses } = useQuery({
     queryKey: ['sleeping_campaign_licenses'],
     queryFn:  getSleepingCampaignLicenses,
+    staleTime: 60 * 1000,
+  });
+  const { data: campaignLics } = useQuery({
+    queryKey: ['campaign_licenses_all'],
+    queryFn:  getAllCampaignLicenses,
+    staleTime: 60 * 1000,
+  });
+  const { data: convertedPhonesSet } = useQuery({
+    queryKey: ['converted_phones_set'],
+    queryFn:  getConvertedPhonesSet,
     staleTime: 60 * 1000,
   });
 
@@ -334,33 +344,56 @@ export default function Dashboard() {
       />
 
       <div className="grid lg:grid-cols-2 gap-6">
-        {/* 체험 파이프라인 */}
+        {/* 체험 파이프라인 — 캠페인 등록 체험권 기준 */}
         <div className="surface-card ring-container p-5">
           <h2 className="font-semibold mb-1">체험 파이프라인</h2>
-          <p className="text-xs text-muted-foreground mb-4">이용권 상태별 현황</p>
-          <div className="space-y-2">
-            {[
-              { label: '대기 (미사용)',    count: allLics.filter(l => l.status === '대기').length,   color: 'bg-slate-200', text: 'text-slate-600' },
-              { label: '사용중',          count: activeTrials.length,                                color: 'bg-teal-400',  text: 'text-teal-700' },
-              { label: '만료 임박 D-30',  count: expiringSoon.length,                                color: 'bg-amber-400', text: 'text-amber-700' },
-              { label: '만료 (미전환)',    count: expiredUnconverted.length,                          color: 'bg-orange-300',text: 'text-orange-700' },
-              { label: '구매 고객',       count: (contacts ?? []).filter(c => ['구매','유지'].includes(normalizeStage(c.fields.Lead_Stage))).length, color: 'bg-primary', text: 'text-primary-foreground' },
-            ].map(row => {
-              const max = Math.max(...[activeTrials.length, allLics.filter(l=>l.status==='대기').length, expiredUnconverted.length], 1);
-              const pct = Math.max(Math.round((row.count / max) * 100), row.count > 0 ? 4 : 0);
-              return (
-                <div key={row.label} className="flex items-center gap-3">
-                  <div className="w-24 shrink-0 text-xs text-muted-foreground text-right">{row.label}</div>
-                  <div className="flex-1 bg-muted/40 rounded-full h-5 overflow-hidden">
-                    <div className={`h-full rounded-full flex items-center justify-end pr-2 ${row.color} transition-all`}
-                      style={{ width: `${pct}%` }}>
-                      {row.count > 0 && <span className={`text-[11px] font-semibold ${row.text}`}>{num(row.count)}</span>}
+          <p className="text-xs text-muted-foreground mb-4">캠페인을 통한 체험권 발송 → 구매 전환 흐름</p>
+          {(() => {
+            const camAll = campaignLics ?? [];
+            const camPending  = camAll.filter(l => l.status === '대기').length;
+            const camActive   = camAll.filter(l => l.status === '사용중');
+            const camExpiring = camActive.filter(l => {
+              if (!l.service_expire_at) return false;
+              const dd = dday(l.service_expire_at);
+              return dd >= 0 && dd <= 30;
+            }).length;
+            const camExpired  = camAll.filter(l => l.status === '만료').length;
+            const phones = convertedPhonesSet ?? new Set<string>();
+            const camConverted = camAll.filter(l => {
+              const p = (l.contact_phone ?? '').replace(/\D/g, '');
+              return p && phones.has(p);
+            }).length;
+
+            const rows = [
+              { label: '대기 (미사용)',     count: camPending,    color: 'bg-slate-200',   text: 'text-slate-600' },
+              { label: '사용중',           count: camActive.length, color: 'bg-teal-400',  text: 'text-teal-700' },
+              { label: '만료 임박 D-30',   count: camExpiring,   color: 'bg-amber-400',   text: 'text-amber-700' },
+              { label: '만료',             count: camExpired,    color: 'bg-orange-300',  text: 'text-orange-700' },
+              { label: '딜 전환',          count: camConverted,  color: 'bg-primary',     text: 'text-primary-foreground' },
+            ];
+            const max = Math.max(camAll.length, 1);
+            return (
+              <div className="space-y-2">
+                {rows.map(row => {
+                  const pct = Math.max(Math.round((row.count / max) * 100), row.count > 0 ? 4 : 0);
+                  return (
+                    <div key={row.label} className="flex items-center gap-3">
+                      <div className="w-24 shrink-0 text-xs text-muted-foreground text-right">{row.label}</div>
+                      <div className="flex-1 bg-muted/40 rounded-full h-5 overflow-hidden">
+                        <div className={`h-full rounded-full flex items-center justify-end pr-2 ${row.color} transition-all`}
+                          style={{ width: `${pct}%` }}>
+                          {row.count > 0 && <span className={`text-[11px] font-semibold ${row.text}`}>{num(row.count)}</span>}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                  );
+                })}
+                <p className="text-[10px] text-muted-foreground text-right pt-1">
+                  총 캠페인 라이선스 {num(camAll.length)}건 (전체 체험권 활성 {num(activeTrials.length)}건은 KPI 카드 참조)
+                </p>
+              </div>
+            );
+          })()}
 
           {/* 잠자는 체험권 액션 바 — 캠페인 등록된 미등록 체험권 */}
           <div className="mt-4 pt-4 border-t border-border space-y-2">
