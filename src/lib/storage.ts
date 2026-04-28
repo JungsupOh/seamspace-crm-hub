@@ -199,73 +199,44 @@ export async function getAllLicenses(): Promise<DealLicenseRecord[]> {
   );
 }
 
-// ── 미사용(잠자는) 체험권 조회 ─────────────────────
-export interface UnusedCouponRow {
-  id:               number;
-  coupon_code:      string;
-  created_at:       string;
-  duration:         number;
-  user_limit:       number;
-  descript:         string | null;
-  extracted_name:   string | null;
-  link_confirmed:   boolean | null;
-  admin_name:       string | null;
-  admin_phone:      string | null;
-}
-
-// 최근 N일 발급된 미사용 체험권 (link_confirmed=false 제외, 즉 매칭 실패 명시 마킹된 건 제외)
-// PostgREST에서 NOT.EQ.FALSE는 NULL을 제외하므로 OR로 명시 (NULL 또는 TRUE)
-export async function getRecentUnusedCoupons(daysBack = 180): Promise<UnusedCouponRow[]> {
-  const since = new Date(Date.now() - daysBack * 86400_000).toISOString();
-  const url = `${SUPABASE_URL}/rest/v1/mdiary_coupons`
-    + `?select=id,coupon_code,created_at,duration,user_limit,descript,extracted_name,link_confirmed,admin_name,admin_phone`
-    + `&is_used=eq.false`
-    + `&or=(link_confirmed.is.null,link_confirmed.eq.true)`
-    + `&created_at=gte.${since}`
-    + `&order=created_at.desc&limit=1000`;
-  const res = await fetch(url, { headers: DB_HEADERS });
-  if (!res.ok) return [];
-  return res.json();
-}
-
-// 미사용 체험권 — campaign_licenses와 매핑해서 contact_phone 보강
-export interface UnusedWithContact extends UnusedCouponRow {
-  contact_name?:  string;
-  contact_phone?: string;
+// ── 잠자는 체험권 — 캠페인 등록된 미등록 체험권 ─────
+// 정의: campaign_licenses 중 status='대기' (발급됐지만 사용 시작 안 함)
+//       + contact_phone, coupon_code 보유 (발송 가능 조건)
+export interface SleepingCampaignLicense {
+  id:             string;
+  campaign_id:    string;
+  campaign_name?: string;
+  coupon_code:    string;
+  contact_name:   string;
+  contact_phone:  string;
   org_name?:      string;
-  campaign_id?:   string;
+  duration:       string;
+  user_count:     string;
+  created_at:     string;
 }
 
-export async function getUnusedCouponsWithContact(daysBack = 180): Promise<UnusedWithContact[]> {
-  const unused = await getRecentUnusedCoupons(daysBack);
-  if (unused.length === 0) return [];
+export async function getSleepingCampaignLicenses(): Promise<SleepingCampaignLicense[]> {
+  // 1. campaign_licenses 대기 중인 것 (연락처 + 쿠폰 보유)
+  const lcUrl = `${SUPABASE_URL}/rest/v1/campaign_licenses`
+    + `?select=id,campaign_id,coupon_code,contact_name,contact_phone,org_name,duration,user_count,created_at`
+    + `&status=eq.${encodeURIComponent('대기')}`
+    + `&contact_phone=not.is.null`
+    + `&coupon_code=not.is.null`
+    + `&order=created_at.desc&limit=1000`;
+  const lcRes = await fetch(lcUrl, { headers: DB_HEADERS });
+  if (!lcRes.ok) return [];
+  const licenses: Omit<SleepingCampaignLicense, 'campaign_name'>[] = await lcRes.json();
+  if (licenses.length === 0) return [];
 
-  // coupon_code 목록으로 campaign_licenses 매핑
-  const codes = unused.map(u => u.coupon_code).filter(Boolean);
-  const codeChunks: string[][] = [];
-  for (let i = 0; i < codes.length; i += 100) codeChunks.push(codes.slice(i, i + 100));
+  // 2. 캠페인 이름 매핑
+  const campaignIds = Array.from(new Set(licenses.map(l => l.campaign_id)));
+  const inList = campaignIds.map(id => `"${id}"`).join(',');
+  const camUrl = `${SUPABASE_URL}/rest/v1/campaigns?select=id,name&id=in.(${encodeURIComponent(inList)})`;
+  const camRes = await fetch(camUrl, { headers: DB_HEADERS });
+  const campaigns: Array<{ id: string; name: string }> = camRes.ok ? await camRes.json() : [];
+  const nameMap = new Map(campaigns.map(c => [c.id, c.name]));
 
-  const matchMap = new Map<string, { contact_name?: string; contact_phone?: string; org_name?: string; campaign_id?: string }>();
-  for (const chunk of codeChunks) {
-    const inList = chunk.map(c => `"${c}"`).join(',');
-    const url = `${SUPABASE_URL}/rest/v1/campaign_licenses`
-      + `?select=coupon_code,contact_name,contact_phone,org_name,campaign_id`
-      + `&coupon_code=in.(${encodeURIComponent(inList)})`;
-    const res = await fetch(url, { headers: DB_HEADERS });
-    if (!res.ok) continue;
-    const rows: Array<{ coupon_code: string; contact_name?: string; contact_phone?: string; org_name?: string; campaign_id?: string }> = await res.json();
-    rows.forEach(r => matchMap.set(r.coupon_code, {
-      contact_name:  r.contact_name,
-      contact_phone: r.contact_phone,
-      org_name:      r.org_name,
-      campaign_id:   r.campaign_id,
-    }));
-  }
-
-  return unused.map(u => ({
-    ...u,
-    ...(matchMap.get(u.coupon_code) ?? {}),
-  }));
+  return licenses.map(l => ({ ...l, campaign_name: nameMap.get(l.campaign_id) }));
 }
 
 // ── Supabase DB — deal_quotes 테이블 ─────────────

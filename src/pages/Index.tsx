@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useContacts, useDeals } from '@/hooks/use-airtable';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getAllLicenses, getUnusedCouponsWithContact, type DealLicenseRecord, type UnusedWithContact } from '@/lib/storage';
+import { getAllLicenses, getSleepingCampaignLicenses, type DealLicenseRecord, type SleepingCampaignLicense } from '@/lib/storage';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
 import { FlaskConical, Briefcase, TrendingUp, AlertCircle, Clock, ArrowRight, CheckCircle2, LogIn, Phone, Users, Send, ChevronDown, MessageSquare, Moon } from 'lucide-react';
 import { DEAL_STAGE_LABELS, STAGE_COLOR, normalizeStage } from '@/lib/grades';
@@ -71,9 +71,9 @@ export default function Dashboard() {
     queryFn:  getRecentSendLogs,
     staleTime: 30 * 1000,
   });
-  const { data: unusedCoupons } = useQuery({
-    queryKey: ['unused_coupons'],
-    queryFn:  () => getUnusedCouponsWithContact(180),
+  const { data: sleepingLicenses } = useQuery({
+    queryKey: ['sleeping_campaign_licenses'],
+    queryFn:  getSleepingCampaignLicenses,
     staleTime: 60 * 1000,
   });
 
@@ -134,35 +134,26 @@ export default function Dashboard() {
   const handleOpenSend = (key: GroupKey) => { setSendGroup(key); setSendOpen(true); };
   const sendTargets = sendGroup ? targetsForGroup(sendGroup) : null;
 
-  // ── 잠자는 (미사용) 체험권 ────────────────────────
-  const sleeping: UnusedWithContact[] = unusedCoupons ?? [];
+  // ── 잠자는 체험권 — 캠페인 등록 미등록자 ─────────
+  const sleeping: SleepingCampaignLicense[] = sleepingLicenses ?? [];
   const sleepingRecent30 = sleeping.filter(c => {
     const d = new Date(c.created_at).getTime();
     return Date.now() - d <= 30 * 86400_000;
   });
 
-  // 발송 가능 = (admin_phone 또는 campaign 매핑된 contact_phone) 보유 + UH_initial 미발송
-  const sleepingSendable = sleeping.filter(c => {
-    const phone = c.admin_phone ?? c.contact_phone ?? '';
-    if (!phone) return false;
-    const id = `mdiary_${c.id}`;
-    return !isAlreadySent(sentMap, 'mdiary', id, 'UH_2821', 'UH_initial');
-  });
-  const sleepingAlreadySent = sleeping.filter(c => {
-    const phone = c.admin_phone ?? c.contact_phone ?? '';
-    if (!phone) return false;
-    const id = `mdiary_${c.id}`;
-    return isAlreadySent(sentMap, 'mdiary', id, 'UH_2821', 'UH_initial');
-  }).length;
+  const sleepingSendable = sleeping.filter(c =>
+    !isAlreadySent(sentMap, 'campaign', c.id, 'UH_2821', 'UH_initial')
+  );
+  const sleepingAlreadySent = sleeping.length - sleepingSendable.length;
 
   const sleepingRecipients: AlimtalkRecipient[] = sleepingSendable.map(c => ({
-    license_id:     `mdiary_${c.id}`,
-    license_source: 'mdiary',
-    name:           c.extracted_name ?? c.contact_name ?? c.admin_name ?? '선생님',
-    phone:          c.contact_phone ?? c.admin_phone ?? '',
+    license_id:     c.id,
+    license_source: 'campaign',
+    name:           c.contact_name,
+    phone:          c.contact_phone,
     group_name:     c.org_name ?? null,
-    user_limit:     String(c.user_limit),
-    duration:       String(c.duration),
+    user_limit:     c.user_count,
+    duration:       c.duration,
     expiry_date:    null,
     coupon_code:    c.coupon_code,
   }));
@@ -371,7 +362,7 @@ export default function Dashboard() {
             })}
           </div>
 
-          {/* 잠자는 체험권 액션 바 — 발급 후 사용 미시작 추적 */}
+          {/* 잠자는 체험권 액션 바 — 캠페인 등록된 미등록 체험권 */}
           <div className="mt-4 pt-4 border-t border-border space-y-2">
             <div className="flex items-center justify-between">
               <button
@@ -388,7 +379,7 @@ export default function Dashboard() {
               </div>
             </div>
             <p className="text-[11px] text-muted-foreground">
-              발급되었지만 아직 사용 시작 안 한 체험권 (link_confirmed≠false 한정 · 매칭 실패 명시 항목 제외)
+              캠페인을 통해 발급되었지만 아직 사용 시작 안 한 체험권 (전체 캠페인 통합)
             </p>
             <div className="flex items-center gap-2">
               <Button
@@ -399,41 +390,43 @@ export default function Dashboard() {
                 <MessageSquare className="h-3.5 w-3.5 mr-1" />
                 {sleepingSendable.length > 0
                   ? `미등록 알림 ${num(sleepingSendable.length)}명 발송`
-                  : '발송 가능 대상 없음'}
+                  : (sleepingAlreadySent > 0 ? '전원 발송 완료' : '대상 없음')}
               </Button>
-              <Link to="/licenses" className="text-[11px] text-primary hover:underline">
-                이용권 관리 → 자동 매칭
+              <Link to="/campaigns" className="text-[11px] text-primary hover:underline">
+                캠페인별 보기 →
               </Link>
               {sleepingAlreadySent > 0 && (
                 <span className="text-[10px] text-muted-foreground ml-auto">이미 {num(sleepingAlreadySent)}명 발송됨</span>
               )}
             </div>
             {sleepingOpen && (
-              <div className="mt-2 max-h-[260px] overflow-y-auto rounded border border-border divide-y divide-border">
+              <div className="mt-2 max-h-[280px] overflow-y-auto rounded border border-border divide-y divide-border">
                 {sleeping.length === 0 ? (
                   <div className="px-3 py-6 text-center text-xs text-muted-foreground">잠자는 체험권 없음</div>
                 ) : sleeping.slice(0, 50).map(c => {
-                  const phone = c.contact_phone ?? c.admin_phone ?? '';
-                  const name  = c.extracted_name ?? c.contact_name ?? c.admin_name ?? '-';
                   const days = Math.floor((Date.now() - new Date(c.created_at).getTime()) / 86400_000);
+                  const sent = isAlreadySent(sentMap, 'campaign', c.id, 'UH_2821', 'UH_initial');
                   return (
-                    <div key={c.id} className="px-3 py-1.5 text-[11px] flex items-center gap-2">
+                    <div key={c.id} className={`px-3 py-1.5 text-[11px] flex items-center gap-2 ${sent ? 'opacity-50' : ''}`}>
                       <span className="font-mono text-muted-foreground shrink-0">{c.coupon_code}</span>
                       <span className="text-muted-foreground shrink-0">D+{num(days)}</span>
-                      <span className="font-medium truncate">{name}</span>
-                      <span className="text-muted-foreground truncate">{c.org_name ?? c.descript ?? ''}</span>
-                      <span className="ml-auto text-muted-foreground shrink-0 whitespace-nowrap">{c.duration}개월·{num(c.user_limit)}명</span>
-                      {phone ? (
-                        <span className="text-teal-600 shrink-0 whitespace-nowrap">📞</span>
+                      <span className="font-medium truncate">{c.contact_name}</span>
+                      <span className="text-muted-foreground truncate">{c.org_name ?? '-'}</span>
+                      {c.campaign_name && (
+                        <span className="text-[10px] text-indigo-600 truncate shrink-0 max-w-[180px]">[{c.campaign_name}]</span>
+                      )}
+                      <span className="ml-auto text-muted-foreground shrink-0 whitespace-nowrap">{c.duration}개월·{num(Number(c.user_count))}명</span>
+                      {sent ? (
+                        <span className="text-teal-600 shrink-0 whitespace-nowrap" title="이미 발송됨">✓</span>
                       ) : (
-                        <span className="text-red-400 shrink-0 whitespace-nowrap" title="연락처 미매칭 — 자동 매칭 필요">⚠️</span>
+                        <span className="text-teal-600 shrink-0 whitespace-nowrap">📞</span>
                       )}
                     </div>
                   );
                 })}
                 {sleeping.length > 50 && (
                   <div className="px-3 py-2 text-center text-[10px] text-muted-foreground">
-                    ... 외 {num(sleeping.length - 50)}건 (이용권 관리 페이지에서 전체 보기)
+                    ... 외 {num(sleeping.length - 50)}건 (캠페인 페이지에서 전체 보기)
                   </div>
                 )}
               </div>
