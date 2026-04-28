@@ -103,6 +103,14 @@ export default function LuckySevenForm() {
     return arr;
   });
 
+  // ── Step 2: 멤버 학교 검색 (멤버별 NEIS 검색) ──
+  // 한 번에 한 멤버의 드롭다운만 활성화. activeMemberSchoolIdx로 추적.
+  const [activeMemberSchoolIdx, setActiveMemberSchoolIdx] = useState<number | null>(null);
+  const [memberSchoolResults, setMemberSchoolResults] = useState<SchoolInfo[]>([]);
+  const [memberSchoolSearching, setMemberSchoolSearching] = useState(false);
+  const memberSearchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const membersSectionRef = useRef<HTMLDivElement>(null);
+
   // ── Step 3: 결제 묶음 ──
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('leader_all');
   const [paymentGroups, setPaymentGroups] = useState<PaymentGroupDraft[]>([]);
@@ -153,10 +161,41 @@ export default function LuckySevenForm() {
       if (schoolRef.current && !schoolRef.current.contains(e.target as Node)) {
         setShowSchoolDropdown(false);
       }
+      if (membersSectionRef.current && !membersSectionRef.current.contains(e.target as Node)) {
+        setActiveMemberSchoolIdx(null);
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  // 멤버 학교 검색 (디바운스)
+  const handleMemberSchoolSearch = (idx: number, query: string) => {
+    setActiveMemberSchoolIdx(idx);
+    updateMember(idx, { schoolName: query });
+    if (memberSearchTimerRef.current) clearTimeout(memberSearchTimerRef.current);
+    if (query.trim().length < 2) {
+      setMemberSchoolResults([]);
+      return;
+    }
+    setMemberSchoolSearching(true);
+    memberSearchTimerRef.current = setTimeout(async () => {
+      try {
+        const results = await searchSchools(query);
+        setMemberSchoolResults(results.slice(0, 20));
+      } catch {
+        setMemberSchoolResults([]);
+      } finally {
+        setMemberSchoolSearching(false);
+      }
+    }, 300);
+  };
+
+  const selectMemberSchool = (idx: number, s: SchoolInfo) => {
+    updateMember(idx, { schoolName: s.name });
+    setActiveMemberSchoolIdx(null);
+    setMemberSchoolResults([]);
+  };
 
   // ── Step 1 → Step 2: 대표자 정보를 0번 멤버에 동기화 ──
   useEffect(() => {
@@ -596,7 +635,7 @@ export default function LuckySevenForm() {
                 대표자 포함 <strong className="text-foreground">{MIN_MEMBERS}~{MAX_MEMBERS}명</strong>의 동료 선생님 정보를 입력해주세요. 모든 멤버는 소속/이름/휴대폰/이메일이 필요합니다.
               </div>
 
-              <div className="space-y-3">
+              <div ref={membersSectionRef} className="space-y-3">
                 {members.map((m, idx) => (
                   <div key={idx} className={`rounded-lg border p-3 space-y-2 ${idx === 0 ? 'bg-primary/5 border-primary/30' : 'border-border'}`}>
                     <div className="flex items-center justify-between">
@@ -609,13 +648,47 @@ export default function LuckySevenForm() {
                         </button>
                       )}
                     </div>
-                    <Input
-                      value={m.schoolName}
-                      onChange={(e) => updateMember(idx, { schoolName: e.target.value })}
-                      placeholder="소속 학교"
-                      className="h-9 text-sm"
-                      disabled={idx === 0}
-                    />
+
+                    {/* 소속 학교 — 0번(대표자)은 자동 채움, 나머지는 NEIS 검색 */}
+                    {idx === 0 ? (
+                      <Input value={m.schoolName} placeholder="소속 학교" className="h-9 text-sm" disabled />
+                    ) : (
+                      <div className="relative">
+                        <div className="relative">
+                          <Input
+                            value={m.schoolName}
+                            onChange={(e) => handleMemberSchoolSearch(idx, e.target.value)}
+                            onFocus={() => {
+                              setActiveMemberSchoolIdx(idx);
+                              if (m.schoolName.trim().length >= 2) handleMemberSchoolSearch(idx, m.schoolName);
+                            }}
+                            placeholder="학교명 검색 (2자 이상)"
+                            className="h-9 text-sm pr-8"
+                          />
+                          <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                            {activeMemberSchoolIdx === idx && memberSchoolSearching
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                              : <Search className="h-3.5 w-3.5 text-muted-foreground" />}
+                          </div>
+                        </div>
+                        {activeMemberSchoolIdx === idx && memberSchoolResults.length > 0 && (
+                          <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg max-h-56 overflow-y-auto">
+                            {memberSchoolResults.map((s, i) => (
+                              <button
+                                key={i}
+                                type="button"
+                                onClick={() => selectMemberSchool(idx, s)}
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors"
+                              >
+                                <div className="font-medium">{s.name}</div>
+                                <div className="text-xs text-muted-foreground">{s.kind} · {s.eduOffice}</div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <Input
                       value={m.name}
                       onChange={(e) => updateMember(idx, { name: e.target.value })}
