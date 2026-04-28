@@ -32,7 +32,13 @@ function daysSince(dateStr: string): number {
   return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 
-type ExpiringLic = DealLicenseRecord & { dd: number; sentStage?: string };
+type ExpiringLic = DealLicenseRecord & {
+  dd: number;
+  sentStage?: string;
+  effectiveName?:  string | null;
+  effectivePhone?: string | null;
+  phoneSource?:    'admin' | 'deal' | null;
+};
 type GroupKey = 'urgent' | 'soon' | 'warn' | 'warnLate' | 'rest';
 
 const GROUP_META: Record<GroupKey, { label: string; range: string; stage: string; color: string; bg: string }> = {
@@ -54,8 +60,8 @@ const groupOf = (dd: number): GroupKey => {
 const toRecipient = (l: ExpiringLic): AlimtalkRecipient => ({
   license_id:     l.id,
   license_source: l.deal_id === 'mdiary' ? 'mdiary' : 'deal',
-  name:           l.admin_name ?? '',
-  phone:          l.admin_phone ?? '',
+  name:           l.effectiveName  ?? l.admin_name  ?? '',
+  phone:          l.effectivePhone ?? l.admin_phone ?? '',
   group_name:     l.group_name ?? l.org_name ?? null,
   user_limit:     String(l.user_count ?? ''),
   duration:       String(l.duration ?? ''),
@@ -138,7 +144,15 @@ export default function Dashboard() {
       for (const s of ['D-1', 'D-3', 'D-7']) {
         if (isAlreadySent(sentMap, source, l.id, 'UD_5369', s)) { sentStage = s; break; }
       }
-      return { ...l, sentStage };
+      // CRM Deal에서 결제자 정보 fallback (운영DB admin이 sync 안 된 경우 대비)
+      const matchedDeal = l.deal_id !== 'mdiary' ? dealMap.get(l.deal_id) : undefined;
+      const fallbackName  = matchedDeal?.fields.Contact_Name  ?? null;
+      const fallbackPhone = matchedDeal?.fields.Contact_Phone ?? null;
+      const effectiveName  = l.admin_name  ?? fallbackName;
+      const effectivePhone = l.admin_phone ?? fallbackPhone;
+      const phoneSource: 'admin' | 'deal' | null =
+        l.admin_phone ? 'admin' : (fallbackPhone ? 'deal' : null);
+      return { ...l, sentStage, effectiveName, effectivePhone, phoneSource };
     })
     .sort((a, b) => a.dd - b.dd);
 
@@ -156,7 +170,7 @@ export default function Dashboard() {
     const list = groups[key];
     if (key === 'rest') return { send: [], skipped: list.length };
     const stage = GROUP_META[key].stage;
-    const valid = list.filter(l => l.admin_name && l.admin_phone);
+    const valid = list.filter(l => l.effectiveName && l.effectivePhone);
     const send = valid.filter(l => l.sentStage !== stage);
     const skipped = (list.length - valid.length) + (valid.length - send.length);
     return { send, skipped };
@@ -518,7 +532,7 @@ function ExpiryGroupSection({
   const meta = GROUP_META[groupKey];
   const stage = meta.stage;
 
-  const validForSend = items.filter(l => l.admin_name && l.admin_phone);
+  const validForSend = items.filter(l => l.effectiveName && l.effectivePhone);
   const sendable = validForSend.filter(l => l.sentStage !== stage);
   const alreadySent = validForSend.filter(l => l.sentStage === stage).length;
   const noContact = items.length - validForSend.length;
@@ -602,17 +616,22 @@ function ExpiringCard({ l, onClick }: { l: ExpiringLic; onClick?: () => void }) 
         {l.edu_office_name && (
           <p className="text-[11px] text-muted-foreground truncate">{l.edu_office_name}</p>
         )}
-        {(l.admin_name || l.admin_phone) && (
+        {(l.effectiveName || l.effectivePhone) && (
           <div className="flex items-center gap-2 flex-wrap">
-            {l.admin_name && (
-              <span className="text-xs font-medium text-foreground">{l.admin_name} 선생님</span>
+            {l.effectiveName && (
+              <span className="text-xs font-medium text-foreground">{l.effectiveName} 선생님</span>
             )}
-            {l.admin_phone && (
-              <a href={`tel:${l.admin_phone}`}
+            {l.effectivePhone && (
+              <a href={`tel:${l.effectivePhone}`}
                 onClick={e => e.stopPropagation()}
                 className="text-xs text-primary flex items-center gap-0.5 hover:underline">
-                <Phone className="h-3 w-3" />{l.admin_phone}
+                <Phone className="h-3 w-3" />{l.effectivePhone}
               </a>
+            )}
+            {l.phoneSource === 'deal' && (
+              <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded" title="운영DB에 사용자 정보 없음 — CRM 결제자 연락처 사용">
+                결제자
+              </span>
             )}
           </div>
         )}
