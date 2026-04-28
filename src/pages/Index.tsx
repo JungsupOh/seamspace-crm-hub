@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getAllLicenses, getSleepingCampaignLicenses, getAllCampaignLicenses, getConvertedPhonesSet, type DealLicenseRecord, type SleepingCampaignLicense } from '@/lib/storage';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
 import { FlaskConical, Briefcase, TrendingUp, AlertCircle, Clock, ArrowRight, CheckCircle2, LogIn, Phone, Users, Send, ChevronDown, MessageSquare, Moon } from 'lucide-react';
-import { DEAL_STAGE_LABELS, STAGE_COLOR, isClosedDeal } from '@/lib/grades';
+import { DEAL_STAGES, DEAL_STAGE_LABELS, STAGE_COLOR, isClosedDeal } from '@/lib/grades';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
@@ -193,11 +193,9 @@ export default function Dashboard() {
   const thisMonthRevenue = thisMonthDeals.reduce((sum, d) =>
     sum + (d.fields.Final_Contract_Value ?? 0), 0);
 
-  // 진행중 딜 (종료 단계 제외 — 입금완료/딜취소/계약파기 + 레거시 호환)
+  // 진행중 딜 (종료 단계 제외) — 정렬은 ActiveDealsSection 내에서 사용자 선택
   const activeDeals = (deals ?? [])
-    .filter(d => !isClosedDeal(d.fields.Deal_Stage))
-    .sort((a, b) => (b.createdTime || '').localeCompare(a.createdTime || ''))
-    .slice(0, 8);
+    .filter(d => !isClosedDeal(d.fields.Deal_Stage));
 
   if (cl || dl || ll) return (
     <div className="space-y-6">
@@ -609,13 +607,57 @@ function ExpiringCard({ l }: { l: ExpiringLic }) {
   );
 }
 
-// ── 진행중 딜 섹션 (full-width) ─────────────────────
+// ── 진행중 딜 섹션 (full-width, 정렬 가능 컬럼) ───────
+type DealSortKey = 'date' | 'stage';
+type SortDir = 'asc' | 'desc';
+const STAGE_ORDER: Record<string, number> = Object.fromEntries(
+  DEAL_STAGES.map((s, i) => [s, i])
+);
+
+function getDealLastDate(d: AirtableRecordOfDeal): string | null {
+  const f = d.fields;
+  const dates = [
+    f.Quote_Date, f.Order_Date, f.Contract_Date, f.Payment_Date,
+    f.Receipt_Date, f.License_Send_Date, f.Created_Date,
+  ].filter(Boolean) as string[];
+  return dates.length > 0
+    ? dates.slice().sort().reverse()[0]
+    : (d.createdTime?.split('T')[0] ?? null);
+}
+
 function ActiveDealsSection({ deals }: { deals: AirtableRecordOfDeal[] }) {
+  const [sortKey, setSortKey] = useState<DealSortKey>('date');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
   const expiredDeals = deals.filter(d => {
     const isQuoteStage = ['체험권', '견적', '계약체결/구매'].includes(d.fields.Deal_Stage ?? '');
     const quoteAge = d.fields.Quote_Date ? daysSince(d.fields.Quote_Date) : null;
     return isQuoteStage && quoteAge !== null && quoteAge > 28;
   });
+
+  const sortedDeals = [...deals].sort((a, b) => {
+    if (sortKey === 'date') {
+      const dA = getDealLastDate(a) ?? '';
+      const dB = getDealLastDate(b) ?? '';
+      return sortDir === 'desc' ? dB.localeCompare(dA) : dA.localeCompare(dB);
+    }
+    // stage
+    const sA = STAGE_ORDER[a.fields.Deal_Stage ?? ''] ?? 999;
+    const sB = STAGE_ORDER[b.fields.Deal_Stage ?? ''] ?? 999;
+    return sortDir === 'asc' ? sA - sB : sB - sA;
+  });
+
+  const handleSort = (key: DealSortKey) => {
+    if (sortKey === key) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'date' ? 'desc' : 'asc');
+    }
+  };
+
+  const sortIcon = (key: DealSortKey) =>
+    sortKey !== key ? '' : sortDir === 'asc' ? ' ↑' : ' ↓';
 
   return (
     <div className="surface-card ring-container overflow-hidden">
@@ -642,12 +684,31 @@ function ActiveDealsSection({ deals }: { deals: AirtableRecordOfDeal[] }) {
           전체 보기 <ArrowRight className="h-3 w-3" />
         </Link>
       </div>
+
       {deals.length === 0 ? (
         <div className="px-5 py-8 text-center text-muted-foreground text-sm">진행중인 딜이 없습니다</div>
       ) : (
-        <div className="divide-y divide-border">
-          {deals.map(d => <ActiveDealRow key={d.id} d={d} />)}
-        </div>
+        <>
+          {/* 컬럼 헤더 (정렬 가능) */}
+          <div className="px-5 py-2 bg-muted/30 border-b border-border flex items-center gap-3 text-[11px] font-medium text-muted-foreground">
+            <button
+              onClick={() => handleSort('date')}
+              className={`w-24 shrink-0 text-left hover:text-foreground transition-colors ${sortKey === 'date' ? 'text-foreground' : ''}`}>
+              변경일{sortIcon('date')}
+            </button>
+            <span className="flex-1">학교 · 담당자 · 연락처</span>
+            <button
+              onClick={() => handleSort('stage')}
+              className={`w-28 shrink-0 text-center hover:text-foreground transition-colors ${sortKey === 'stage' ? 'text-foreground' : ''}`}>
+              단계{sortIcon('stage')}
+            </button>
+            <span className="w-24 shrink-0 text-right">금액</span>
+          </div>
+
+          <div className="divide-y divide-border max-h-[480px] overflow-y-auto">
+            {sortedDeals.map(d => <ActiveDealRow key={d.id} d={d} />)}
+          </div>
+        </>
       )}
     </div>
   );
@@ -658,68 +719,70 @@ function ActiveDealRow({ d }: { d: AirtableRecordOfDeal }) {
   const stageLabel = DEAL_STAGE_LABELS[f.Deal_Stage ?? ''] ?? f.Deal_Stage ?? '-';
   const stageColor = STAGE_COLOR[f.Deal_Stage ?? ''] ?? 'bg-muted text-muted-foreground';
 
-  // 최근 변경일자 — 단계별 입력 일자 + Created_Date 중 가장 최근
-  const dates: string[] = [
-    f.Quote_Date, f.Order_Date, f.Contract_Date, f.Payment_Date,
-    f.Receipt_Date, f.License_Send_Date, f.Created_Date,
-  ].filter(Boolean) as string[];
-  const lastDate = dates.length > 0
-    ? dates.slice().sort().reverse()[0]
-    : (d.createdTime?.split('T')[0] ?? null);
+  const lastDate = getDealLastDate(d);
   const lastDays = lastDate ? daysSince(lastDate) : null;
 
-  // 견적 28일 경과 = 자동 딜취소 후보
+  // 견적 28일 경과
   const isQuoteStage = ['체험권', '견적', '계약체결/구매'].includes(f.Deal_Stage ?? '');
   const quoteAge = f.Quote_Date ? daysSince(f.Quote_Date) : null;
   const expired = isQuoteStage && quoteAge !== null && quoteAge > 28;
 
   return (
-    <div className={`px-5 py-3 hover:bg-muted/30 transition-colors ${expired ? 'bg-red-50/40' : ''}`}>
-      <div className="flex items-start gap-4">
-        {/* 좌측: 학교/담당자/연락처 */}
-        <div className="flex-1 min-w-0 space-y-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-sm truncate">{f.Org_Name || f.Deal_Name || '-'}</span>
-            {f.Contact_Name && <span className="text-xs text-muted-foreground">· {f.Contact_Name}</span>}
-            {f.Contact_Phone && (
-              <a href={`tel:${f.Contact_Phone}`}
-                className="text-xs text-primary hover:underline flex items-center gap-0.5">
-                <Phone className="h-3 w-3" />{f.Contact_Phone}
-              </a>
-            )}
-          </div>
-          {f.Notes && (
-            <p className="text-[11px] text-muted-foreground line-clamp-1" title={f.Notes}>
-              💬 {f.Notes}
-            </p>
-          )}
-        </div>
-
-        {/* 우측: 단계/금액/변경일 */}
-        <div className="shrink-0 text-right space-y-0.5 min-w-[180px]">
-          <div className="flex items-center gap-2 justify-end">
-            {expired && (
-              <span className="text-[10px] text-red-600 font-semibold whitespace-nowrap">
-                ⚠ 견적 {num(quoteAge ?? 0)}일 경과
-              </span>
-            )}
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${stageColor}`}>
-              {stageLabel}
-            </span>
-          </div>
-          {f.Final_Contract_Value != null && f.Final_Contract_Value > 0 && (
-            <p className="text-sm font-semibold tabular-nums">
-              {f.Final_Contract_Value >= 10_000
-                ? `${Math.round(f.Final_Contract_Value / 10_000).toLocaleString()}만원`
-                : `${f.Final_Contract_Value.toLocaleString()}원`}
-            </p>
-          )}
-          {lastDate && lastDays !== null && (
+    <div className={`px-5 py-2 flex items-center gap-3 hover:bg-muted/30 transition-colors ${expired ? 'bg-red-50/40' : ''}`}>
+      {/* 1. 변경일 (좌측 주요 지표) */}
+      <div className="w-24 shrink-0">
+        {lastDate ? (
+          <>
+            <p className="text-xs font-medium tabular-nums">{lastDate}</p>
             <p className="text-[10px] text-muted-foreground">
-              {lastDate} · {lastDays === 0 ? '오늘' : `${num(lastDays)}일 전`}
+              {lastDays === 0 ? '오늘' : `${num(lastDays ?? 0)}일 전`}
             </p>
+          </>
+        ) : <span className="text-[10px] text-muted-foreground">—</span>}
+      </div>
+
+      {/* 2. 학교 · 담당자 · 연락처 (+ 메모) */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-medium text-sm truncate">{f.Org_Name || f.Deal_Name || '-'}</span>
+          {f.Contact_Name && <span className="text-xs text-muted-foreground">· {f.Contact_Name}</span>}
+          {f.Contact_Phone && (
+            <a href={`tel:${f.Contact_Phone}`}
+              className="text-xs text-primary hover:underline flex items-center gap-0.5">
+              <Phone className="h-3 w-3" />{f.Contact_Phone}
+            </a>
+          )}
+          {expired && (
+            <span className="text-[10px] text-red-600 font-semibold whitespace-nowrap">
+              ⚠ 견적 {num(quoteAge ?? 0)}일+
+            </span>
           )}
         </div>
+        {f.Notes && (
+          <p className="text-[11px] text-muted-foreground line-clamp-1" title={f.Notes}>
+            💬 {f.Notes}
+          </p>
+        )}
+      </div>
+
+      {/* 3. 단계 */}
+      <div className="w-28 shrink-0 flex justify-center">
+        <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${stageColor} whitespace-nowrap`}>
+          {stageLabel}
+        </span>
+      </div>
+
+      {/* 4. 금액 */}
+      <div className="w-24 shrink-0 text-right">
+        {f.Final_Contract_Value != null && f.Final_Contract_Value > 0 ? (
+          <p className="text-sm font-semibold tabular-nums">
+            {f.Final_Contract_Value >= 10_000
+              ? `${Math.round(f.Final_Contract_Value / 10_000).toLocaleString()}만`
+              : f.Final_Contract_Value.toLocaleString()}
+          </p>
+        ) : (
+          <span className="text-[10px] text-muted-foreground">—</span>
+        )}
       </div>
     </div>
   );
