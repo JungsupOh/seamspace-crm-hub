@@ -530,10 +530,10 @@ export default function LuckySevenForm() {
   return (
     <div className="min-h-screen bg-muted/20 py-6 px-4">
       <div className="max-w-md mx-auto bg-card rounded-xl shadow-lg ring-1 ring-border overflow-hidden">
-        {/* 상단 이미지 */}
-        {campaign.image_url && step === 1 && (
+        {/* 상단 이미지 — Step 1에만 노출 (전용 인트로) */}
+        {step === 1 && (
           <div className="bg-muted/10">
-            <img src={campaign.image_url} alt={campaign.name} className="w-full h-auto" />
+            <img src="/events/lucky-seven/lucky-seven-Intro.png" alt={campaign.name} className="w-full h-auto block" />
           </div>
         )}
 
