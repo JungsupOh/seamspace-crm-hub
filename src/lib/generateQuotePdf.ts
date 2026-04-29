@@ -99,20 +99,18 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
   }
 
   container.innerHTML = `
-    <div style="padding: 48px 52px; width: 794px; box-sizing: border-box;">
-      <!-- 상단 로고 -->
-      <div style="display: flex; justify-content: flex-end; margin-bottom: 4px;">
-        <img src="/social-enterprise-logo.png" style="height: 72px; object-fit: contain;" />
-      </div>
-
-      <!-- 견적서 번호 -->
-      <div style="font-size: 12px; text-decoration: underline; margin-bottom: 12px;">
-        NO. ${data.quoteNumber.replace(/-/g, '- ')}
-      </div>
-
-      <!-- 제목 -->
-      <div style="text-align: center; font-size: 26px; font-weight: bold; letter-spacing: 12px; margin-bottom: 24px; border-bottom: 2px solid #000; padding-bottom: 8px;">
-        견 적 서
+    <div style="padding: 48px 52px 96px; width: 794px; box-sizing: border-box;">
+      <!-- 상단 — 좌측(번호+제목) / 우측(로고) — 동일 height로 정렬 -->
+      <div style="display: flex; align-items: stretch; gap: 16px; margin-bottom: 24px; border-bottom: 2px solid #000; padding-bottom: 8px;">
+        <div style="flex: 1; display: flex; flex-direction: column; justify-content: space-between; min-height: 80px;">
+          <div style="font-size: 12px; text-decoration: underline;">
+            NO. ${data.quoteNumber.replace(/-/g, '- ')}
+          </div>
+          <div style="text-align: center; font-size: 26px; font-weight: bold; letter-spacing: 12px;">
+            견 적 서
+          </div>
+        </div>
+        <img src="/social-enterprise-logo.png" style="height: 80px; object-fit: contain;" />
       </div>
 
       <!-- 수신처 + 공급자 -->
@@ -124,8 +122,8 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
           <div style="font-size: 13px; margin-bottom: 12px;">${data.contactName} 선생님 귀하</div>
           <div style="font-size: 12px; color: #333;">아래와 같이 견적합니다.</div>
         </div>
-        <!-- 우측 공급자 테이블 -->
-        <div style="width: 340px;">
+        <!-- 우측 공급자 테이블 — 폭 확장으로 주소/종목을 1줄로 -->
+        <div style="width: 420px;">
           <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
             <tr>
               <td style="border: 1px solid #000; padding: 5px 8px 10px; background: #f8f8f8; white-space: nowrap; text-align: center; vertical-align: middle; width: 90px;">사업자등록번호</td>
@@ -141,14 +139,14 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
               </td>
             </tr>
             <tr>
-              <td style="border: 1px solid #000; padding: 5px 8px 10px; background: #f8f8f8; text-align: center; vertical-align: middle;">사업장 주소</td>
-              <td style="border: 1px solid #000; padding: 5px 8px 10px; font-size: 10px; vertical-align: middle;" colspan="3">대전광역시 유성구 대학로99, 510호<br>(궁동, 대전팁스타운)</td>
+              <td style="border: 1px solid #000; padding: 5px 8px 10px; background: #f8f8f8; text-align: center; vertical-align: middle; white-space: nowrap;">사업장 주소</td>
+              <td style="border: 1px solid #000; padding: 5px 8px 10px; font-size: 10px; vertical-align: middle; white-space: nowrap;" colspan="3">대전광역시 유성구 대학로99, 510호 (궁동, 대전팁스타운)</td>
             </tr>
             <tr>
               <td style="border: 1px solid #000; padding: 5px 8px 10px; background: #f8f8f8; text-align: center; vertical-align: middle;">업 태</td>
               <td style="border: 1px solid #000; padding: 5px 8px 10px; vertical-align: middle;">정보통신업</td>
               <td style="border: 1px solid #000; padding: 5px 8px 10px; background: #f8f8f8; text-align: center; vertical-align: middle;">종목</td>
-              <td style="border: 1px solid #000; padding: 5px 8px 10px; font-size: 10px; vertical-align: middle;">응용 소프트웨어<br>개발 및 공급업</td>
+              <td style="border: 1px solid #000; padding: 5px 8px 10px; font-size: 10px; vertical-align: middle; white-space: nowrap;">응용 소프트웨어 개발 및 공급업</td>
             </tr>
             <tr>
               <td style="border: 1px solid #000; padding: 5px 8px 10px; background: #f8f8f8; text-align: center; vertical-align: middle;">전화번호</td>
@@ -199,7 +197,7 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
             </td>
           </tr>` : '');
           }).join('')}
-          ${(() => { const usedRows = items.length + items.filter(i => i.s2b_number).length + (discount > 0 ? 1 : 0); const empty = Math.max(10 - usedRows, 1); return [...Array(empty)].map(() => `
+          ${(() => { const usedRows = items.length + items.filter(i => i.s2b_number).length + (discount > 0 ? 1 : 0); const empty = Math.max(9 - usedRows, 1); return [...Array(empty)].map(() => `
           <tr style="height: 28px;">
             <td style="border: 1px solid #000;"></td>
             <td style="border: 1px solid #000;"></td>
