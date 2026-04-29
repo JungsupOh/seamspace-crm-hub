@@ -197,7 +197,7 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
             </td>
           </tr>` : '');
           }).join('')}
-          ${(() => { const usedRows = items.length + items.filter(i => i.s2b_number).length + (discount > 0 ? 1 : 0); const empty = Math.max(9 - usedRows, 1); return [...Array(empty)].map(() => `
+          ${(() => { const usedRows = items.length + items.filter(i => i.s2b_number).length + (discount > 0 ? 1 : 0); const empty = Math.max(10 - usedRows, 1); return [...Array(empty)].map(() => `
           <tr style="height: 28px;">
             <td style="border: 1px solid #000;"></td>
             <td style="border: 1px solid #000;"></td>
@@ -232,7 +232,7 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
             - 견적서 유효기간은 4주입니다.<br>
             - 위 견적내용은 외부 유출에 주의해 주시기 바랍니다.
             ${data.notes ? `<br>- ${data.notes}` : ''}
-            ${data.paymentUrl ? `<br>- 직접 결재를 하시려면, 우측의 QR이나 <span style="font-family: 'Courier New', monospace; color: #0a3aa1; word-break: break-all;">${data.paymentUrl}</span> 에서 가능합니다.<br>　(결재 페이지 진입 시 본 견적서를 받으신 이메일 주소를 입력하셔야 합니다.)` : ''}
+            ${data.paymentUrl ? `<br>- 직접 결재를 하시려면, 우측 QR이나 아래 링크에서 가능합니다.<div style="margin-left: 10px; margin-top: 2px; font-family: 'Courier New', monospace; font-size: 10px; color: #0a3aa1; white-space: nowrap; overflow: hidden;">${data.paymentUrl}</div><div style="margin-left: 10px; font-size: 10px; color: #666;">(결재 페이지 진입 시 본 견적서를 받으신 이메일 주소를 입력하셔야 합니다.)</div>` : ''}
           </div>
         </div>
         ${data.paymentUrl && qrDataUrl ? `
