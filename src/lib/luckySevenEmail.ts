@@ -115,8 +115,9 @@ export async function issueQuoteForPaymentGroup(params: {
   members: LSLeadRow[];
   leaderName: string;     // 견적서 contactName용
   leaderSchoolName: string;
+  skipEmail?: boolean;    // true이면 PDF 재생성/업로드만 (이메일 발송 X, 사용자에게 noisy하지 않게)
 }): Promise<void> {
-  const { group, paymentGroup, members } = params;
+  const { group, paymentGroup, members, skipEmail = false } = params;
   const memberCount = members.length;
   const today = new Date().toISOString().slice(0, 10);
 
@@ -154,43 +155,47 @@ export async function issueQuoteForPaymentGroup(params: {
     paymentUrl: paymentLinkUrl,
   });
 
-  // 2) Storage 업로드
+  // 2) Storage 업로드 (PDF 파일 교체)
   const pdfUrl = await uploadQuotePdf(paymentGroup.quote_number, blob);
 
-  // 3) 이메일 발송 (sendEmail 헬퍼 사용 — sales@tebahsoft.com cc 자동 적용)
-  const base64 = await blobToBase64(blob);
-  const html = buildHtml({
-    payerName: paymentGroup.payer_name,
-    groupCode: group.group_code,
-    paymentLinkUrl,
-    amount: paymentGroup.amount,
-    memberCount,
-  });
+  // 3) 이메일 발송 — skipEmail=false 일 때만 (sendEmail 헬퍼 사용 — sales@tebahsoft.com cc 자동 적용)
+  if (!skipEmail) {
+    const base64 = await blobToBase64(blob);
+    const html = buildHtml({
+      payerName: paymentGroup.payer_name,
+      groupCode: group.group_code,
+      paymentLinkUrl,
+      amount: paymentGroup.amount,
+      memberCount,
+    });
 
-  const subject = `(테바소프트) 심스페이스 럭키세븐 견적서_${group.group_code}_${paymentGroup.payer_name}`;
+    const subject = `(테바소프트) 심스페이스 럭키세븐 견적서_${group.group_code}_${paymentGroup.payer_name}`;
 
-  const emailRes = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-    },
-    body: JSON.stringify({
-      to: paymentGroup.payer_email,
-      subject,
-      html,
-      reply_to: 'sales@tebahsoft.com',
-      attachments: [{ filename: fileName, content: base64 }],
-      // cc 미지정 → Edge Function이 RESEND_DEFAULT_CC(sales@tebahsoft.com)을 자동 주입
-    }),
-  });
-  if (!emailRes.ok) {
-    const err = await emailRes.json().catch(() => ({}));
-    throw new Error(err.error || '견적서 이메일 발송 실패');
+    const emailRes = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+      },
+      body: JSON.stringify({
+        to: paymentGroup.payer_email,
+        subject,
+        html,
+        reply_to: 'sales@tebahsoft.com',
+        attachments: [{ filename: fileName, content: base64 }],
+        // cc 미지정 → Edge Function이 RESEND_DEFAULT_CC(sales@tebahsoft.com)을 자동 주입
+      }),
+    });
+    if (!emailRes.ok) {
+      const err = await emailRes.json().catch(() => ({}));
+      throw new Error(err.error || '견적서 이메일 발송 실패');
+    }
   }
 
-  // 4) payment_groups 업데이트 (PDF URL + 이메일 발송 시각 + status)
+  // 4) payment_groups 업데이트
+  // skipEmail=true 면 PDF URL만 갱신, 이메일/status는 그대로 (단순 재생성)
+  // skipEmail=false 면 email_sent_at + status='견적발송'까지 갱신
   await fetch(`${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?id=eq.${paymentGroup.id}`, {
     method: 'PATCH',
     headers: {
@@ -199,10 +204,10 @@ export async function issueQuoteForPaymentGroup(params: {
       Authorization: `Bearer ${SUPABASE_KEY}`,
       Prefer: 'return=minimal',
     },
-    body: JSON.stringify({
-      quote_pdf_url: pdfUrl,
-      email_sent_at: new Date().toISOString(),
-      status: '견적발송',
-    }),
+    body: JSON.stringify(
+      skipEmail
+        ? { quote_pdf_url: pdfUrl }
+        : { quote_pdf_url: pdfUrl, email_sent_at: new Date().toISOString(), status: '견적발송' },
+    ),
   });
 }

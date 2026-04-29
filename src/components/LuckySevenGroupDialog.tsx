@@ -310,6 +310,29 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
     }
   };
 
+  // PDF만 재생성 — 이메일 발송 X, Storage 파일 교체 + DB quote_pdf_url 갱신
+  const handleRegeneratePdf = async (pg: LSPaymentGroupRow) => {
+    setBusy(true);
+    try {
+      const pgMembers = leads.filter((l) => l.ls_payment_group_id === pg.id);
+      await issueQuoteForPaymentGroup({
+        group,
+        paymentGroup: pg,
+        members: pgMembers,
+        leaderName: group.leader_name ?? '(대표자)',
+        leaderSchoolName: group.leader_school ?? '',
+        skipEmail: true,
+      });
+      toast.success(`PDF 재생성 완료: ${pg.quote_number}`);
+      await reloadDetail();
+      onChange();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'PDF 재생성 실패');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleManualPaid = async (pg: LSPaymentGroupRow) => {
     if (!confirm(`${pg.payer_name}님의 ${pg.amount.toLocaleString()}원 결제를 완료 처리할까요?`)) return;
     setBusy(true);
@@ -464,6 +487,9 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
                     </Button>
                   </a>
                 )}
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy} onClick={() => handleRegeneratePdf(pg)} title="이메일 없이 Storage PDF 파일만 새 형식으로 교체">
+                  <FileText className="h-3 w-3 mr-1" /> PDF 재생성
+                </Button>
                 <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy} onClick={() => handleResendQuote(pg)}>
                   <Mail className="h-3 w-3 mr-1" /> 견적서 재발송
                 </Button>
