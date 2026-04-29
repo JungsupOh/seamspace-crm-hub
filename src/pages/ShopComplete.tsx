@@ -14,7 +14,7 @@ export default function ShopComplete() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState('');
-  const [issuedCoupons, setIssuedCoupons] = useState<Array<{ productName: string; couponCode: string }>>([]);
+  const [issuedCoupons, setIssuedCoupons] = useState<Array<{ productName: string; couponCode: string; alimtokOk?: boolean }>>([]);
 
   useEffect(() => {
     const paymentKey = params.get('paymentKey');
@@ -165,16 +165,26 @@ export default function ShopComplete() {
 
         {issuedCoupons.length > 0 ? (
           <div className="rounded-lg bg-teal-50 dark:bg-teal-950/20 border border-teal-200 px-4 py-3 mb-4 text-left space-y-2">
-            <div className="flex items-center gap-1.5 text-xs text-teal-800 dark:text-teal-100">
-              <Smartphone className="h-3.5 w-3.5" />
-              <span>이용권이 SMS로 발송되었습니다</span>
-            </div>
+            {issuedCoupons.some((c) => c.alimtokOk === false) ? (
+              <div className="flex items-center gap-1.5 text-xs text-amber-800">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                <span>이용권은 발급되었으나 알림톡 발송에 실패했습니다. 아래 코드를 보관해주세요.</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 text-xs text-teal-800 dark:text-teal-100">
+                <Smartphone className="h-3.5 w-3.5" />
+                <span>이용권이 알림톡으로 발송되었습니다</span>
+              </div>
+            )}
             {issuedCoupons.map((c, i) => (
               <div key={i} className="text-xs flex justify-between">
                 <span className="text-muted-foreground">{c.productName}</span>
                 <span className="font-mono font-semibold">{c.couponCode}</span>
               </div>
             ))}
+            <p className="text-[10px] text-muted-foreground pt-1 border-t">
+              문의: sales@tebahsoft.com
+            </p>
           </div>
         ) : (
           <div className="rounded-lg bg-muted/40 px-4 py-3 text-xs text-muted-foreground space-y-1 mb-6">

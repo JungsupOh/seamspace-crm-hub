@@ -130,7 +130,7 @@ Deno.serve(async (req: Request) => {
     }).catch((e) => console.warn("[confirm-shop-payment] shop_order_items 실패:", e));
 
     // ── Step 4: 디지털 상품 자동 발급 ─────────────────
-    const issuedCoupons: Array<{ productName: string; couponCode: string }> = [];
+    const issuedCoupons: Array<{ productName: string; couponCode: string; alimtokOk: boolean }> = [];
 
     for (const item of items) {
       const meta = DIGITAL_PRODUCTS[item.productId];
@@ -163,21 +163,31 @@ Deno.serve(async (req: Request) => {
           continue;
         }
 
-        issuedCoupons.push({ productName: item.productName, couponCode: couponCodeIssued });
-
-        // 4-2) 알림톡 발송 (실패해도 흐름 계속)
-        await fetch(`${SUPABASE_URL}/functions/v1/send-coupon`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
+        // 4-2) 알림톡 발송 (실패해도 흐름 계속, 상세 로그 남김)
+        let alimtokOk = false;
+        try {
+          const sendBody = {
             first_name: customer.name,
             phone:      phoneNorm,
             coupon_code: couponCodeIssued,
             user_limit: String(meta.userLimit),
             duration:   String(meta.duration),
             send_type:  "buyer",
-          }),
-        }).catch((e) => console.warn("[confirm-shop-payment] 알림톡 실패:", e));
+          };
+          console.log("[confirm-shop-payment] 알림톡 요청:", JSON.stringify(sendBody));
+          const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-coupon`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify(sendBody),
+          });
+          const sendText = await sendRes.text();
+          console.log(`[confirm-shop-payment] 알림톡 응답 ${sendRes.status}:`, sendText);
+          alimtokOk = sendRes.ok;
+        } catch (e) {
+          console.error("[confirm-shop-payment] 알림톡 예외:", e);
+        }
+
+        issuedCoupons.push({ productName: item.productName, couponCode: couponCodeIssued, alimtokOk });
 
         // 4-3) deals INSERT — 딜관리 가시화 (한 쿠폰 = 한 딜 행)
         const supplyPrice = Math.round(item.unitPrice / 1.1);
