@@ -29,17 +29,23 @@ async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 // PDF Storage 업로드 → public URL 반환
+// 파일명에 timestamp 붙여 항상 신규 INSERT (Storage RLS는 INSERT만 허용 → upsert 회피).
+// quote_pdf_url을 새 path로 update하면 기존 stale 파일은 자연스럽게 무시됨.
 async function uploadQuotePdf(quoteNumber: string, blob: Blob): Promise<string> {
-  const path = `${quoteNumber}.pdf`;
+  const ts = Date.now();
+  const path = `${quoteNumber}-${ts}.pdf`;
   const upRes = await fetch(
     `${SUPABASE_URL}/storage/v1/object/lucky_seven_quote_pdfs/${encodeURIComponent(path)}`,
     {
       method: 'POST',
-      headers: { ...HEADERS_FILE, 'Content-Type': 'application/pdf', 'x-upsert': 'true' },
+      headers: { ...HEADERS_FILE, 'Content-Type': 'application/pdf' },
       body: blob,
     },
   );
-  if (!upRes.ok) throw new Error('PDF 업로드 실패');
+  if (!upRes.ok) {
+    const err = await upRes.json().catch(() => ({}));
+    throw new Error(err.message || `PDF 업로드 실패 (${upRes.status})`);
+  }
   return `${SUPABASE_URL}/storage/v1/object/public/lucky_seven_quote_pdfs/${encodeURIComponent(path)}`;
 }
 
