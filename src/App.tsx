@@ -30,6 +30,7 @@ import ShopCheckout from "./pages/ShopCheckout";
 import ShopComplete from "./pages/ShopComplete";
 import ShopFail from "./pages/ShopFail";
 import ShopOrderLookup from "./pages/ShopOrderLookup";
+import ShopOrders from "./pages/ShopOrders";
 import ShopLuckySeven from "./pages/ShopLuckySeven";
 import LuckySevenForm from "./pages/LuckySevenForm";
 import LuckySevenPay from "./pages/LuckySevenPay";
@@ -265,6 +266,16 @@ function AppRoutes() {
           <RequireAuth>
             <AppLayout>
               <Users />
+            </AppLayout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/shop-orders"
+        element={
+          <RequireAuth>
+            <AppLayout>
+              <ShopOrders />
             </AppLayout>
           </RequireAuth>
         }

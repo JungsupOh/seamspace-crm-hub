@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, Briefcase, Building2, Megaphone, Upload, Key, UserCog } from 'lucide-react';
+import { LayoutDashboard, Users, Briefcase, Building2, Megaphone, Upload, Key, UserCog, ShoppingBag } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useLocation } from 'react-router-dom';
 import {
@@ -12,6 +12,7 @@ const mainItems = [
   { title: '고객', url: '/contacts', icon: Users, guestAllowed: true },
   { title: '딜 관리', url: '/deals', icon: Briefcase, guestAllowed: true },
   { title: '이용권 관리', url: '/licenses', icon: Key, guestAllowed: false },
+  { title: '상품 관리', url: '/shop-orders', icon: ShoppingBag, guestAllowed: false },
   { title: '파트너 관리', url: '/partners', icon: Building2, guestAllowed: false },
   { title: '캠페인', url: '/campaigns', icon: Megaphone, guestAllowed: false },
   { title: '데이터 업로드', url: '/upload', icon: Upload, guestAllowed: false },
