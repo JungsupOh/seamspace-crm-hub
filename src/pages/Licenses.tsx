@@ -1,5 +1,7 @@
 import { useState, useRef } from 'react';
 import { formatPhone } from '@/lib/utils';
+import { PeriodFilter } from '@/components/PeriodFilter';
+import { matchesPeriod, type PeriodValue } from '@/lib/period';
 import { useAuth } from '@/contexts/AuthContext';
 import { useResizableColumns } from '@/hooks/useResizableColumns';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -998,7 +1000,9 @@ export default function Licenses() {
 
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | LicenseStatus>('all');
-  const [dateFilter, setDateFilter]     = useState<'all' | 'today' | 'yesterday' | '3days' | '7days' | 'month'>('all');
+  const [periodFilter, setPeriodFilter] = useState<PeriodValue>('this_year');
+  const [periodCustomFrom, setPeriodCustomFrom] = useState('');
+  const [periodCustomTo, setPeriodCustomTo]     = useState('');
   const [linkingId, setLinkingId]       = useState<string | null>(null);
   const [linkingDealId, setLinkingDealId] = useState('');
   const [checkedIds, setCheckedIds]     = useState<Set<string>>(new Set());
@@ -1018,18 +1022,7 @@ export default function Licenses() {
     const matchSearch = !q || [l.coupon_code, l.contact_name, l.org_name, l.contact_phone]
       .some(v => v?.toLowerCase().includes(q));
     const matchStatus = statusFilter === 'all' || l.displayStatus === statusFilter;
-    let matchDate = true;
-    if (dateFilter !== 'all' && l.created_at) {
-      const created = l.created_at.slice(0, 10);
-      const now = new Date();
-      const todayStr = now.toISOString().slice(0, 10);
-      const daysAgo = (n: number) => { const d = new Date(now); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
-      if (dateFilter === 'today') matchDate = created === todayStr;
-      else if (dateFilter === 'yesterday') matchDate = created === daysAgo(1);
-      else if (dateFilter === '3days') matchDate = created >= daysAgo(2);
-      else if (dateFilter === '7days') matchDate = created >= daysAgo(6);
-      else if (dateFilter === 'month') matchDate = created.slice(0, 7) === todayStr.slice(0, 7);
-    }
+    const matchDate = matchesPeriod(l.created_at?.slice(0, 10), periodFilter, periodCustomFrom, periodCustomTo);
     return matchSearch && matchStatus && matchDate;
   });
 
@@ -1217,17 +1210,13 @@ export default function Licenses() {
             {PIPELINE.map(s => <SelectItem key={s} value={s}>{STATUS_META[s].label}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Select value={dateFilter} onValueChange={v => setDateFilter(v as typeof dateFilter)}>
-          <SelectTrigger className="w-28 h-8 text-sm"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">전체 기간</SelectItem>
-            <SelectItem value="today">오늘</SelectItem>
-            <SelectItem value="yesterday">어제</SelectItem>
-            <SelectItem value="3days">최근 3일</SelectItem>
-            <SelectItem value="7days">최근 7일</SelectItem>
-            <SelectItem value="month">이번 달</SelectItem>
-          </SelectContent>
-        </Select>
+        <PeriodFilter
+          value={periodFilter}
+          onChange={setPeriodFilter}
+          customFrom={periodCustomFrom}
+          customTo={periodCustomTo}
+          onCustomChange={(from, to) => { setPeriodCustomFrom(from); setPeriodCustomTo(to); }}
+        />
         <span className="ml-auto text-xs text-muted-foreground self-center tabular-nums">{filtered.length.toLocaleString()}건</span>
       </div>
 
