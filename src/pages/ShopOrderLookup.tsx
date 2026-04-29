@@ -62,7 +62,10 @@ export default function ShopOrderLookup() {
       <main className="max-w-lg mx-auto px-4 py-8 space-y-6">
         {/* 조회 폼 */}
         <div className="bg-white rounded-2xl border border-border p-5 space-y-4">
-          <p className="text-sm font-medium">주문 시 입력한 정보로 조회합니다</p>
+          <div>
+            <p className="text-sm font-medium">주문 시 입력한 정보로 조회합니다</p>
+            <p className="text-xs text-muted-foreground mt-1">📅 최근 30일 이내 주문만 조회됩니다.</p>
+          </div>
           <div className="space-y-1.5">
             <Label className="text-xs">이름</Label>
             <Input value={name} onChange={e => setName(e.target.value)}
@@ -142,10 +145,24 @@ export default function ShopOrderLookup() {
                       )}
 
                       {/* 운송장 */}
-                      {order.tracking_number && (
-                        <div className="border-t pt-2">
-                          <p className="text-xs text-muted-foreground">운송장</p>
-                          <p className="font-mono font-bold">{order.carrier ? `${order.carrier} ` : ''}{order.tracking_number}</p>
+                      {(order.tracking_number || order.shipped_at) && (
+                        <div className="border-t pt-2 bg-teal-50 -mx-4 px-4 py-3 -mb-3 mt-2">
+                          <p className="text-xs text-teal-700 font-medium mb-1">📦 배송 정보</p>
+                          {order.tracking_number && (
+                            <p className="font-mono font-bold text-sm">
+                              {order.carrier ? `${order.carrier} ` : ''}{order.tracking_number}
+                            </p>
+                          )}
+                          {order.shipped_at && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              발송일: {new Date(order.shipped_at).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}
+                            </p>
+                          )}
+                          {order.delivered_at && (
+                            <p className="text-xs text-muted-foreground">
+                              배송완료: {new Date(order.delivered_at).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>

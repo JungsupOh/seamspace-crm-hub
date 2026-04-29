@@ -1,7 +1,7 @@
 // 상품관리 — /shop 결제건 어드민 (실물 배송 관리 위주)
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Package, Truck, CheckCircle2, AlertTriangle, X, ExternalLink, Smartphone } from 'lucide-react';
+import { Loader2, Package, Truck, CheckCircle2, X, ExternalLink, Smartphone, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -266,6 +266,12 @@ function OrderDetailDialog(props: {
   const [carrier, setCarrier] = useState(order.carrier ?? '');
   const [trackingNumber, setTrackingNumber] = useState(order.tracking_number ?? '');
 
+  // order(서버 응답)이 갱신되면 폼 상태도 동기화
+  useEffect(() => {
+    setCarrier(order.carrier ?? '');
+    setTrackingNumber(order.tracking_number ?? '');
+  }, [order.id, order.carrier, order.tracking_number]);
+
   const itemsQuery = useQuery({
     queryKey: ['shop-order-items', order.order_id],
     queryFn: () => fetchOrderItems(order.order_id),
@@ -273,7 +279,13 @@ function OrderDetailDialog(props: {
 
   const next = NEXT_STATUS[order.status as keyof typeof NEXT_STATUS];
 
+  // 미저장 변경 여부
+  const dirty =
+    (carrier || '') !== (order.carrier ?? '') ||
+    (trackingNumber || '') !== (order.tracking_number ?? '');
+
   const handleSaveTracking = () => {
+    if (!dirty) return;
     onUpdate({ carrier, trackingNumber });
   };
 
@@ -283,7 +295,8 @@ function OrderDetailDialog(props: {
       toast.error('송장번호를 입력해주세요.');
       return;
     }
-    onUpdate({ status: next });
+    // 단계 전환 시 송장 정보도 함께 저장
+    onUpdate({ status: next, carrier, trackingNumber });
   };
 
   const handleCancel = () => {
@@ -327,6 +340,23 @@ function OrderDetailDialog(props: {
                 {order.address_detail && <p className="text-muted-foreground">{order.address_detail}</p>}
                 {order.delivery_memo && <p className="text-muted-foreground italic">메모: {order.delivery_memo}</p>}
               </div>
+              {(order.tracking_number || order.shipped_at || order.delivered_at) && (
+                <div className="mt-2 bg-teal-50 dark:bg-teal-950/20 border border-teal-200 rounded p-3 text-xs space-y-0.5">
+                  {order.carrier || order.tracking_number ? (
+                    <p>
+                      <span className="text-teal-700 dark:text-teal-300 font-medium">운송장: </span>
+                      {order.carrier ? `${order.carrier} ` : ''}
+                      <span className="font-mono">{order.tracking_number ?? '—'}</span>
+                    </p>
+                  ) : null}
+                  {order.shipped_at && (
+                    <p className="text-muted-foreground">발송: {new Date(order.shipped_at).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                  )}
+                  {order.delivered_at && (
+                    <p className="text-muted-foreground">배송완료: {new Date(order.delivered_at).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                  )}
+                </div>
+              )}
             </section>
           )}
 
@@ -361,7 +391,12 @@ function OrderDetailDialog(props: {
           {/* 배송 정보 입력 (실물만) */}
           {!digitalOnly && order.status !== '취소' && order.status !== '배송완료' && (
             <section>
-              <p className="text-xs font-semibold mb-2 text-muted-foreground">배송 정보</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-muted-foreground">배송 정보</p>
+                {dirty && (
+                  <span className="text-[10px] text-amber-600 font-medium">● 미저장 변경</span>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <Label className="text-xs">택배사</Label>
@@ -377,14 +412,18 @@ function OrderDetailDialog(props: {
                   <Input
                     value={trackingNumber}
                     onChange={(e) => setTrackingNumber(e.target.value)}
-                    placeholder="송장번호"
+                    placeholder="숫자만 입력"
                     className="h-9 text-xs"
                   />
                 </div>
               </div>
-              <Button size="sm" variant="outline" onClick={handleSaveTracking} disabled={updating} className="mt-2">
-                송장 저장
+              <Button onClick={handleSaveTracking} disabled={updating || !dirty} className="mt-3 w-full">
+                {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                송장 정보 저장
               </Button>
+              <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
+                저장 후 고객이 주문 조회에서 운송장 번호를 확인할 수 있습니다.
+              </p>
             </section>
           )}
 
