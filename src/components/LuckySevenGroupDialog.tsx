@@ -3,11 +3,13 @@
 import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, FileText, CheckCircle2, Clock, RefreshCw, Mail, Award, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, FileText, CheckCircle2, Clock, RefreshCw, Mail, Award, ChevronDown, ChevronRight, Briefcase } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   refreshGroupStatus,
   issueLuckySevenLicenses,
+  createDealFromLuckySevenGroup,
+  findDealIdForGroupCode,
   type LSGroupRow,
   type LSPaymentGroupRow,
   type LSLeadRow,
@@ -171,6 +173,7 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
+  const [existingDealId, setExistingDealId] = useState<string | null>(null);
 
   const reloadDetail = async () => {
     setLoading(true);
@@ -190,6 +193,11 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
 
   // group.id 진입 시 + 부모 새로고침(refreshKey 변경) 시 재조회
   useEffect(() => { reloadDetail(); }, [group.id, refreshKey]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 딜 등록 여부 조회
+  useEffect(() => {
+    findDealIdForGroupCode(group.group_code).then(setExistingDealId).catch(() => setExistingDealId(null));
+  }, [group.group_code, refreshKey]);
 
   if (loading || !detail) {
     return <div className="border-t border-border p-6 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
@@ -272,6 +280,42 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
     }
   };
 
+  const handleRegisterDeal = async () => {
+    const leader = leads.find((l) => l.ls_role === 'leader') ?? leads[0];
+    if (!leader) { toast.error('대표자 정보를 찾을 수 없습니다.'); return; }
+    if (!confirm(`그룹 ${group.group_code}을 딜로 등록할까요?\n· 딜 1건 + 결제묶음 ${paymentGroups.length}건의 견적 + 멤버 ${leads.length}명의 사용자 등록`)) return;
+    setBusy(true);
+    try {
+      const result = await createDealFromLuckySevenGroup({
+        group,
+        leader: {
+          schoolName: leader.school_name ?? '',
+          schoolCode: null,
+          schoolKind: null,
+          position: leader.position ?? '',
+          name: leader.name,
+          phone: leader.phone,
+          email: leader.email ?? '',
+          source: '럭키세븐 5월',
+          sourceEtc: null,
+          marketingConsent: false,
+        },
+        members: leads,
+        paymentGroups,
+      });
+      if (result.created) {
+        toast.success(`딜 등록 완료 (견적 ${paymentGroups.length}건 / 사용자 ${leads.length}명)`);
+      } else {
+        toast.info('이미 등록된 딜이 있습니다.');
+      }
+      setExistingDealId(result.dealId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '딜 등록 실패');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const allPaid = paymentGroups.length > 0 && paymentGroups.every((p) => p.status === '결제완료');
   const isIssued = group.status === '발급완료';
 
@@ -348,6 +392,23 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
             </div>
           );
         })}
+      </div>
+
+      {/* 딜 관리 등록 */}
+      <div className="rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 p-3 flex items-center justify-between">
+        <div>
+          <div className="text-sm font-semibold flex items-center gap-1">
+            <Briefcase className="h-3.5 w-3.5" /> 딜 관리 등록
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {existingDealId
+              ? '✅ 이미 딜로 등록되었습니다 (영업이 /deals에서 후속 관리).'
+              : `딜 1건 + 결제묶음 ${paymentGroups.length}건 견적 + 멤버 ${leads.length}명 사용자 등록`}
+          </div>
+        </div>
+        <Button size="sm" variant={existingDealId ? 'outline' : 'default'} disabled={busy || !!existingDealId} onClick={handleRegisterDeal}>
+          <Briefcase className="h-4 w-4 mr-1" /> {existingDealId ? '등록됨' : '딜로 등록'}
+        </Button>
       </div>
 
       {/* 라이선스 일괄 발급 */}

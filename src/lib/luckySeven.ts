@@ -3,6 +3,8 @@
 
 import { apiCreateCoupon, apiSendCoupon } from '@/lib/coupons';
 import { airtable } from '@/lib/airtable';
+import { saveDealQuote, type DealQuote } from '@/lib/storage';
+import { saveDealUsers, type DealUserInput } from '@/lib/deal-users';
 import type { DealFields } from '@/types/airtable';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -486,14 +488,32 @@ export async function fetchGroupByLeaderAuth(groupCode: string, leaderPhone: str
 
 // ─────────────────────────────────────────────────
 // 럭키세븐 그룹 → 딜 1건 자동 생성 (그룹 신청 시 영업 추적용)
+// + 결제묶음별 deal_quotes 등록
+// + 모든 멤버 deal_users로 등록 (대표자=primary)
+// + 멱등성: 같은 group_code의 딜이 이미 있으면 skip
 // ─────────────────────────────────────────────────
+
+// 같은 group_code로 이미 만들어진 딜이 있는지 확인 (Quote_Number 매칭)
+export async function findDealIdForGroupCode(groupCode: string): Promise<string | null> {
+  const url = `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(groupCode)}&select=id&limit=1`;
+  const r = await fetch(url, { headers: HEADERS }).catch(() => null);
+  if (!r?.ok) return null;
+  const rows: { id: string }[] = await r.json();
+  return rows[0]?.id ?? null;
+}
 
 export async function createDealFromLuckySevenGroup(params: {
   group: LSGroupRow;
   leader: LSLeaderInput;
+  members: LSLeadRow[];
   paymentGroups: LSPaymentGroupRow[];
-}): Promise<void> {
-  const { group, leader, paymentGroups } = params;
+}): Promise<{ dealId: string; created: boolean }> {
+  const { group, leader, members, paymentGroups } = params;
+
+  // 멱등성: 이미 등록된 딜이 있으면 skip (return 기존 deal id)
+  const existing = await findDealIdForGroupCode(group.group_code);
+  if (existing) return { dealId: existing, created: false };
+
   const today = new Date().toISOString().slice(0, 10);
   const totalAmount = group.member_count * LS_UNIT_PRICE;
   const supplyPrice = Math.round(totalAmount / 1.1);
@@ -503,6 +523,7 @@ export async function createDealFromLuckySevenGroup(params: {
     .map((pg) => `${pg.quote_number} (${pg.payer_name}, ${pg.amount.toLocaleString('ko-KR')}원)`)
     .join('\n');
 
+  // 1) 03_Deals INSERT
   const dealData: DealFields = {
     Deal_Name: `[럭키세븐] ${group.group_code} ${leader.name} (${leader.schoolName})`,
     Deal_Stage: '견적',
@@ -525,8 +546,53 @@ export async function createDealFromLuckySevenGroup(params: {
     Created_Date: today,
     Notes: `럭키세븐 그룹 ${group.group_code} (멤버 ${group.member_count}명, 1인 100,000원 × 7개월)\n결제 묶음 ${paymentGroups.length}건:\n${pgSummary}`,
   };
+  const created = await airtable.createRecord<DealFields>('03_Deals', dealData);
+  const dealId = created.id;
 
-  await airtable.createRecord<DealFields>('03_Deals', dealData);
+  // 2) 결제묶음별 deal_quotes INSERT
+  for (let i = 0; i < paymentGroups.length; i++) {
+    const pg = paymentGroups[i];
+    const pgMembers = members.filter((m) => m.ls_payment_group_id === pg.id);
+    const qty = pgMembers.length;
+    const final_value = qty * LS_UNIT_PRICE;
+    const supply = Math.round(final_value / 1.1);
+    const tax = final_value - supply;
+
+    const quoteRow: Omit<DealQuote, 'id' | 'created_at'> = {
+      deal_id: dealId,
+      quote_number: pg.quote_number,
+      quote_date: today,
+      plan: '럭키세븐이벤트플랜',
+      qty,
+      license_qty: qty,
+      duration: LS_DURATION_MONTHS,
+      unit_price: LS_UNIT_PRICE,
+      supply_price: supply,
+      tax_amount: tax,
+      final_value,
+      items: [{ plan: '럭키세븐이벤트플랜', duration: LS_DURATION_MONTHS, qty, unit_price: LS_UNIT_PRICE, amount: final_value, s2b_number: '' }],
+      discount_amount: 0,
+      contact_phone: pg.payer_phone,
+      contact_email: pg.payer_email,
+      notes: `결제자: ${pg.payer_name} / 묶음 ${i + 1}/${paymentGroups.length}`,
+      is_selected: i === 0,    // 첫 묶음을 활성 견적으로
+    };
+    await saveDealQuote(quoteRow).catch((e) => console.warn(`deal_quote 저장 실패 (${pg.quote_number})`, e));
+  }
+
+  // 3) 모든 멤버를 deal_users로 등록 (대표자=primary)
+  const userInputs: DealUserInput[] = members.map((m) => ({
+    user_name: m.name,
+    user_phone: m.phone,
+    user_email: m.email ?? undefined,
+    student_count: LS_USER_COUNT,
+    month_count: LS_DURATION_MONTHS,
+    plan_name: '럭키세븐이벤트플랜',
+    is_primary: m.ls_role === 'leader',
+  }));
+  await saveDealUsers(dealId, userInputs).catch((e) => console.warn('deal_users 저장 실패', e));
+
+  return { dealId, created: true };
 }
 
 // ─────────────────────────────────────────────────

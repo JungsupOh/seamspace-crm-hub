@@ -97,6 +97,9 @@ export default function LuckySevenForm() {
   const [sourceEtc, setSourceEtc] = useState('');
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [privacyConsent, setPrivacyConsent] = useState(false);
+  // 1번 멤버를 대표자와 동일하게 자동 채울지 여부 (기본 true)
+  // false면 1번 멤버 정보를 별도로 입력 (Step 2에서 편집 가능)
+  const [firstMemberIsLeader, setFirstMemberIsLeader] = useState(true);
 
   // ── Step 2: 멤버 ──
   // 0번이 대표자 (Step 1에서 자동 채움)
@@ -200,8 +203,9 @@ export default function LuckySevenForm() {
     setMemberSchoolResults([]);
   };
 
-  // ── Step 1 → Step 2: 대표자 정보를 0번 멤버에 동기화 ──
+  // ── Step 1 → Step 2: 1번 멤버에 대표자 정보 동기화 (체크박스 ON 일 때만) ──
   useEffect(() => {
+    if (!firstMemberIsLeader) return;
     setMembers((prev) => {
       const next = [...prev];
       next[0] = {
@@ -212,7 +216,17 @@ export default function LuckySevenForm() {
       };
       return next;
     });
-  }, [schoolInfo, schoolQuery, leaderName, leaderPhone, leaderEmail]);
+  }, [schoolInfo, schoolQuery, leaderName, leaderPhone, leaderEmail, firstMemberIsLeader]);
+
+  // 체크박스 OFF로 전환할 때 1번 멤버를 빈 상태로 리셋 (별도 입력 가능하도록)
+  useEffect(() => {
+    if (firstMemberIsLeader) return;
+    setMembers((prev) => {
+      const next = [...prev];
+      next[0] = emptyMember();
+      return next;
+    });
+  }, [firstMemberIsLeader]);
 
   // ── 멤버 조작 ──
   const addMember = () => {
@@ -422,10 +436,12 @@ export default function LuckySevenForm() {
       );
 
       // 딜 관리에 1건 자동 생성 (영업 추적용)
+      // - 03_Deals 1건 + 결제묶음별 deal_quotes + 멤버 전원 deal_users
       try {
         await createDealFromLuckySevenGroup({
           group: result.group,
           leader: leaderInput,
+          members: result.leads,
           paymentGroups: result.paymentGroups,
         });
       } catch (e) {
@@ -626,6 +642,19 @@ export default function LuckySevenForm() {
                 <Input value={leaderEmail} onChange={(e) => setLeaderEmail(e.target.value)} placeholder="email@example.com" type="email" className="h-10 text-sm" />
               </div>
 
+              <label className="flex items-start gap-2 cursor-pointer p-2 rounded-md bg-muted/30 border border-border">
+                <input
+                  type="checkbox"
+                  checked={firstMemberIsLeader}
+                  onChange={(e) => setFirstMemberIsLeader(e.target.checked)}
+                  className="mt-0.5 accent-primary"
+                />
+                <span className="text-xs text-muted-foreground leading-relaxed">
+                  <strong className="text-foreground">대표자 선생님이 1번 사용자(이용권 수령자)이기도 합니다.</strong>
+                  <br />체크 해제 시, 1번 사용자 정보를 다음 단계에서 별도로 입력할 수 있습니다.
+                </span>
+              </label>
+
               <div className="space-y-1.5">
                 <Label className="text-xs">유입 경로 <span className="text-destructive">*</span></Label>
                 <div className="space-y-2">
@@ -651,11 +680,19 @@ export default function LuckySevenForm() {
               </div>
 
               <div ref={membersSectionRef} className="space-y-3">
-                {members.map((m, idx) => (
-                  <div key={idx} className={`rounded-lg border p-3 space-y-2 ${idx === 0 ? 'bg-primary/5 border-primary/30' : 'border-border'}`}>
+                {members.map((m, idx) => {
+                  // 1번 멤버가 대표자와 동일하다고 체크된 경우에만 disabled 처리
+                  const isAutoLeader = idx === 0 && firstMemberIsLeader;
+                  const isLeaderRow = idx === 0;
+                  return (
+                  <div key={idx} className={`rounded-lg border p-3 space-y-2 ${isLeaderRow ? 'bg-primary/5 border-primary/30' : 'border-border'}`}>
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold">
-                        {idx === 0 ? <span className="text-primary">대표자 선생님 (1번)</span> : `${idx + 1}번 선생님`}
+                        {isLeaderRow ? (
+                          <span className="text-primary">
+                            1번 선생님 {isAutoLeader ? '(= 대표자 자동)' : '(대표자와 다름)'}
+                          </span>
+                        ) : `${idx + 1}번 선생님`}
                       </span>
                       {idx > 0 && members.length > MIN_MEMBERS && (
                         <button type="button" onClick={() => removeMember(idx)} className="text-destructive hover:opacity-80">
@@ -664,8 +701,8 @@ export default function LuckySevenForm() {
                       )}
                     </div>
 
-                    {/* 소속 학교 — 0번(대표자)은 자동 채움, 나머지는 NEIS 검색 */}
-                    {idx === 0 ? (
+                    {/* 소속 학교 — 자동 채움(isAutoLeader) 시 disabled, 나머지는 NEIS 검색 */}
+                    {isAutoLeader ? (
                       <Input value={m.schoolName} placeholder="소속 학교" className="h-9 text-sm" disabled />
                     ) : (
                       <div className="relative">
@@ -709,7 +746,7 @@ export default function LuckySevenForm() {
                       onChange={(e) => updateMember(idx, { name: e.target.value })}
                       placeholder="이름"
                       className="h-9 text-sm"
-                      disabled={idx === 0}
+                      disabled={isAutoLeader}
                     />
                     <Input
                       value={m.phone}
@@ -717,7 +754,7 @@ export default function LuckySevenForm() {
                       placeholder="010-0000-0000"
                       type="tel"
                       className="h-9 text-sm"
-                      disabled={idx === 0}
+                      disabled={isAutoLeader}
                     />
                     <Input
                       value={m.email}
@@ -725,10 +762,11 @@ export default function LuckySevenForm() {
                       placeholder="email@example.com"
                       type="email"
                       className="h-9 text-sm"
-                      disabled={idx === 0}
+                      disabled={isAutoLeader}
                     />
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {members.length < MAX_MEMBERS && (
