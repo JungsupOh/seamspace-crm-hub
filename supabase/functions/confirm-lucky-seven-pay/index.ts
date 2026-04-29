@@ -1,13 +1,9 @@
 // Supabase Edge Function: confirm-lucky-seven-pay
 // 럭키세븐 결제 완료 처리 — Toss 결제 승인만 처리하고, 라이선스 발급은 어드민에서 수동으로 일괄 처리.
-// 1) Toss 결제 승인
+// 1) Toss 결제 승인 (공통 헬퍼)
 // 2) lucky_seven_payment_groups 업데이트 (status, paid_at, toss_payment_key, toss_order_id)
 
-const CORS = {
-  "Access-Control-Allow-Origin":  "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
-};
+import { CORS, confirmTossPayment, buildReceiptFields, jsonResponse } from "../_shared/toss.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -25,10 +21,7 @@ Deno.serve(async (req: Request) => {
     };
 
     if (!paymentKey || !orderId || !amount || !quoteNumber) {
-      return new Response(
-        JSON.stringify({ error: "필수 파라미터 누락" }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS } },
-      );
+      return jsonResponse({ error: "필수 파라미터 누락" }, 400);
     }
 
     // 1) 결제 묶음 조회 + 금액 검증
@@ -38,39 +31,21 @@ Deno.serve(async (req: Request) => {
     );
     const pgs = pgRes.ok ? await pgRes.json() : [];
     if (!Array.isArray(pgs) || pgs.length === 0) {
-      return new Response(
-        JSON.stringify({ error: "견적서를 찾을 수 없습니다" }),
-        { status: 404, headers: { "Content-Type": "application/json", ...CORS } },
-      );
+      return jsonResponse({ error: "견적서를 찾을 수 없습니다" }, 404);
     }
     const pg = pgs[0];
     if (pg.status === "결제완료") {
-      return new Response(
-        JSON.stringify({ ok: true, alreadyPaid: true }),
-        { headers: { "Content-Type": "application/json", ...CORS } },
-      );
+      return jsonResponse({ ok: true, alreadyPaid: true });
     }
     if (Number(pg.amount) !== Number(amount)) {
-      return new Response(
-        JSON.stringify({ error: "결제 금액 불일치" }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS } },
-      );
+      return jsonResponse({ error: "결제 금액 불일치" }, 400);
     }
 
     // 2) Toss 결제 승인
-    const tossAuth = btoa(`${TOSS_SECRET}:`);
-    const tossRes = await fetch("https://api.tosspayments.com/v1/payments/confirm", {
-      method: "POST",
-      headers: { Authorization: `Basic ${tossAuth}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ paymentKey, orderId, amount }),
-    });
-    const tossData = await tossRes.json();
-    if (!tossRes.ok) {
-      console.error("[confirm-lucky-seven-pay] Toss 승인 실패:", tossData);
-      return new Response(
-        JSON.stringify({ error: tossData.message ?? "Toss 결제 승인 실패" }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS } },
-      );
+    const toss = await confirmTossPayment({ paymentKey, orderId, amount, secret: TOSS_SECRET });
+    if (!toss.ok) {
+      console.error("[confirm-lucky-seven-pay] Toss 승인 실패:", toss.data);
+      return jsonResponse({ error: toss.data?.message ?? "Toss 결제 승인 실패" }, 400);
     }
 
     // 3) payment_groups 업데이트
@@ -96,26 +71,16 @@ Deno.serve(async (req: Request) => {
       console.warn("[confirm-lucky-seven-pay] payment_groups 업데이트 실패");
     }
 
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        groupId: pg.group_id,
-        paymentGroupId: pg.id,
-        method: tossData.method ?? null,
-        approvedAt: tossData.approvedAt ?? null,
-        receiptUrl: tossData.receipt?.url ?? null,
-        orderName: tossData.orderName ?? null,
-        amount: tossData.totalAmount ?? amount,
-        payerEmail: pg.payer_email ?? null,
-        payerName: pg.payer_name ?? null,
-      }),
-      { headers: { "Content-Type": "application/json", ...CORS } },
-    );
+    return jsonResponse({
+      ok: true,
+      groupId: pg.group_id,
+      paymentGroupId: pg.id,
+      payerEmail: pg.payer_email ?? null,
+      payerName:  pg.payer_name ?? null,
+      ...buildReceiptFields(toss.data, amount),
+    });
   } catch (e) {
     console.error("[confirm-lucky-seven-pay] 오류:", e);
-    return new Response(
-      JSON.stringify({ error: String(e) }),
-      { status: 500, headers: { "Content-Type": "application/json", ...CORS } },
-    );
+    return jsonResponse({ error: String(e) }, 500);
   }
 });

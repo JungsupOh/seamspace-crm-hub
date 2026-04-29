@@ -1,13 +1,10 @@
 // Supabase Edge Function: confirm-payment
-// 1. Toss 결제 승인 API 호출
+// 1. Toss 결제 승인 (공통 헬퍼)
 // 2. mDiary 이용권 생성 (create-coupon 재사용)
 // 3. AlimTok 이용권 발송 (send-coupon 재사용)
+// 4. order_payments 저장
 
-const CORS = {
-  "Access-Control-Allow-Origin":  "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
-};
+import { CORS, confirmTossPayment, buildReceiptFields, jsonResponse } from "../_shared/toss.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -52,25 +49,12 @@ Deno.serve(async (req: Request) => {
     };
 
     // ── Step 1: Toss 결제 승인 ────────────────────────
-    const tossAuth = btoa(`${TOSS_SECRET}:`);
-    const tossRes = await fetch("https://api.tosspayments.com/v1/payments/confirm", {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${tossAuth}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ paymentKey, orderId, amount }),
-    });
-
-    const tossData = await tossRes.json();
-    if (!tossRes.ok) {
-      console.error("[confirm-payment] Toss 승인 실패:", tossData);
-      return new Response(
-        JSON.stringify({ error: tossData.message ?? "Toss 결제 승인 실패" }),
-        { status: 400, headers: { "Content-Type": "application/json", ...CORS } }
-      );
+    const toss = await confirmTossPayment({ paymentKey, orderId, amount, secret: TOSS_SECRET });
+    if (!toss.ok) {
+      console.error("[confirm-payment] Toss 승인 실패:", toss.data);
+      return jsonResponse({ error: toss.data?.message ?? "Toss 결제 승인 실패" }, 400);
     }
-
+    const tossData = toss.data;
     console.log("[confirm-payment] Toss 승인 성공:", tossData.paymentKey);
 
     // ── Step 2: mDiary 이용권 생성 ────────────────────
@@ -94,10 +78,7 @@ Deno.serve(async (req: Request) => {
     if (!couponRes.ok || couponData.error) {
       console.error("[confirm-payment] 쿠폰 생성 실패:", couponData.error);
       // 결제는 됐으므로 에러 반환하되 paymentKey 포함
-      return new Response(
-        JSON.stringify({ error: "이용권 생성 실패. 고객센터에 문의해 주세요.", paymentKey }),
-        { status: 500, headers: { "Content-Type": "application/json", ...CORS } }
-      );
+      return jsonResponse({ error: "이용권 생성 실패. 고객센터에 문의해 주세요.", paymentKey }, 500);
     }
 
     const couponCode = couponData.coupon_code!;
@@ -150,26 +131,16 @@ Deno.serve(async (req: Request) => {
       }),
     }).catch(e => console.warn("[confirm-payment] order_payments 저장 실패 (무시):", e));
 
-    return new Response(
-      JSON.stringify({
-        ok: true,
-        coupon_code: couponCode,
-        receiptUrl:  tossData.receipt?.url ?? null,
-        orderName:   tossData.orderName ?? null,
-        method:      tossData.method ?? null,
-        approvedAt:  tossData.approvedAt ?? null,
-        amount:      tossData.totalAmount ?? amount,
-        customerEmail: customerEmail ?? null,
-        customerName:  customerName ?? null,
-      }),
-      { headers: { "Content-Type": "application/json", ...CORS } }
-    );
+    return jsonResponse({
+      ok: true,
+      coupon_code:   couponCode,
+      customerEmail: customerEmail ?? null,
+      customerName:  customerName ?? null,
+      ...buildReceiptFields(tossData, amount),
+    });
 
   } catch (e) {
     console.error("[confirm-payment] 오류:", e);
-    return new Response(
-      JSON.stringify({ error: String(e) }),
-      { status: 500, headers: { "Content-Type": "application/json", ...CORS } }
-    );
+    return jsonResponse({ error: String(e) }, 500);
   }
 });
