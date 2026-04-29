@@ -2,7 +2,7 @@
 // (기존 sendQuoteEmail은 그대로 두고 별도 헬퍼로 분리)
 
 import { generateQuotePdfBlob } from '@/lib/generateQuotePdf';
-import { LS_NORMAL_UNIT_PRICE, LS_UNIT_PRICE, LS_DURATION_MONTHS } from '@/lib/luckySeven';
+import { LS_UNIT_PRICE, LS_DURATION_MONTHS } from '@/lib/luckySeven';
 import type { LSPaymentGroupRow, LSLeadRow, LSGroupRow } from '@/lib/luckySeven';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -120,18 +120,17 @@ export async function issueQuoteForPaymentGroup(params: {
   const memberCount = members.length;
   const today = new Date().toISOString().slice(0, 10);
 
-  // 1) 견적서 PDF 생성
+  // 1) 견적서 PDF 생성 — 럭키세븐이벤트플랜 (7개월, 1장 10만원, 학급수 × 단가)
   const items = [
     {
-      plan: '학급플랜',
+      plan: '럭키세븐이벤트플랜',
       duration: LS_DURATION_MONTHS,
       qty: memberCount,
-      unit_price: LS_NORMAL_UNIT_PRICE,
-      amount: LS_NORMAL_UNIT_PRICE * memberCount,
+      unit_price: LS_UNIT_PRICE,
+      amount: LS_UNIT_PRICE * memberCount,
       s2b_number: '',
     },
   ];
-  const discountAmount = (LS_NORMAL_UNIT_PRICE - LS_UNIT_PRICE) * memberCount;
   const finalValue = LS_UNIT_PRICE * memberCount;
   const supplyPrice = Math.round(finalValue / 1.1);
   const taxAmount = finalValue - supplyPrice;
@@ -142,15 +141,15 @@ export async function issueQuoteForPaymentGroup(params: {
     orgName: paymentGroup.buyer_org_name || params.leaderSchoolName,
     contactName: paymentGroup.payer_name,
     items,
-    discountAmount,
-    plan: '학급플랜',
+    discountAmount: 0,
+    plan: '럭키세븐이벤트플랜',
     duration: LS_DURATION_MONTHS,
-    unitPrice: LS_NORMAL_UNIT_PRICE,
+    unitPrice: LS_UNIT_PRICE,
     licenseQty: memberCount,
     finalValue,
     supplyPrice,
     taxAmount,
-    notes: `럭키세븐 5월 이벤트 그룹 ${group.group_code} (멤버 ${memberCount}명, 1장당 100,000원)`,
+    notes: `럭키세븐 5월 이벤트 그룹 ${group.group_code} (멤버 ${memberCount}명, 1장당 100,000원, 7개월 고정)`,
   });
 
   // 2) Storage 업로드
