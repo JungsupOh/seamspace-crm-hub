@@ -37,6 +37,7 @@ export function LuckySevenGroupDialog({ open, onClose, campaignId, campaignName 
   const [groups, setGroups] = useState<GroupListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);  // 펼친 GroupDetail 강제 재조회 트리거
 
   const reload = async () => {
     setLoading(true);
@@ -66,6 +67,7 @@ export function LuckySevenGroupDialog({ open, onClose, campaignId, campaignName 
         };
       }));
       setGroups(enriched);
+      setRefreshKey((k) => k + 1);  // 펼친 그룹 상세도 재조회
     } finally {
       setLoading(false);
     }
@@ -102,6 +104,7 @@ export function LuckySevenGroupDialog({ open, onClose, campaignId, campaignName 
                 expanded={expanded === g.id}
                 onToggle={() => setExpanded(expanded === g.id ? null : g.id)}
                 onChange={reload}
+                refreshKey={refreshKey}
               />
             ))}
           </div>
@@ -111,12 +114,13 @@ export function LuckySevenGroupDialog({ open, onClose, campaignId, campaignName 
   );
 }
 
-function GroupCard({ group, campaignName, expanded, onToggle, onChange }: {
+function GroupCard({ group, campaignName, expanded, onToggle, onChange, refreshKey }: {
   group: GroupListItem;
   campaignName: string;
   expanded: boolean;
   onToggle: () => void;
   onChange: () => void;
+  refreshKey: number;
 }) {
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
@@ -138,12 +142,12 @@ function GroupCard({ group, campaignName, expanded, onToggle, onChange }: {
         </div>
       </button>
 
-      {expanded && <GroupDetail group={group} campaignName={campaignName} onChange={onChange} />}
+      {expanded && <GroupDetail group={group} campaignName={campaignName} onChange={onChange} refreshKey={refreshKey} />}
     </div>
   );
 }
 
-function GroupDetail({ group, campaignName, onChange }: { group: GroupListItem; campaignName: string; onChange: () => void }) {
+function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: GroupListItem; campaignName: string; onChange: () => void; refreshKey: number }) {
   const [detail, setDetail] = useState<{ paymentGroups: LSPaymentGroupRow[]; leads: LSLeadRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -164,7 +168,8 @@ function GroupDetail({ group, campaignName, onChange }: { group: GroupListItem; 
     }
   };
 
-  useEffect(() => { reloadDetail(); }, [group.id]);  // eslint-disable-line react-hooks/exhaustive-deps
+  // group.id 진입 시 + 부모 새로고침(refreshKey 변경) 시 재조회
+  useEffect(() => { reloadDetail(); }, [group.id, refreshKey]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading || !detail) {
     return <div className="border-t border-border p-6 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
