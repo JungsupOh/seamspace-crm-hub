@@ -499,35 +499,100 @@ export default function Contacts() {
     if (!selected) { setLicenses([]); setContactDeals([]); return; }
     const name  = selected.fields.Name ?? '';
     const phone = selected.fields.Phone ?? '';
+    const myPhoneNorm = phone.replace(/\D/g, '');
 
-    // 이용권: 전화번호 우선, 없으면 이름으로 폴백
-    (phone
-      ? getLicensesByPhone(phone).then(data => data.length > 0 ? data : getLicensesByName(name))
+    // 이용권: 전화번호가 있으면 phone 기준만 사용 (동명이인 격리). phone이 없을 때만 이름 폴백.
+    (myPhoneNorm.length >= 9
+      ? getLicensesByPhone(phone)
       : getLicensesByName(name)
     ).then(setLicenses).catch(() => setLicenses([]));
 
-    // 관련 딜
-    getDealsByContactName(name).then(setContactDeals).catch(() => setContactDeals([]));
+    // 관련 딜 — 이름으로 가져온 뒤 phone이 있으면 동명이인 제외
+    getDealsByContactName(name).then(deals => {
+      if (myPhoneNorm.length < 9) return deals;
+      return deals.filter(d => {
+        const dphone = (d.Contact_Phone ?? '').replace(/\D/g, '');
+        return !dphone || dphone === myPhoneNorm;  // phone 없는 옛 데이터는 통과
+      });
+    }).then(setContactDeals).catch(() => setContactDeals([]));
   }, [selected?.id]);
 
   useEffect(() => {
     const name = selected?.fields.Name;
-    if (!name) { setMDiaryCoupons([]); return; }
-    getMDiaryCouponsByName(name).then(async (data) => {
+    if (!name || !selected) { setMDiaryCoupons([]); return; }
+    const currentContactId = selected.id;
+    const myPhoneNorm = (selected.fields.Phone ?? '').replace(/\D/g, '');
+
+    getMDiaryCouponsByName(name).then(async (rawData) => {
+      if (rawData.length === 0) { setMDiaryCoupons([]); return; }
+
+      // 1) 동명이인 격리 — 이미 다른 contact에 link_confirmed된 쿠폰은 본 화면에서 제외
+      let data = rawData.filter(c => {
+        if (c.link_confirmed === true && c.linked_contact_id && c.linked_contact_id !== currentContactId) {
+          return false;
+        }
+        return true;
+      });
       if (data.length === 0) { setMDiaryCoupons([]); return; }
 
-      // 동명이인 여부 확인
+      // 2) phone 기반 자동 매칭 — coupon_code로 campaign_licenses/deal_licenses의 contact_phone 조회해서 본인 phone과 비교.
+      // mdiary_coupons에는 phone이 없으므로 발급 기록(licenses)을 우회 lookup.
+      const unconfirmed = data.filter(c => c.link_confirmed === null);
+      if (myPhoneNorm.length >= 9 && unconfirmed.length > 0) {
+        const codes = unconfirmed.map(c => c.coupon_code).filter(Boolean);
+        const codeList = codes.map(c => `"${c.replace(/"/g, '\\"')}"`).join(',');
+
+        const phoneMap = new Map<string, string>(); // coupon_code → contact_phone(normalized)
+        const fetchOpts = { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } };
+        const tryFetch = async (url: string) => {
+          const r = await fetch(url, fetchOpts).catch(() => null);
+          if (!r?.ok) return [] as { coupon_code: string; contact_phone: string | null }[];
+          return r.json();
+        };
+        const [campRows, dealRows] = await Promise.all([
+          tryFetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?coupon_code=in.(${codeList})&select=coupon_code,contact_phone`),
+          tryFetch(`${SUPABASE_URL}/rest/v1/deal_licenses?coupon_code=in.(${codeList})&select=coupon_code,contact_phone`),
+        ]);
+        [...campRows, ...dealRows].forEach((r: { coupon_code: string; contact_phone: string | null }) => {
+          if (r.contact_phone && !phoneMap.has(r.coupon_code)) {
+            phoneMap.set(r.coupon_code, r.contact_phone.replace(/\D/g, ''));
+          }
+        });
+
+        // phone이 본인과 다르게 매핑된 쿠폰 → 표시 제외
+        const otherPhoneIds = new Set(
+          unconfirmed
+            .filter(c => {
+              const cphone = phoneMap.get(c.coupon_code);
+              return cphone && cphone !== myPhoneNorm;
+            })
+            .map(c => c.id),
+        );
+        data = data.filter(c => !otherPhoneIds.has(c.id));
+
+        // phone 일치하는 쿠폰 → 자동 link_confirmed
+        const phoneMatched = unconfirmed.filter(c => {
+          const cphone = phoneMap.get(c.coupon_code);
+          return cphone && cphone === myPhoneNorm;
+        });
+        if (phoneMatched.length > 0) {
+          await Promise.all(phoneMatched.map(c => confirmCouponLink(c.id, currentContactId).catch(() => {})));
+          const ids = new Set(phoneMatched.map(c => c.id));
+          data = data.map(c => ids.has(c.id) ? { ...c, link_confirmed: true, linked_contact_id: currentContactId } : c);
+        }
+      }
+
+      if (data.length === 0) { setMDiaryCoupons([]); return; }
+
+      // 3) 이름 유일 + 활동이력 날짜 기반 자동 확인 (phone 매칭이 안 된 경우의 폴백)
       const sameNameCount = contacts?.filter(c => c.fields.Name === name).length ?? 0;
       const isUniqueName = sameNameCount <= 1;
-
-      // 활동이력에서 날짜 추출
       const activityDates: string[] = [];
       (selected.fields.Notes ?? '').split('\n').forEach(line => {
         const m = line.match(/\[(\d{4}-\d{2}-\d{2})\]/);
         if (m) activityDates.push(m[1]);
       });
 
-      // 자동확인 조건: 미확인 + 이름 유일 + 활동이력 날짜와 7일 이내
       const toAutoConfirm = data.filter(c => {
         if (c.link_confirmed !== null) return false;
         if (!isUniqueName) return false;
@@ -538,11 +603,11 @@ export default function Contacts() {
       });
 
       if (toAutoConfirm.length > 0) {
-        await Promise.all(toAutoConfirm.map(c => confirmCouponLink(c.id, selected.id)));
+        await Promise.all(toAutoConfirm.map(c => confirmCouponLink(c.id, currentContactId).catch(() => {})));
         const confirmedIds = new Set(toAutoConfirm.map(ac => ac.id));
         setMDiaryCoupons(data.map(c =>
           confirmedIds.has(c.id)
-            ? { ...c, link_confirmed: true, linked_contact_id: selected.id }
+            ? { ...c, link_confirmed: true, linked_contact_id: currentContactId }
             : c
         ));
         toast.success(`체험권 ${toAutoConfirm.length}건 자동 확인됨`);
@@ -550,7 +615,7 @@ export default function Contacts() {
         setMDiaryCoupons(data);
       }
     }).catch(() => setMDiaryCoupons([]));
-  }, [selected?.id]);
+  }, [selected?.id]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSort = (field: string) => {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
