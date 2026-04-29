@@ -12,6 +12,7 @@ import { notifyLuckySevenGroup } from '@/lib/telegram';
 import {
   fetchLuckySevenCampaign,
   submitLuckySevenGroup,
+  createDealFromLuckySevenGroup,
   validatePaymentGroups,
   isValidEmail,
   normalizePhone,
@@ -19,6 +20,7 @@ import {
   LS_UNIT_PRICE,
   type LSMemberInput,
   type LSPaymentGroupInput,
+  type LSLeaderInput,
 } from '@/lib/luckySeven';
 import { issueQuoteForPaymentGroup } from '@/lib/luckySevenEmail';
 
@@ -401,25 +403,34 @@ export default function LuckySevenForm() {
       }));
       const pgInputs: LSPaymentGroupInput[] = buildPaymentGroupInputs();
 
+      const leaderInput: LSLeaderInput = {
+        schoolName: schoolInfo?.name || schoolQuery.trim(),
+        schoolCode: null,
+        schoolKind: schoolInfo?.kind || null,
+        position: position.trim(),
+        name: leaderName.trim(),
+        phone: leaderPhone.trim(),
+        email: leaderEmail.trim(),
+        source,
+        sourceEtc: source === '기타' ? sourceEtc.trim() : null,
+        marketingConsent,
+      };
+
       const result = await submitLuckySevenGroup(
-        {
-          campaignId: campaign.id,
-          leader: {
-            schoolName: schoolInfo?.name || schoolQuery.trim(),
-            schoolCode: null,
-            schoolKind: schoolInfo?.kind || null,
-            position: position.trim(),
-            name: leaderName.trim(),
-            phone: leaderPhone.trim(),
-            email: leaderEmail.trim(),
-            source,
-            sourceEtc: source === '기타' ? sourceEtc.trim() : null,
-            marketingConsent,
-          },
-          members: memberInputs,
-        },
+        { campaignId: campaign.id, leader: leaderInput, members: memberInputs },
         pgInputs,
       );
+
+      // 딜 관리에 1건 자동 생성 (영업 추적용)
+      try {
+        await createDealFromLuckySevenGroup({
+          group: result.group,
+          leader: leaderInput,
+          paymentGroups: result.paymentGroups,
+        });
+      } catch (e) {
+        console.warn('럭키세븐 딜 자동 생성 실패 (그룹 신청은 정상)', e);
+      }
 
       // 견적서 PDF 생성 + Storage 업로드 + 이메일 발송 (묶음별)
       for (const pg of result.paymentGroups) {

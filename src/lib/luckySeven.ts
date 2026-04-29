@@ -2,6 +2,8 @@
 // /event/lucky-seven 폼 + 결제 페이지 + 어드민 다이얼로그에서 공통 사용
 
 import { apiCreateCoupon, apiSendCoupon } from '@/lib/coupons';
+import { airtable } from '@/lib/airtable';
+import type { DealFields } from '@/types/airtable';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -480,6 +482,51 @@ export async function fetchGroupByLeaderAuth(groupCode: string, leaderPhone: str
     paymentGroups: pgRes.ok ? await pgRes.json() : [],
     leads: leadsRes.ok ? await leadsRes.json() : [],
   };
+}
+
+// ─────────────────────────────────────────────────
+// 럭키세븐 그룹 → 딜 1건 자동 생성 (그룹 신청 시 영업 추적용)
+// ─────────────────────────────────────────────────
+
+export async function createDealFromLuckySevenGroup(params: {
+  group: LSGroupRow;
+  leader: LSLeaderInput;
+  paymentGroups: LSPaymentGroupRow[];
+}): Promise<void> {
+  const { group, leader, paymentGroups } = params;
+  const today = new Date().toISOString().slice(0, 10);
+  const totalAmount = group.member_count * LS_UNIT_PRICE;
+  const supplyPrice = Math.round(totalAmount / 1.1);
+  const taxAmount = totalAmount - supplyPrice;
+
+  const pgSummary = paymentGroups
+    .map((pg) => `${pg.quote_number} (${pg.payer_name}, ${pg.amount.toLocaleString('ko-KR')}원)`)
+    .join('\n');
+
+  const dealData: DealFields = {
+    Deal_Name: `[럭키세븐] ${group.group_code} ${leader.name} (${leader.schoolName})`,
+    Deal_Stage: '견적',
+    Deal_Type: 'New',
+    Contact_Name: leader.name,
+    Contact_Phone: leader.phone,
+    Contact_Email: leader.email,
+    Org_Name: leader.schoolName,
+    Education_Office: leader.schoolKind ?? undefined,
+    Quote_Date: today,
+    Quote_Qty: group.member_count,
+    Quote_Plan: '럭키세븐이벤트플랜',
+    Quote_Number: group.group_code,
+    License_Duration: LS_DURATION_MONTHS,
+    Unit_Price: LS_UNIT_PRICE,
+    Supply_Price: supplyPrice,
+    Tax_Amount: taxAmount,
+    Final_Contract_Value: totalAmount,
+    Lead_Source: '럭키세븐 5월',
+    Created_Date: today,
+    Notes: `럭키세븐 그룹 ${group.group_code} (멤버 ${group.member_count}명, 1인 100,000원 × 7개월)\n결제 묶음 ${paymentGroups.length}건:\n${pgSummary}`,
+  };
+
+  await airtable.createRecord<DealFields>('03_Deals', dealData);
 }
 
 // ─────────────────────────────────────────────────
