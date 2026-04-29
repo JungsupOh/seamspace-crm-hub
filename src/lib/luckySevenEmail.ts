@@ -151,7 +151,6 @@ export async function issueQuoteForPaymentGroup(params: {
     finalValue,
     supplyPrice,
     taxAmount,
-    notes: `럭키세븐 5월 이벤트 그룹 ${group.group_code} (멤버 ${memberCount}명, 1장당 100,000원, 7개월 고정)`,
     paymentUrl: paymentLinkUrl,
   });
 

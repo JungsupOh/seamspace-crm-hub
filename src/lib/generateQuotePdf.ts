@@ -142,7 +142,7 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
             </tr>
             <tr>
               <td style="border: 1px solid #000; padding: 5px 8px 10px; background: #f8f8f8; text-align: center; vertical-align: middle;">사업장 주소</td>
-              <td style="border: 1px solid #000; padding: 5px 8px 10px; font-size: 10px; vertical-align: middle;" colspan="3">대전광역시 유성구 공동로2번길 81, 107호<br>(공동, 대전스타트업파크본부동)</td>
+              <td style="border: 1px solid #000; padding: 5px 8px 10px; font-size: 10px; vertical-align: middle;" colspan="3">대전광역시 유성구 대학로99, 510호<br>(궁동, 대전팁스타운)</td>
             </tr>
             <tr>
               <td style="border: 1px solid #000; padding: 5px 8px 10px; background: #f8f8f8; text-align: center; vertical-align: middle;">업 태</td>
@@ -226,33 +226,23 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
         </tbody>
       </table>
 
-      <!-- 특기사항 -->
-      <div style="border: 1px solid #000; margin-top: 20px; padding: 12px 16px; font-size: 11px;">
-        <div style="font-weight: bold; margin-bottom: 8px;">[특기사항]</div>
-        <div style="color: #333; line-height: 1.8;">
-          - 견적서 유효기간은 4주입니다.<br>
-          - 위 견적내용은 외부 유출에 주의해 주시기 바랍니다.
-          ${data.notes ? `<br>- ${data.notes}` : ''}
+      <!-- 특기사항 + 결제 QR (paymentUrl 있을 때 우측에 QR 표시) -->
+      <div style="border: 1px solid #000; margin-top: 20px; padding: 12px 16px; font-size: 11px; display: flex; gap: 16px; align-items: stretch;">
+        <div style="flex: 1; min-width: 0;">
+          <div style="font-weight: bold; margin-bottom: 8px;">[특기사항]</div>
+          <div style="color: #333; line-height: 1.8;">
+            - 견적서 유효기간은 4주입니다.<br>
+            - 위 견적내용은 외부 유출에 주의해 주시기 바랍니다.
+            ${data.notes ? `<br>- ${data.notes}` : ''}
+            ${data.paymentUrl ? `<br>- 직접 결재를 하시려면, 우측의 QR이나 <span style="font-family: 'Courier New', monospace; color: #0a3aa1; word-break: break-all;">${data.paymentUrl}</span> 에서 가능합니다.<br>　(결재 페이지 진입 시 본 견적서를 받으신 이메일 주소를 입력하셔야 합니다.)` : ''}
+          </div>
         </div>
+        ${data.paymentUrl && qrDataUrl ? `
+        <div style="width: 100px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
+          <img src="${qrDataUrl}" style="width: 100px; height: 100px;" />
+          <div style="font-size: 9px; color: #666; text-align: center;">결제 QR</div>
+        </div>` : ''}
       </div>
-
-      ${data.paymentUrl ? `
-      <!-- 결제 안내 (QR + URL) -->
-      <div style="border: 1.5px solid #000; margin-top: 14px; padding: 14px 16px; display: flex; gap: 16px; align-items: center;">
-        ${qrDataUrl ? `<img src="${qrDataUrl}" style="width: 92px; height: 92px; flex-shrink: 0;" />` : ''}
-        <div style="flex: 1; font-size: 12px; line-height: 1.7;">
-          <div style="font-size: 14px; font-weight: bold; margin-bottom: 4px;">💳 카드 결제 (모바일 QR / 직접 링크)</div>
-          <div style="color: #333; margin-bottom: 6px;">
-            QR 코드를 스캔하거나 아래 링크로 접속하시면 본 견적서를 바로 결제하실 수 있습니다.
-          </div>
-          <div style="font-family: 'Courier New', monospace; font-size: 11px; word-break: break-all; color: #0a3aa1; padding: 6px 8px; background: #f4f6fb; border: 1px dashed #c4c9d4;">
-            ${data.paymentUrl}
-          </div>
-          <div style="font-size: 10px; color: #666; margin-top: 4px;">
-            * 결제 페이지 진입 시 본 견적서를 받으신 이메일을 입력하셔야 합니다 (보안).
-          </div>
-        </div>
-      </div>` : ''}
     </div>
   `;
 

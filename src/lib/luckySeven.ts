@@ -128,16 +128,17 @@ export function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-// 그룹 코드 생성 (JS) — LS{YY}-{6 alphanum} 형식.
+// 그룹 코드 생성 (JS) — {YYYY}-LS-{6 alphanum} 형식.
+// 견적서 번호는 group_code + '-Q{i}' 로 결합되므로 결제 페이지/링크에서도 동일 prefix 사용.
 // 충돌 방지를 위해 호출 측에서 INSERT 실패 시 재시도하도록 설계.
 export function generateGroupCode(): string {
-  const yy = String(new Date().getFullYear()).slice(-2);
+  const yyyy = String(new Date().getFullYear());
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // 헷갈리는 0/O/I/L/1 제외
   let rand = '';
   const buf = new Uint8Array(6);
   crypto.getRandomValues(buf);
   for (let i = 0; i < 6; i++) rand += alphabet[buf[i] % alphabet.length];
-  return `LS${yy}-${rand}`;
+  return `${yyyy}-LS-${rand}`;
 }
 
 // 고유번호증 파일 업로드 (Supabase Storage — lucky_seven_school_id_files 버킷)
