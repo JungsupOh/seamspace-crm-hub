@@ -141,6 +141,18 @@ async function getCampaignLicenses(campaignId: string): Promise<CampaignLicense[
   return r.json();
 }
 
+// 모든 캠페인의 이용권을 한 번에 조회 (캠페인 페이지 로드 최적화).
+// useQuery({ queryKey: ['all_campaign_licenses'], queryFn: getAllCampaignLicenses, select: 캠페인별 필터 })로 사용.
+async function getAllCampaignLicenses(): Promise<CampaignLicense[]> {
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/campaign_licenses?order=created_at.asc&limit=10000`,
+    { headers: HEADERS }
+  );
+  if (!r.ok) return [];
+  const data = await r.json();
+  return Array.isArray(data) ? data : [];
+}
+
 async function addCampaignLicense(row: Omit<CampaignLicense, 'id' | 'created_at'>): Promise<CampaignLicense> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
     method: 'POST',
@@ -185,6 +197,17 @@ async function bulkAddCampaignLicenses(rows: Omit<CampaignLicense, 'id' | 'creat
 async function getCampaignLeads(campaignId: string): Promise<CampaignLead[]> {
   const r = await fetch(
     `${SUPABASE_URL}/rest/v1/campaign_leads?campaign_id=eq.${campaignId}&order=created_at.desc`,
+    { headers: HEADERS }
+  );
+  if (!r.ok) return [];
+  const data = await r.json();
+  return Array.isArray(data) ? data : [];
+}
+
+// 모든 캠페인의 리드를 한 번에 조회 (캠페인 페이지 로드 최적화).
+async function getAllCampaignLeads(): Promise<CampaignLead[]> {
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/campaign_leads?order=created_at.desc&limit=20000`,
     { headers: HEADERS }
   );
   if (!r.ok) return [];
@@ -515,7 +538,7 @@ function AddLicenseRow({ campaignId, onDone }: AddLicenseRowProps) {
       service_expire_at: row.service_expire_at || undefined,
     }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaignId] });
+      qc.invalidateQueries({ queryKey: ['all_campaign_licenses'] });
       qc.invalidateQueries({ queryKey: ['campaigns'] });
       toast.success('추가됨');
       onDone();
@@ -568,21 +591,25 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_KEY}` },
         body: JSON.stringify({ codes: pendingCodes, limit: pendingCodes.length }),
       });
-      if (r.ok) qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+      if (r.ok) qc.invalidateQueries({ queryKey: ['all_campaign_licenses'] });
       return true;
     },
     staleTime: 1000 * 60 * 5,
     refetchOnWindowFocus: false,
   });
 
-  // 동기화 후 라이선스 통계
+  // 동기화 후 라이선스 통계 — 전역 캐시 공유 (캠페인별 필터)
   const { data: syncedLicenses } = useQuery({
-    queryKey: ['campaign_licenses', campaign.id],
-    queryFn: () => getCampaignLicenses(campaign.id),
+    queryKey: ['all_campaign_licenses'],
+    queryFn: getAllCampaignLicenses,
+    select: (all) => all.filter((l) => l.campaign_id === campaign.id),
+    staleTime: 60_000,
   });
   const { data: leads } = useQuery({
-    queryKey: ['campaign_leads', campaign.id],
-    queryFn: () => getCampaignLeads(campaign.id),
+    queryKey: ['all_campaign_leads'],
+    queryFn: getAllCampaignLeads,
+    select: (all) => all.filter((l) => l.campaign_id === campaign.id),
+    staleTime: 60_000,
   });
   const normalize = (p?: string) => (p ?? '').replace(/\D/g, '');
   const licTotal    = syncedLicenses?.length ?? 0;
@@ -678,12 +705,16 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
   const [sendProgress, setSendProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
 
   const { data: leads, isLoading: leadsLoading } = useQuery({
-    queryKey: ['campaign_leads', campaign.id],
-    queryFn: () => getCampaignLeads(campaign.id),
+    queryKey: ['all_campaign_leads'],
+    queryFn: getAllCampaignLeads,
+    select: (all) => all.filter((l) => l.campaign_id === campaign.id),
+    staleTime: 60_000,
   });
   const { data: licenses, isLoading: licensesLoading } = useQuery({
-    queryKey: ['campaign_licenses', campaign.id],
-    queryFn: () => getCampaignLicenses(campaign.id),
+    queryKey: ['all_campaign_licenses'],
+    queryFn: getAllCampaignLicenses,
+    select: (all) => all.filter((l) => l.campaign_id === campaign.id),
+    staleTime: 60_000,
   });
   // 전체 캠페인별 라이선스 + 구매고객 contacts 로드 (이력 판별용)
   //   phone(normalized) → { otherCampaignTrial: boolean, purchased: boolean }
@@ -911,8 +942,8 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
 
     setSending(false);
     setSelectedIds(new Set());
-    qc.invalidateQueries({ queryKey: ['campaign_leads', campaign.id] });
-    qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+    qc.invalidateQueries({ queryKey: ['all_campaign_leads'] });
+    qc.invalidateQueries({ queryKey: ['all_campaign_licenses'] });
     qc.invalidateQueries({ queryKey: ['campaigns'] });
     if (partialCount > 0) {
       toast.warning(`${targets.length}건 알림톡 발송 완료 — 그중 ${partialCount}건은 DB 저장 일부 누락 (콘솔 확인)`);
@@ -934,7 +965,7 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
       toast.success(`${leadIds.length}건 상태를 '${bulkStatus}'로 변경`);
       setSelectedIds(new Set());
       setBulkStatus('');
-      qc.invalidateQueries({ queryKey: ['campaign_leads', campaign.id] });
+      qc.invalidateQueries({ queryKey: ['all_campaign_leads'] });
     } catch { toast.error('상태 변경 실패'); }
   };
 
@@ -1004,8 +1035,8 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
         await deleteCampaignLicense(licId);
       }
       toast.success(`${deleteTarget.name} 리드 삭제됨`);
-      qc.invalidateQueries({ queryKey: ['campaign_leads', campaign.id] });
-      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+      qc.invalidateQueries({ queryKey: ['all_campaign_leads'] });
+      qc.invalidateQueries({ queryKey: ['all_campaign_licenses'] });
       qc.invalidateQueries({ queryKey: ['campaigns'] });
     } catch (e) {
       toast.error(`삭제 실패: ${e instanceof Error ? e.message : String(e)}`);
@@ -1248,7 +1279,7 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
       const rows = await parseExcel(file);
       if (rows.length === 0) { toast.error('데이터가 없습니다'); return; }
       await bulkAddCampaignLicenses(rows.map(r => ({ ...r, campaign_id: campaign.id, status: r.status ?? '대기' })));
-      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+      qc.invalidateQueries({ queryKey: ['all_campaign_licenses'] });
       qc.invalidateQueries({ queryKey: ['campaigns'] });
       toast.success(`${rows.length}건 가져오기 완료`);
     } catch (e) {
@@ -1260,8 +1291,10 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
   };
 
   const { data: licenses, isLoading } = useQuery({
-    queryKey: ['campaign_licenses', campaign.id],
-    queryFn: () => getCampaignLicenses(campaign.id),
+    queryKey: ['all_campaign_licenses'],
+    queryFn: getAllCampaignLicenses,
+    select: (all) => all.filter((l) => l.campaign_id === campaign.id),
+    staleTime: 60_000,
   });
 
   // 동기화는 CampaignDetail 레벨에서 실행 (캠페인 펼칠 때 즉시)
@@ -1272,7 +1305,7 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
   const delMut = useMutation({
     mutationFn: deleteCampaignLicense,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+      qc.invalidateQueries({ queryKey: ['all_campaign_licenses'] });
       qc.invalidateQueries({ queryKey: ['campaigns'] });
       toast.success('삭제됨');
     },
@@ -1282,7 +1315,7 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
   const editMut = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Partial<CampaignLicense> }) => updateCampaignLicense(id, patch),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['campaign_licenses', campaign.id] });
+      qc.invalidateQueries({ queryKey: ['all_campaign_licenses'] });
       setEditingId(null);
       toast.success('수정됨');
     },
@@ -1489,13 +1522,18 @@ function CampaignCard({ campaign, convertedPhones, onEdit, onDelete, canEdit }: 
   const [lsDialogOpen, setLsDialogOpen] = useState(false);
   const isLuckySeven = campaign.slug === 'lucky-seven';
 
+  // 카드 헤더 통계 — 전역 캐시 공유 (캠페인별 select 필터)
   const { data: leads } = useQuery({
-    queryKey: ['campaign_leads', campaign.id],
-    queryFn: () => getCampaignLeads(campaign.id),
+    queryKey: ['all_campaign_leads'],
+    queryFn: getAllCampaignLeads,
+    select: (all) => all.filter((l) => l.campaign_id === campaign.id),
+    staleTime: 60_000,
   });
   const { data: licenses } = useQuery({
-    queryKey: ['campaign_licenses', campaign.id],
-    queryFn: () => getCampaignLicenses(campaign.id),
+    queryKey: ['all_campaign_licenses'],
+    queryFn: getAllCampaignLicenses,
+    select: (all) => all.filter((l) => l.campaign_id === campaign.id),
+    staleTime: 60_000,
   });
 
   const newLeads = leads?.filter(l => l.status === '신규').length ?? 0;
