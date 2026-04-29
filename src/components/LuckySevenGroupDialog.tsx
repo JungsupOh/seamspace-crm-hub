@@ -1,7 +1,7 @@
 // 럭키세븐 그룹 관리 다이얼로그 — Campaigns.tsx 어드민에서 호출
 // slug='lucky-seven' 캠페인의 그룹 리스트 + 상세 + 견적서 재발송 + 라이선스 일괄 발급
 import { useState, useEffect } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2, FileText, CheckCircle2, Clock, RefreshCw, Mail, Award, ChevronDown, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
@@ -33,11 +33,12 @@ interface GroupListItem extends LSGroupRow {
   total_count?: number;
 }
 
-export function LuckySevenGroupDialog({ open, onClose, campaignId, campaignName }: Props) {
+// 그룹 리스트 + 상세 뷰 (Dialog 또는 인라인 탭에서 재사용)
+export function LuckySevenGroupsView({ campaignId, campaignName }: { campaignId: string; campaignName: string }) {
   const [groups, setGroups] = useState<GroupListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);  // 펼친 GroupDetail 강제 재조회 트리거
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const reload = async () => {
     setLoading(true);
@@ -48,7 +49,6 @@ export function LuckySevenGroupDialog({ open, onClose, campaignId, campaignName 
       );
       const rawGroups: LSGroupRow[] = groupsRes.ok ? await groupsRes.json() : [];
 
-      // 각 그룹별 대표자 정보 + 결제 진행률 동시 조회
       const enriched = await Promise.all(rawGroups.map(async (g) => {
         const [leaderRes, pgRes] = await Promise.all([
           g.leader_lead_id
@@ -67,48 +67,67 @@ export function LuckySevenGroupDialog({ open, onClose, campaignId, campaignName 
         };
       }));
       setGroups(enriched);
-      setRefreshKey((k) => k + 1);  // 펼친 그룹 상세도 재조회
+      setRefreshKey((k) => k + 1);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (open) reload();
+    reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, campaignId]);
+  }, [campaignId]);
 
+  // 합계 통계
+  const totalApplications = groups.reduce((s, g) => s + g.member_count, 0);
+  const totalPaymentGroups = groups.reduce((s, g) => s + (g.total_count ?? 0), 0);
+  const totalPaid = groups.reduce((s, g) => s + (g.paid_count ?? 0), 0);
+
+  return (
+    <div className="space-y-3">
+      {/* 헤더 — 합계 + 새로고침 */}
+      <div className="flex items-center justify-between gap-2 px-1">
+        <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
+          <span><strong className="text-foreground">{groups.length}</strong> 그룹</span>
+          <span>· <strong className="text-foreground">{totalApplications}</strong>명 신청</span>
+          <span>· 결제 <strong className="text-foreground">{totalPaid}/{totalPaymentGroups}</strong> 묶음</span>
+        </div>
+        <Button size="sm" variant="outline" onClick={reload} disabled={loading} className="h-7">
+          <RefreshCw className={`h-3.5 w-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} /> 새로고침
+        </Button>
+      </div>
+
+      {loading && groups.length === 0 ? (
+        <div className="py-12 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : groups.length === 0 ? (
+        <div className="py-12 text-center text-sm text-muted-foreground">아직 신청된 그룹이 없습니다.</div>
+      ) : (
+        <div className="space-y-2">
+          {groups.map((g) => (
+            <GroupCard
+              key={g.id}
+              group={g}
+              campaignName={campaignName}
+              expanded={expanded === g.id}
+              onToggle={() => setExpanded(expanded === g.id ? null : g.id)}
+              onChange={reload}
+              refreshKey={refreshKey}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function LuckySevenGroupDialog({ open, onClose, campaignId, campaignName }: Props) {
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
-            <span>럭키세븐 그룹 관리</span>
-            <Button size="sm" variant="outline" onClick={reload} disabled={loading} className="h-7">
-              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} /> 새로고침
-            </Button>
-          </DialogTitle>
+          <DialogTitle>럭키세븐 그룹 관리</DialogTitle>
         </DialogHeader>
-
-        {loading && groups.length === 0 ? (
-          <div className="py-12 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-        ) : groups.length === 0 ? (
-          <div className="py-12 text-center text-sm text-muted-foreground">아직 신청된 그룹이 없습니다.</div>
-        ) : (
-          <div className="space-y-2">
-            {groups.map((g) => (
-              <GroupCard
-                key={g.id}
-                group={g}
-                campaignName={campaignName}
-                expanded={expanded === g.id}
-                onToggle={() => setExpanded(expanded === g.id ? null : g.id)}
-                onChange={reload}
-                refreshKey={refreshKey}
-              />
-            ))}
-          </div>
-        )}
+        {open && <LuckySevenGroupsView campaignId={campaignId} campaignName={campaignName} />}
       </DialogContent>
     </Dialog>
   );
@@ -238,12 +257,14 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
     }
   };
 
-  const handleIssueLicenses = async () => {
-    if (!confirm(`멤버 ${leads.length}명에게 학급플랜 7개월권을 일괄 발급할까요?\n쿠폰 알림톡이 각 멤버 휴대폰으로 발송됩니다.`)) return;
+  const [issueDialogOpen, setIssueDialogOpen] = useState(false);
+
+  const handleConfirmIssue = async () => {
     setBusy(true);
     try {
       await issueLuckySevenLicenses(group, leads);
       toast.success(`라이선스 ${leads.length}건 발급 + 알림톡 발송 완료`);
+      setIssueDialogOpen(false);
       onChange();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '라이선스 발급 실패');
@@ -342,11 +363,115 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
               : '결제가 모두 완료되어야 발급 가능합니다.'}
           </div>
         </div>
-        <Button size="sm" disabled={busy || !allPaid || isIssued} onClick={handleIssueLicenses}>
+        <Button size="sm" disabled={busy || !allPaid || isIssued} onClick={() => setIssueDialogOpen(true)}>
           <Award className="h-4 w-4 mr-1" /> {isIssued ? '발급 완료' : '발급'}
         </Button>
       </div>
+
+      <IssueLicensesConfirmDialog
+        open={issueDialogOpen}
+        onOpenChange={setIssueDialogOpen}
+        group={group}
+        members={leads}
+        sending={busy}
+        onConfirm={handleConfirmIssue}
+      />
     </div>
+  );
+}
+
+// 라이선스 일괄 발급 — 발송 문구 + 대상자 미리보기 (대시보드 미등록 알림 패턴)
+function IssueLicensesConfirmDialog({ open, onOpenChange, group, members, sending, onConfirm }: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  group: LSGroupRow;
+  members: LSLeadRow[];
+  sending: boolean;
+  onConfirm: () => void;
+}) {
+  const [previewIdx, setPreviewIdx] = useState(0);
+  const total = members.length;
+  const previewTarget = members[Math.min(previewIdx, Math.max(total - 1, 0))];
+
+  const previewMessage = (m: LSLeadRow): string => {
+    return `안녕하세요, ${m.name} 선생님!  ❤️❤️\n` +
+      `심스페이스 학급플랜 7개월권을 발급해 드립니다.\n` +
+      `아래 코드로 등록하시고 학생들과 함께 이용해 보세요.\n\n` +
+      `⭐이용권 정보⭐\n` +
+      `코드: (발급 시 자동 생성)\n` +
+      `기간: 7 개월\n` +
+      `인원: 40 명\n\n` +
+      `이용 중 문의사항은 카카오채널의 상담을 이용해 주시길 부탁드립니다. 💬\n\n감사합니다.`;
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!sending) onOpenChange(v); }}>
+      <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Award className="h-4 w-4" />
+            럭키세븐 라이선스 일괄 발급 — {group.group_code}
+          </DialogTitle>
+          <DialogDescription>
+            총 <strong>{total}명</strong>에게 학급플랜 7개월권 발급 + 알림톡 발송. 발급 후 취소 불가.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 overflow-hidden flex-1">
+          {/* 대상자 리스트 */}
+          <div className="overflow-y-auto border border-border rounded-lg">
+            <div className="px-3 py-2 text-[11px] font-medium text-muted-foreground bg-muted/30 sticky top-0">
+              발송 대상 {total}명
+            </div>
+            {members.map((m, i) => (
+              <button
+                key={m.id}
+                onClick={() => setPreviewIdx(i)}
+                className={`w-full text-left px-3 py-2 border-b border-border text-xs hover:bg-muted/30 ${
+                  i === previewIdx ? 'bg-primary/5 border-l-2 border-l-primary' : ''
+                }`}
+              >
+                <div className="font-medium">
+                  {m.name} 선생님 {m.ls_role === 'leader' && <span className="text-primary text-[10px]">·대표</span>}
+                  <span className="text-muted-foreground ml-1">· {m.phone}</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-0.5">
+                  {m.school_name ?? '-'} · 학급플랜 7개월권 / 40명
+                </div>
+              </button>
+            ))}
+            {total === 0 && (
+              <div className="px-3 py-8 text-center text-xs text-muted-foreground">대상자 없음</div>
+            )}
+          </div>
+
+          {/* 미리보기 */}
+          <div className="overflow-y-auto border border-border rounded-lg bg-yellow-50/40">
+            <div className="px-3 py-2 text-[11px] font-medium text-muted-foreground bg-yellow-50 sticky top-0 border-b border-yellow-200">
+              알림톡 미리보기 — TS_6206 · {previewTarget?.name ?? '-'}
+            </div>
+            {previewTarget ? (
+              <pre className="px-3 py-3 text-[11px] whitespace-pre-wrap font-sans leading-relaxed">
+                {previewMessage(previewTarget)}
+              </pre>
+            ) : (
+              <div className="px-3 py-8 text-center text-xs text-muted-foreground">대상자 선택</div>
+            )}
+            <div className="px-3 py-2 text-[10px] text-muted-foreground border-t border-yellow-200 italic">
+              * 실제 발송 메시지는 Aligo 등록 템플릿(TS_6206) 기준. 쿠폰 코드는 발급 시 자동 생성됩니다.
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-3 border-t border-border">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={sending}>취소</Button>
+          <Button onClick={onConfirm} disabled={sending || total === 0}>
+            {sending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />발급 중...</>
+                     : <><Award className="h-4 w-4 mr-1" />{total}명에게 발급</>}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
