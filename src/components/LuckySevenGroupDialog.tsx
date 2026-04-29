@@ -35,12 +35,26 @@ interface GroupListItem extends LSGroupRow {
   total_count?: number;
 }
 
+// 그룹 status → 상태 카테고리 매핑 (필터 칩용)
+type StatusFilter = 'all' | '결제대기' | '결제진행중' | '결제완료' | '라이선스대기' | '라이선스발급';
+
+const matchFilter = (status: string, filter: StatusFilter): boolean => {
+  if (filter === 'all') return true;
+  if (filter === '결제대기') return status === '신청' || status === '견적발송';
+  if (filter === '결제진행중') return status === '일부결제';
+  if (filter === '결제완료') return status === '결제완료' || status === '발급완료';
+  if (filter === '라이선스대기') return status === '결제완료';
+  if (filter === '라이선스발급') return status === '발급완료';
+  return true;
+};
+
 // 그룹 리스트 + 상세 뷰 (Dialog 또는 인라인 탭에서 재사용)
 export function LuckySevenGroupsView({ campaignId, campaignName }: { campaignId: string; campaignName: string }) {
   const [groups, setGroups] = useState<GroupListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [filter, setFilter] = useState<StatusFilter>('all');
 
   const reload = async () => {
     setLoading(true);
@@ -85,9 +99,35 @@ export function LuckySevenGroupsView({ campaignId, campaignName }: { campaignId:
   const totalPaymentGroups = groups.reduce((s, g) => s + (g.total_count ?? 0), 0);
   const totalPaid = groups.reduce((s, g) => s + (g.paid_count ?? 0), 0);
 
+  // 필터별 카운트
+  const counts: Record<StatusFilter, number> = {
+    all: groups.length,
+    결제대기: groups.filter((g) => matchFilter(g.status, '결제대기')).length,
+    결제진행중: groups.filter((g) => matchFilter(g.status, '결제진행중')).length,
+    결제완료: groups.filter((g) => matchFilter(g.status, '결제완료')).length,
+    라이선스대기: groups.filter((g) => matchFilter(g.status, '라이선스대기')).length,
+    라이선스발급: groups.filter((g) => matchFilter(g.status, '라이선스발급')).length,
+  };
+
+  const filteredGroups = groups.filter((g) => matchFilter(g.status, filter));
+
+  const Chip = ({ id, label, color }: { id: StatusFilter; label: string; color: string }) => (
+    <button
+      type="button"
+      onClick={() => setFilter(id)}
+      className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${
+        filter === id
+          ? 'bg-foreground text-background border-foreground'
+          : `${color} hover:opacity-80`
+      }`}
+    >
+      {label} <span className="font-bold ml-0.5">{counts[id]}</span>
+    </button>
+  );
+
   return (
     <div className="space-y-3">
-      {/* 헤더 — 합계 + 새로고침 */}
+      {/* 합계 라인 */}
       <div className="flex items-center justify-between gap-2 px-1">
         <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
           <span><strong className="text-foreground">{groups.length}</strong> 그룹</span>
@@ -99,13 +139,27 @@ export function LuckySevenGroupsView({ campaignId, campaignName }: { campaignId:
         </Button>
       </div>
 
+      {/* 상태별 필터 칩 */}
+      <div className="flex items-center gap-1.5 flex-wrap px-1">
+        <Chip id="all" label="전체" color="bg-muted text-muted-foreground border-border" />
+        <span className="text-[10px] text-muted-foreground/60 ml-1">결제</span>
+        <Chip id="결제대기" label="대기" color="bg-amber-50 text-amber-700 border-amber-200" />
+        <Chip id="결제진행중" label="진행중" color="bg-blue-50 text-blue-700 border-blue-200" />
+        <Chip id="결제완료" label="완료" color="bg-teal-50 text-teal-700 border-teal-200" />
+        <span className="text-[10px] text-muted-foreground/60 ml-1">라이선스</span>
+        <Chip id="라이선스대기" label="대기" color="bg-orange-50 text-orange-700 border-orange-200" />
+        <Chip id="라이선스발급" label="발급" color="bg-emerald-50 text-emerald-700 border-emerald-200" />
+      </div>
+
       {loading && groups.length === 0 ? (
         <div className="py-12 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-      ) : groups.length === 0 ? (
-        <div className="py-12 text-center text-sm text-muted-foreground">아직 신청된 그룹이 없습니다.</div>
+      ) : filteredGroups.length === 0 ? (
+        <div className="py-12 text-center text-sm text-muted-foreground">
+          {groups.length === 0 ? '아직 신청된 그룹이 없습니다.' : `${filter} 상태의 그룹이 없습니다.`}
+        </div>
       ) : (
         <div className="space-y-2">
-          {groups.map((g) => (
+          {filteredGroups.map((g) => (
             <GroupCard
               key={g.id}
               group={g}
