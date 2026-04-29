@@ -1913,18 +1913,33 @@ function DealForm({
                     {items.map((it, idx) => (
                       <div key={idx} className="rounded-md border border-border p-2 space-y-1.5">
                         <div className="flex items-center gap-1.5">
-                          <select value={it.plan} onChange={e => {
-                            const nextPlan = e.target.value;
-                            // 럭키세븐이벤트플랜 선택 시 duration을 7개월로 자동 고정
-                            if (nextPlan === '럭키세븐이벤트플랜') {
-                              updateItem(idx, { plan: nextPlan, duration: 7, unit_price: 0 });
-                            } else {
-                              updateItem(idx, { plan: nextPlan, unit_price: 0 });
-                            }
-                          }}
-                            className="h-7 text-xs border rounded px-1.5 flex-1 bg-background">
+                          <select
+                            value={PLAN_LIST.includes(it.plan) ? it.plan : (it.plan ? '__custom__' : PLAN_LIST[0])}
+                            onChange={e => {
+                              const nextPlan = e.target.value;
+                              if (nextPlan === '__custom__') {
+                                // 기타 — 기존 자유입력 값 유지
+                                updateItem(idx, { plan: PLAN_LIST.includes(it.plan) ? '' : it.plan, unit_price: 0 });
+                              } else if (nextPlan === '럭키세븐이벤트플랜') {
+                                updateItem(idx, { plan: nextPlan, duration: 7, unit_price: 0 });
+                              } else {
+                                updateItem(idx, { plan: nextPlan, unit_price: 0 });
+                              }
+                            }}
+                            className="h-7 text-xs border rounded px-1.5 flex-1 bg-background"
+                          >
                             {PLAN_LIST.map(p => <option key={p} value={p}>{p}</option>)}
+                            <option value="__custom__">기타(직접입력)</option>
                           </select>
+                          {it.plan && !PLAN_LIST.includes(it.plan) && (
+                            <input
+                              type="text"
+                              value={it.plan}
+                              onChange={e => updateItem(idx, { plan: e.target.value })}
+                              placeholder="플랜명"
+                              className="h-7 text-xs border rounded px-1.5 w-32 bg-background"
+                            />
+                          )}
                           <select value={it.duration} onChange={e => updateItem(idx, { duration: Number(e.target.value), unit_price: 0 })}
                             className="h-7 text-xs border rounded px-1.5 w-20 bg-background"
                             disabled={it.plan === '럭키세븐이벤트플랜'}>

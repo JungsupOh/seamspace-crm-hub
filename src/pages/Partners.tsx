@@ -25,6 +25,7 @@ import { Users } from 'lucide-react';
 import { sendInviteEmail } from '@/lib/email';
 import { PeriodFilter } from '@/components/PeriodFilter';
 import { getPeriodRange, matchesPeriod, sumByPeriod, type PeriodValue } from '@/lib/period';
+import { PARTNER_PLAN_LIST } from '@/lib/pricing';
 import { supabase } from '@/lib/supabase';
 import { notifyPartnerDeal } from '@/lib/telegram';
 
@@ -1268,7 +1269,28 @@ function PartnerDealsSection({
                     <div className="grid grid-cols-3 gap-2">
                       <div><span className="text-[10px] text-muted-foreground">학생 수</span><Input type="number" value={b.student_count} onChange={e => updateBuyer(idx, 'student_count', parseInt(e.target.value) || 0)} className="h-7 text-xs" /></div>
                       <div><span className="text-[10px] text-muted-foreground">개월 수</span><Input type="number" value={b.month_count} onChange={e => updateBuyer(idx, 'month_count', parseInt(e.target.value) || '')} placeholder="12" className="h-7 text-xs" /></div>
-                      <div><span className="text-[10px] text-muted-foreground">플랜</span><Input value={b.plan_name} onChange={e => updateBuyer(idx, 'plan_name', e.target.value)} className="h-7 text-xs" /></div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">플랜</span>
+                        <Select
+                          value={PARTNER_PLAN_LIST.includes(b.plan_name ?? '') ? (b.plan_name ?? '') : ((b.plan_name ?? '') ? '__custom__' : '')}
+                          onValueChange={v => {
+                            if (v === '__custom__') {
+                              updateBuyer(idx, 'plan_name', PARTNER_PLAN_LIST.includes(b.plan_name ?? '') ? '' : (b.plan_name ?? ''));
+                            } else {
+                              updateBuyer(idx, 'plan_name', v);
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="선택" /></SelectTrigger>
+                          <SelectContent>
+                            {PARTNER_PLAN_LIST.map(p => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}
+                            <SelectItem value="__custom__" className="text-xs">기타</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {b.plan_name && !PARTNER_PLAN_LIST.includes(b.plan_name) && (
+                          <Input value={b.plan_name} onChange={e => updateBuyer(idx, 'plan_name', e.target.value)} placeholder="직접입력" className="h-6 text-xs mt-1" />
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1277,7 +1299,25 @@ function PartnerDealsSection({
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs">플랜</Label>
-                <Input value={df('plan_name')} onChange={e => setDialogForm(p => ({ ...p, plan_name: e.target.value }))} className="h-9 text-sm" />
+                <Select
+                  value={PARTNER_PLAN_LIST.includes(df('plan_name')) ? df('plan_name') : (df('plan_name') ? '__custom__' : '')}
+                  onValueChange={v => {
+                    if (v === '__custom__') {
+                      setDialogForm(p => ({ ...p, plan_name: PARTNER_PLAN_LIST.includes(p.plan_name ?? '') ? '' : (p.plan_name ?? '') }));
+                    } else {
+                      setDialogForm(p => ({ ...p, plan_name: v }));
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="플랜 선택" /></SelectTrigger>
+                  <SelectContent>
+                    {PARTNER_PLAN_LIST.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                    <SelectItem value="__custom__">기타(직접입력)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {df('plan_name') && !PARTNER_PLAN_LIST.includes(df('plan_name')) && (
+                  <Input value={df('plan_name')} onChange={e => setDialogForm(p => ({ ...p, plan_name: e.target.value }))} placeholder="플랜명 직접입력" className="h-8 text-sm mt-1" />
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">결제금액</Label>

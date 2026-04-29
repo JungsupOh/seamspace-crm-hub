@@ -12,6 +12,10 @@ export interface QuoteLineItem {
 // '럭키세븐이벤트플랜'은 5월 한정 이벤트용 임시 플랜 (7개월 고정, 1장 10만원).
 // 이벤트 종료 후 PLAN_LIST에서 제거 가능.
 export const PLAN_LIST = ['소수학급플랜', '학급플랜', '학년플랜', '학교(소)', '학교(중)', '학교(대)', '럭키세븐이벤트플랜'];
+
+// 파트너 노출용 — 럭키세븐(이벤트 전용) + 소수학급(어드민 한정) 제외
+export const PARTNER_PLAN_LIST = ['학급플랜', '학년플랜', '학교(소)', '학교(중)', '학교(대)'];
+
 export const DURATION_OPTIONS = [1, 4, 6, 7, 12];
 
 export const PLAN_CAPACITY: Record<string, number> = {

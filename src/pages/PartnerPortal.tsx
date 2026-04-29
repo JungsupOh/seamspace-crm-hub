@@ -13,7 +13,7 @@ import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDea
 import { notifyPartnerDeal } from '@/lib/telegram';
 import type { PartnerDeal, PartnerDealBuyer } from '@/lib/partner-deals';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
-import { PLAN_LIST, DURATION_OPTIONS, getUnitPrice } from '@/lib/pricing';
+import { PARTNER_PLAN_LIST, DURATION_OPTIONS, getUnitPrice } from '@/lib/pricing';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -524,12 +524,31 @@ export default function PartnerPortal() {
                     <div className="grid grid-cols-[1fr_0.7fr_0.5fr_1fr] gap-2">
                       <div>
                         <span className="text-[10px] text-muted-foreground">구매플랜</span>
-                        <Select value={it.plan} onValueChange={v => updateItem(idx, 'plan', v)}>
-                          <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                        <Select
+                          value={PARTNER_PLAN_LIST.includes(it.plan) ? it.plan : (it.plan ? '__custom__' : '')}
+                          onValueChange={v => {
+                            if (v === '__custom__') {
+                              // 기타 선택 시 — 기존 자유입력 값 유지하거나 빈값으로 시작
+                              updateItem(idx, 'plan', PARTNER_PLAN_LIST.includes(it.plan) ? '' : it.plan);
+                            } else {
+                              updateItem(idx, 'plan', v);
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="플랜 선택" /></SelectTrigger>
                           <SelectContent>
-                            {PLAN_LIST.map(p => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}
+                            {PARTNER_PLAN_LIST.map(p => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}
+                            <SelectItem value="__custom__" className="text-xs">기타(직접입력)</SelectItem>
                           </SelectContent>
                         </Select>
+                        {it.plan && !PARTNER_PLAN_LIST.includes(it.plan) && (
+                          <Input
+                            value={it.plan}
+                            onChange={e => updateItem(idx, 'plan', e.target.value)}
+                            placeholder="플랜명 직접입력"
+                            className="h-6 text-xs mt-1"
+                          />
+                        )}
                       </div>
                       <div>
                         <span className="text-[10px] text-muted-foreground">이용개월</span>
