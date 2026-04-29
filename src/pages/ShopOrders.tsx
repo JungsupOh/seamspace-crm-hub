@@ -397,7 +397,7 @@ function OrderDetailDialog(props: {
                   <span className="text-[10px] text-amber-600 font-medium">● 미저장 변경</span>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-[1fr_1.4fr_auto] gap-2 items-end">
                 <div>
                   <Label className="text-xs">택배사</Label>
                   <Select value={carrier} onValueChange={setCarrier}>
@@ -412,16 +412,17 @@ function OrderDetailDialog(props: {
                   <Input
                     value={trackingNumber}
                     onChange={(e) => setTrackingNumber(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && dirty && !updating) handleSaveTracking(); }}
                     placeholder="숫자만 입력"
                     className="h-9 text-xs"
                   />
                 </div>
+                <Button onClick={handleSaveTracking} disabled={updating || !dirty} size="sm" className="h-9">
+                  {updating ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
+                  저장
+                </Button>
               </div>
-              <Button onClick={handleSaveTracking} disabled={updating || !dirty} className="mt-3 w-full">
-                {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-                송장 정보 저장
-              </Button>
-              <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
+              <p className="text-[10px] text-muted-foreground mt-1.5">
                 저장 후 고객이 주문 조회에서 운송장 번호를 확인할 수 있습니다.
               </p>
             </section>
