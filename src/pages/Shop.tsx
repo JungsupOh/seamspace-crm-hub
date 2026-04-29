@@ -93,8 +93,8 @@ export default function Shop() {
               </div>
             </Link>
             <Link to="/shop/lucky-seven" className="group text-center">
-              <div className="relative rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-2 aspect-square">
-                <img src="/events/lucky-seven/lucky-seven-thumnail-2.png" alt="럭키세븐 이벤트" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-2 relative">
+                <img src="/events/lucky-seven/lucky-seven-thumnail-2.png" alt="럭키세븐 이벤트" className="w-full block group-hover:scale-105 transition-transform duration-300" />
                 <span className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">5월 한정</span>
               </div>
               <h3 className="font-bold text-sm">럭키세븐 이벤트</h3>
