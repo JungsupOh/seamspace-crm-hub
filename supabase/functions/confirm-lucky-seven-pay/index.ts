@@ -103,6 +103,11 @@ Deno.serve(async (req: Request) => {
         paymentGroupId: pg.id,
         method: tossData.method ?? null,
         approvedAt: tossData.approvedAt ?? null,
+        receiptUrl: tossData.receipt?.url ?? null,
+        orderName: tossData.orderName ?? null,
+        amount: tossData.totalAmount ?? amount,
+        payerEmail: pg.payer_email ?? null,
+        payerName: pg.payer_name ?? null,
       }),
       { headers: { "Content-Type": "application/json", ...CORS } },
     );

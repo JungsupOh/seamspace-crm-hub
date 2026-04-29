@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { CheckCircle2, MessageSquare, FileText, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { sendPaymentReceiptEmail } from '@/lib/email';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -47,6 +48,21 @@ export default function OrderComplete() {
         if (ok && data.coupon_code) {
           setCouponCode(data.coupon_code);
           setConfirmed(true);
+
+          // 영수증 이메일 발송 (실패해도 UI 진행)
+          const toEmail = data.customerEmail || session.customerEmail;
+          if (toEmail) {
+            sendPaymentReceiptEmail({
+              to: toEmail,
+              customerName: data.customerName || session.customerName || '',
+              orderName: data.orderName || '심스페이스 이용권',
+              amount: Number(data.amount ?? amount),
+              paidAt: data.approvedAt ?? undefined,
+              receiptUrl: data.receiptUrl ?? undefined,
+              orderId: orderId ?? undefined,
+              method: data.method ?? '카드',
+            }).catch((err) => console.warn('[OrderComplete] 영수증 이메일 실패:', err));
+          }
         } else {
           setError(data.error ?? '결제 확인 중 오류가 발생했습니다.');
           setConfirmed(true);

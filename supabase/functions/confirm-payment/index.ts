@@ -151,7 +151,17 @@ Deno.serve(async (req: Request) => {
     }).catch(e => console.warn("[confirm-payment] order_payments 저장 실패 (무시):", e));
 
     return new Response(
-      JSON.stringify({ ok: true, coupon_code: couponCode }),
+      JSON.stringify({
+        ok: true,
+        coupon_code: couponCode,
+        receiptUrl:  tossData.receipt?.url ?? null,
+        orderName:   tossData.orderName ?? null,
+        method:      tossData.method ?? null,
+        approvedAt:  tossData.approvedAt ?? null,
+        amount:      tossData.totalAmount ?? amount,
+        customerEmail: customerEmail ?? null,
+        customerName:  customerName ?? null,
+      }),
       { headers: { "Content-Type": "application/json", ...CORS } }
     );
 

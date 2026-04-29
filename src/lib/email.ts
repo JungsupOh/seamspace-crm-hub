@@ -248,3 +248,60 @@ export async function sendQuoteEmail(params: {
     }
   );
 }
+
+// ── 결제 완료 영수증 이메일 ──────────────────────────
+export async function sendPaymentReceiptEmail(params: {
+  to: string;
+  customerName: string;
+  orderName: string;
+  amount: number;
+  paidAt?: string;        // ISO datetime
+  receiptUrl?: string;    // Toss 매출전표 URL
+  orderId?: string;       // 주문번호 (= quote_number 등)
+  method?: string;        // 결제 수단 ('카드' 등)
+}): Promise<void> {
+  const fmtAmount = params.amount.toLocaleString('ko-KR');
+  const paidAtStr = params.paidAt
+    ? new Date(params.paidAt).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })
+    : new Date().toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
+
+  const html = layout(`
+    <h2 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#18181b;">결제가 완료되었습니다 💳</h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
+      ${params.customerName} 선생님,<br/>
+      심스페이스 결제가 정상 처리되었습니다. 아래에서 결제 내역을 확인하세요.
+    </p>
+
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:8px;padding:16px;margin-bottom:20px;">
+      <tr><td style="padding:6px 0;font-size:13px;color:#64748b;">상품</td>
+          <td style="padding:6px 0;font-size:13px;color:#18181b;font-weight:600;text-align:right;">${params.orderName}</td></tr>
+      ${params.orderId ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;">주문번호</td>
+          <td style="padding:6px 0;font-size:12px;color:#18181b;font-family:monospace;text-align:right;">${params.orderId}</td></tr>` : ''}
+      ${params.method ? `<tr><td style="padding:6px 0;font-size:13px;color:#64748b;">결제수단</td>
+          <td style="padding:6px 0;font-size:13px;color:#18181b;text-align:right;">${params.method}</td></tr>` : ''}
+      <tr><td style="padding:6px 0;font-size:13px;color:#64748b;">결제일시</td>
+          <td style="padding:6px 0;font-size:13px;color:#18181b;text-align:right;">${paidAtStr}</td></tr>
+      <tr><td style="padding:8px 0 0;font-size:13px;color:#64748b;border-top:1px solid #e4e4e7;">결제 금액</td>
+          <td style="padding:8px 0 0;font-size:16px;color:#0f172a;font-weight:700;text-align:right;border-top:1px solid #e4e4e7;">${fmtAmount}원</td></tr>
+    </table>
+
+    ${params.receiptUrl ? `
+    <p style="margin:0 0 24px;text-align:center;">
+      <a href="${params.receiptUrl}" target="_blank" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-size:14px;font-weight:600;">매출전표(영수증) 보기</a>
+    </p>` : ''}
+
+    <p style="margin:0 0 8px;font-size:13px;color:#64748b;line-height:1.7;">
+      문의: <a href="mailto:sales@tebahsoft.com" style="color:#6366f1;text-decoration:none;">sales@tebahsoft.com</a>
+    </p>
+    <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
+      감사합니다.<br/>테바소프트 담당자 드림.
+    </p>
+  `);
+
+  await sendEmail(
+    params.to,
+    `[심스페이스] 결제 완료 영수증 — ${params.orderName}`,
+    html,
+    { reply_to: 'sales@tebahsoft.com' },
+  );
+}
