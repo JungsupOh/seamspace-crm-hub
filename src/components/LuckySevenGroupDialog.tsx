@@ -170,6 +170,7 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
   const [detail, setDetail] = useState<{ paymentGroups: LSPaymentGroupRow[]; leads: LSLeadRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [issueDialogOpen, setIssueDialogOpen] = useState(false);
 
   const reloadDetail = async () => {
     setLoading(true);
@@ -256,8 +257,6 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
       setBusy(false);
     }
   };
-
-  const [issueDialogOpen, setIssueDialogOpen] = useState(false);
 
   const handleConfirmIssue = async () => {
     setBusy(true);
