@@ -879,14 +879,82 @@ function PartnerDealsSection({
   const [dealCustomFrom, setDealCustomFrom] = useState('');
   const [dealCustomTo, setDealCustomTo] = useState('');
 
-  // 계약금액: contract_date 기준 / 매출·수수료·정산: deposit_date 기준 (회계 정합성)
-  const totalContract = sumByPeriod(deals, d => d.contract_date, d => d.payment_amount, dealPeriod, dealCustomFrom, dealCustomTo);
-  const totalPayment = sumByPeriod(deals, d => d.deposit_date, d => d.payment_amount, dealPeriod, dealCustomFrom, dealCustomTo);
-  const totalCommission = sumByPeriod(deals, d => d.deposit_date, d => d.commission_amount, dealPeriod, dealCustomFrom, dealCustomTo);
-  const totalSettlement = sumByPeriod(deals, d => d.deposit_date, d => d.settlement_amount, dealPeriod, dealCustomFrom, dealCustomTo);
+  // 통합 행 — partner_deals + crm_only (linked 제외)
+  type UnifiedRow = {
+    source: 'partner' | 'crm_only';
+    rawId: string;
+    contract_date?: string;
+    school_name?: string;
+    buyer_name?: string;
+    buyer_phone?: string;
+    plan_name?: string;
+    quantity?: number;
+    payment_amount: number;
+    commission_amount: number;
+    settlement_amount: number;
+    license_issue_date?: string;
+    deposit_date?: string;
+    remarks?: string;
+    linked_deal_id?: string;
+    rawPartner?: PartnerDeal;
+  };
 
-  // 테이블 표시용 — 계약일 기준 매칭 (목록에서는 계약일 우선)
-  const filteredByPeriod = deals.filter(d => matchesPeriod(d.contract_date, dealPeriod, dealCustomFrom, dealCustomTo));
+  const linkedDealIdSet = new Set(
+    deals.filter(d => d.linked_deal_id).map(d => d.linked_deal_id!),
+  );
+
+  const unifiedRows: UnifiedRow[] = [
+    ...deals.map((d): UnifiedRow => ({
+      source: 'partner',
+      rawId: d.id,
+      contract_date: d.contract_date,
+      school_name: d.school_name,
+      buyer_name: d.buyer_name,
+      buyer_phone: d.buyer_phone,
+      plan_name: d.plan_name,
+      quantity: d.quantity,
+      payment_amount: d.payment_amount ?? 0,
+      commission_amount: d.commission_amount ?? 0,
+      settlement_amount: d.settlement_amount ?? 0,
+      license_issue_date: d.license_issue_date,
+      deposit_date: d.deposit_date,
+      remarks: d.remarks,
+      linked_deal_id: d.linked_deal_id,
+      rawPartner: d,
+    })),
+    ...crmDeals
+      .filter(c => !linkedDealIdSet.has(c.id))
+      .map((c): UnifiedRow => {
+        const amt = c.fields.Final_Contract_Value ?? 0;
+        const calc = calcCommission(amt, commissionRate);
+        return {
+          source: 'crm_only',
+          rawId: c.id,
+          contract_date: c.fields.Contract_Date,
+          school_name: c.fields.Org_Name,
+          buyer_name: c.fields.Contact_Name,
+          buyer_phone: c.fields.Contact_Phone,
+          plan_name: c.fields.Quote_Plan,
+          quantity: c.fields.Quote_Qty,
+          payment_amount: amt,
+          commission_amount: calc.commission,
+          settlement_amount: calc.settlement,
+          license_issue_date: c.fields.License_Send_Date,
+          deposit_date: c.fields.Payment_Date,
+          remarks: c.fields.Deal_Stage,
+        };
+      }),
+  ].sort((a, b) => (b.contract_date ?? '').localeCompare(a.contract_date ?? ''));
+
+  // 4개 카드 합계 — 통합 행 기준, 카드별로 다른 날짜 필드 사용
+  const totalContract = sumByPeriod(unifiedRows, r => r.contract_date, r => r.payment_amount, dealPeriod, dealCustomFrom, dealCustomTo);
+  const totalPayment = sumByPeriod(unifiedRows, r => r.deposit_date, r => r.payment_amount, dealPeriod, dealCustomFrom, dealCustomTo);
+  const totalCommission = sumByPeriod(unifiedRows, r => r.deposit_date, r => r.commission_amount, dealPeriod, dealCustomFrom, dealCustomTo);
+  const totalSettlement = sumByPeriod(unifiedRows, r => r.deposit_date, r => r.settlement_amount, dealPeriod, dealCustomFrom, dealCustomTo);
+
+  // 테이블 행 — 계약일 기준 기간 필터
+  const filteredUnified = unifiedRows.filter(r => matchesPeriod(r.contract_date, dealPeriod, dealCustomFrom, dealCustomTo));
+  const filteredByPeriod = filteredUnified.filter(r => r.source === 'partner').map(r => r.rawPartner!);  // 기존 호환 (편집 다이얼로그용)
 
   const openAddDialog = () => {
     setDialogMode('add');
@@ -1110,57 +1178,32 @@ function PartnerDealsSection({
         </div>
       </div>
 
-      {/* 실적 요약 카드 */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* 실적 요약 카드 — 4개 (계약금액=계약일 기준 / 매출·수수료·정산=입금일 기준) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="surface-card ring-container p-4">
-          <p className="text-xs text-muted-foreground mb-1">매출 (결제금액)</p>
+          <p className="text-xs text-muted-foreground mb-1">계약금액 <span className="text-[10px] text-muted-foreground/60">· 계약일 기준</span></p>
+          <p className="text-2xl font-bold tabular-nums text-slate-700">{totalContract.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">원</span></p>
+        </div>
+        <div className="surface-card ring-container p-4">
+          <p className="text-xs text-muted-foreground mb-1">매출 (입금액) <span className="text-[10px] text-muted-foreground/60">· 입금일 기준</span></p>
           <p className="text-2xl font-bold tabular-nums">{totalPayment.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">원</span></p>
         </div>
         <div className="surface-card ring-container p-4">
-          <p className="text-xs text-muted-foreground mb-1">수수료</p>
+          <p className="text-xs text-muted-foreground mb-1">수수료 <span className="text-[10px] text-muted-foreground/60">· 입금일 기준</span></p>
           <p className="text-2xl font-bold tabular-nums text-amber-600">{totalCommission.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">원</span></p>
         </div>
         <div className="surface-card ring-container p-4">
-          <p className="text-xs text-muted-foreground mb-1">정산금액</p>
+          <p className="text-xs text-muted-foreground mb-1">정산금액 <span className="text-[10px] text-muted-foreground/60">· 입금일 기준</span></p>
           <p className="text-2xl font-bold tabular-nums text-teal-700">{totalSettlement.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">원</span></p>
         </div>
       </div>
 
-      {/* CRM 연관 딜 (참조) */}
-      {crmDeals.length > 0 && (
-        <details className="text-xs">
-          <summary className="text-muted-foreground cursor-pointer hover:text-foreground">CRM 연관 딜 {crmDeals.length}건 (참조)</summary>
-          <div className="mt-1 rounded border border-border overflow-hidden max-h-40 overflow-y-auto">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0"><tr className="bg-muted/90 border-b border-border">
-                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">학교</th>
-                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">담당자</th>
-                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">계약일</th>
-                <th className="px-3 py-1.5 text-right font-medium text-muted-foreground">금액</th>
-                <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">단계</th>
-              </tr></thead>
-              <tbody className="divide-y divide-border">
-                {crmDeals.map(d => (
-                  <tr key={d.id} className="hover:bg-muted/30">
-                    <td className="px-3 py-1.5">{d.fields.Org_Name || '-'}</td>
-                    <td className="px-3 py-1.5 text-muted-foreground">{d.fields.Contact_Name || '-'}</td>
-                    <td className="px-3 py-1.5 text-muted-foreground">{d.fields.Contract_Date || '-'}</td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">{d.fields.Final_Contract_Value?.toLocaleString() || '-'}</td>
-                    <td className="px-3 py-1.5 text-muted-foreground">{d.fields.Deal_Stage || '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </details>
-      )}
-
-      {/* 딜 목록 */}
+      {/* 딜 목록 — 통합 (파트너 등록 + CRM-only) */}
       {loading ? (
         <div className="text-center py-8 text-sm text-muted-foreground">로딩 중...</div>
-      ) : deals.length === 0 ? (
+      ) : unifiedRows.length === 0 ? (
         <div className="text-center py-12 text-sm text-muted-foreground border border-dashed rounded-md">
-          파트너 딜이 없습니다. [딜 추가] 버튼으로 등록하세요.
+          딜이 없습니다. [딜 추가] 버튼으로 등록하거나 CRM 자동연결로 가져오세요.
         </div>
       ) : (
         <div className="surface-card ring-container overflow-hidden">
@@ -1168,7 +1211,7 @@ function PartnerDealsSection({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/60">
-                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground w-10">#</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground w-14">출처</th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">계약일</th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">학교명</th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">구매자</th>
@@ -1181,36 +1224,49 @@ function PartnerDealsSection({
                   <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">이용권발급</th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">입금일</th>
                   <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">비고</th>
-                  <th className="px-3 py-3 text-center text-xs font-medium text-muted-foreground">연결</th>
                   <th className="px-3 py-3 w-16"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredByPeriod.map((d, idx) => (
-                    <tr key={d.id} className="hover:bg-muted/30 cursor-pointer" onClick={() => openEditDialog(d)}>
-                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{idx + 1}</td>
-                      <td className="px-3 py-2.5 text-sm whitespace-nowrap">{d.contract_date || '-'}</td>
-                      <td className="px-3 py-2.5 font-medium">{d.school_name || '-'}</td>
-                      <td className="px-3 py-2.5 text-muted-foreground">{d.buyer_name || '-'}</td>
-                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.buyer_phone || '-'}</td>
-                      <td className="px-3 py-2.5 text-muted-foreground">{d.plan_name || '-'}</td>
-                      <td className="px-3 py-2.5 text-center">{d.quantity || '-'}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums font-medium">{(d.payment_amount ?? 0) > 0 ? d.payment_amount!.toLocaleString() : '-'}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-amber-600">{(d.commission_amount ?? 0) > 0 ? d.commission_amount!.toLocaleString() : '-'}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-teal-700">{(d.settlement_amount ?? 0) > 0 ? d.settlement_amount!.toLocaleString() : '-'}</td>
-                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.license_issue_date || '-'}</td>
-                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.deposit_date || '-'}</td>
-                      <td className="px-3 py-2.5 text-xs text-muted-foreground truncate max-w-[120px]">{d.remarks || '-'}</td>
-                      <td className="px-3 py-2.5 text-center">{d.linked_deal_id
-                        ? <Link2 className="h-3.5 w-3.5 text-teal-600 inline" />
-                        : <span className="text-muted-foreground/40">-</span>
-                      }</td>
+                {filteredUnified.map((r) => {
+                  const isPartner = r.source === 'partner';
+                  return (
+                    <tr
+                      key={`${r.source}-${r.rawId}`}
+                      className={`${isPartner ? 'hover:bg-muted/30 cursor-pointer' : 'bg-muted/10 cursor-default'}`}
+                      onClick={() => { if (isPartner && r.rawPartner) openEditDialog(r.rawPartner); }}
+                      title={!isPartner ? '이 딜은 /deals 메뉴에서 수정해주세요' : undefined}
+                    >
+                      <td className="px-3 py-2.5">
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                          isPartner ? 'bg-purple-100 text-purple-700' : 'bg-slate-200 text-slate-600'
+                        }`}>
+                          {isPartner ? '파트너' : '어드민'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-sm whitespace-nowrap">{r.contract_date || '-'}</td>
+                      <td className="px-3 py-2.5 font-medium">{r.school_name || '-'}</td>
+                      <td className="px-3 py-2.5 text-muted-foreground">{r.buyer_name || '-'}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{r.buyer_phone || '-'}</td>
+                      <td className="px-3 py-2.5 text-muted-foreground">{r.plan_name || '-'}</td>
+                      <td className="px-3 py-2.5 text-center">{r.quantity || '-'}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums font-medium">{r.payment_amount > 0 ? r.payment_amount.toLocaleString() : '-'}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-amber-600">{r.commission_amount > 0 ? r.commission_amount.toLocaleString() : '-'}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-teal-700">{r.settlement_amount > 0 ? r.settlement_amount.toLocaleString() : '-'}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{r.license_issue_date || '-'}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{r.deposit_date || '-'}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground truncate max-w-[120px]">{r.remarks || '-'}</td>
                       <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => handleDelete(d.id)}
-                          className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
+                        {isPartner ? (
+                          <button onClick={() => handleDelete(r.rawId)}
+                            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
+                        ) : (
+                          <span className="text-muted-foreground/40 text-[10px]">CRM</span>
+                        )}
                       </td>
                     </tr>
-                  ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
