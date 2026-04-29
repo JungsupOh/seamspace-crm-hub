@@ -292,6 +292,7 @@ export interface DealQuote {
   discount_amount?: number;
   notes?: string;
   contact_phone?: string;
+  contact_email?: string;
   is_selected: boolean;
   created_at: string;
   // 웹 주문 필드

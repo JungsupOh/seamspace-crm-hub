@@ -17,6 +17,7 @@ import Upload from "./pages/Upload";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import Order from "./pages/Order";
+import OrderPay from "./pages/OrderPay";
 import OrderTest from "./pages/OrderTest";
 import OrderComplete from "./pages/OrderComplete";
 import OrderFail from "./pages/OrderFail";
@@ -145,8 +146,9 @@ function AppRoutes() {
       <Route path="/event/lucky-seven/pay/fail" element={<LuckySevenPayFail />} />
       <Route path="/event/lucky-seven/pay/:quoteNumber" element={<LuckySevenPay />} />
       <Route path="/event/lucky-seven/status" element={<LuckySevenStatus />} />
-      {/* /order는 일반 사용자용 — 정식 오픈 전까지 '준비중' 페이지 */}
+      {/* /order는 견적서 번호 lookup 폼, /order/pay/:quoteNumber는 이메일 검증 + Toss 결제 */}
       <Route path="/order" element={<Order />} />
+      <Route path="/order/pay/:quoteNumber" element={<OrderPay />} />
       <Route path="/order/complete" element={<OrderComplete />} />
       <Route path="/order/fail" element={<OrderFail />} />
       {/* 상품 스토어 — 로그인 불필요 */}

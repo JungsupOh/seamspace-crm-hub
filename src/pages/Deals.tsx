@@ -1299,8 +1299,10 @@ function DealForm({
     const items = tab?.items ?? [];
     const discount = tab?.discount_amount ?? 0;
     const totals = calcQuoteTotals(items, discount);
+    const quoteNumber = n('Quote_Number');
+    const paymentUrl = quoteNumber ? `${window.location.origin}/order/pay/${encodeURIComponent(quoteNumber)}` : undefined;
     return {
-      quoteNumber: n('Quote_Number'),
+      quoteNumber,
       quoteDate: n('Quote_Date'),
       orgName: n('Org_Name'),
       contactName: n('Contact_Name'),
@@ -1314,6 +1316,7 @@ function DealForm({
       supplyPrice: totals.supplyPrice || (num('Supply_Price') ?? 0),
       taxAmount: totals.taxAmount || (num('Tax_Amount') ?? 0),
       notes: tab?.notes,
+      paymentUrl,
     };
   };
 
@@ -1365,19 +1368,69 @@ function DealForm({
     setQuoteSendPreview({ blobUrl, base64, fileName });
   };
 
+  // 결제 페이지 검증용 — deal_quotes에 quote_number / contact_email / contact_phone UPSERT
+  // /order/pay/:quoteNumber에서 견적서 조회 + 이메일 매칭 시 사용됨
+  const upsertActiveTabQuote = async () => {
+    const quoteNumber = n('Quote_Number');
+    if (!quoteNumber) return;
+    const dealId = draftKey?.startsWith('edit_') ? draftKey.slice(5) : 'web';
+    const tab = localTabs[activeTabIdx];
+    const items = tab?.items ?? [];
+    const fields = {
+      deal_id: dealId,
+      quote_number: quoteNumber,
+      quote_date: n('Quote_Date') || undefined,
+      contact_email: n('Contact_Email') || undefined,
+      contact_phone: n('Contact_Phone') || undefined,
+      org_name: n('Org_Name') || undefined,
+      plan: items[0]?.plan || n('Quote_Plan') || undefined,
+      duration: num('License_Duration') ?? items[0]?.duration,
+      qty: items[0]?.qty,
+      license_qty: tab?.license_qty,
+      unit_price: items[0]?.unit_price ?? num('Unit_Price'),
+      supply_price: num('Supply_Price'),
+      tax_amount: num('Tax_Amount'),
+      final_value: num('Final_Contract_Value'),
+      items,
+      discount_amount: tab?.discount_amount,
+      notes: tab?.notes,
+    };
+    try {
+      const found = await fetch(
+        `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=eq.${encodeURIComponent(quoteNumber)}&select=id`,
+        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+      ).then((r) => (r.ok ? r.json() : []));
+      if (Array.isArray(found) && found.length > 0) {
+        await updateDealQuote(found[0].id, fields);
+      } else {
+        await saveDealQuote({ ...fields, is_selected: tab?.is_selected ?? false } as Omit<DealQuote, 'id' | 'created_at'>);
+      }
+    } catch (e) {
+      console.warn('deal_quotes UPSERT 실패 (이메일 검증 영향)', e);
+    }
+  };
+
   const handleQuoteConfirmSend = async () => {
     if (!quoteSendPreview) return;
     setQuoteSending(true);
     try {
+      const quoteNumber = n('Quote_Number');
+      const contactEmail = n('Contact_Email');
+      const paymentUrl = quoteNumber ? `${window.location.origin}/order/pay/${encodeURIComponent(quoteNumber)}` : undefined;
+
+      // 결제 페이지 검증용 — deal_quotes에 contact_email/contact_phone UPSERT
+      await upsertActiveTabQuote();
+
       await sendQuoteEmail({
-        to: n('Contact_Email'),
+        to: contactEmail,
         orgName: n('Org_Name'),
         contactName: n('Contact_Name'),
-        quoteNumber: n('Quote_Number'),
+        quoteNumber,
+        paymentUrl,
         attachmentBase64: quoteSendPreview.base64,
         attachmentFileName: quoteSendPreview.fileName,
       });
-      toast.success(`${n('Contact_Email')}으로 견적서를 발송했습니다`);
+      toast.success(`${contactEmail}으로 견적서를 발송했습니다`);
       URL.revokeObjectURL(quoteSendPreview.blobUrl);
       setQuoteSendPreview(null);
     } catch (e) {
@@ -1422,14 +1475,22 @@ function DealForm({
     if (!quoteBatchPreview) return;
     setQuoteBatchSending(true);
     try {
+      const quoteNumber = n('Quote_Number');
+      const contactEmail = n('Contact_Email');
+      const paymentUrl = quoteNumber ? `${window.location.origin}/order/pay/${encodeURIComponent(quoteNumber)}` : undefined;
+
+      // 결제 페이지 검증용 — deal_quotes에 contact_email/contact_phone UPSERT
+      await upsertActiveTabQuote();
+
       await sendQuoteEmail({
-        to: n('Contact_Email'),
+        to: contactEmail,
         orgName: n('Org_Name'),
         contactName: n('Contact_Name'),
-        quoteNumber: n('Quote_Number'),
+        quoteNumber,
+        paymentUrl,
         attachments: quoteBatchPreview.map(p => ({ base64: p.base64, fileName: p.fileName })),
       });
-      toast.success(`${quoteBatchPreview.length}건의 견적서를 ${n('Contact_Email')}으로 발송했습니다`);
+      toast.success(`${quoteBatchPreview.length}건의 견적서를 ${contactEmail}으로 발송했습니다`);
       quoteBatchPreview.forEach(p => URL.revokeObjectURL(p.blobUrl));
       setQuoteBatchPreview(null);
     } catch (e) {
@@ -2418,20 +2479,25 @@ function QuoteDialog({
 
   const effectiveStoredFile = removeFile ? undefined : existingFileRec;
 
-  const getPdfData = () => ({
-    quoteNumber: n('quote_number'),
-    quoteDate: n('quote_date'),
-    orgName,
-    contactName,
-    plan: n('plan'),
-    duration: num('duration') ?? 0,
-    unitPrice: num('unit_price') ?? 0,
-    licenseQty: num('license_qty') ?? 0,
-    finalValue: num('final_value') ?? 0,
-    supplyPrice: num('supply_price') ?? 0,
-    taxAmount: num('tax_amount') ?? 0,
-    notes: n('notes') || undefined,
-  });
+  const getPdfData = () => {
+    const quoteNumber = n('quote_number');
+    const paymentUrl = quoteNumber ? `${window.location.origin}/order/pay/${encodeURIComponent(quoteNumber)}` : undefined;
+    return {
+      quoteNumber,
+      quoteDate: n('quote_date'),
+      orgName,
+      contactName,
+      plan: n('plan'),
+      duration: num('duration') ?? 0,
+      unitPrice: num('unit_price') ?? 0,
+      licenseQty: num('license_qty') ?? 0,
+      finalValue: num('final_value') ?? 0,
+      supplyPrice: num('supply_price') ?? 0,
+      taxAmount: num('tax_amount') ?? 0,
+      notes: n('notes') || undefined,
+      paymentUrl,
+    };
+  };
 
   const handleGenerateNumber = async () => {
     setNumGenerating(true);
@@ -2475,11 +2541,14 @@ function QuoteDialog({
     if (!sendPreview) return;
     setSending(true);
     try {
+      const quoteNumber = n('quote_number');
+      const paymentUrl = quoteNumber ? `${window.location.origin}/order/pay/${encodeURIComponent(quoteNumber)}` : undefined;
       await sendQuoteEmail({
         to: contactEmail,
         orgName,
         contactName,
-        quoteNumber: n('quote_number'),
+        quoteNumber,
+        paymentUrl,
         attachmentBase64: sendPreview.base64,
         attachmentFileName: sendPreview.fileName,
       });

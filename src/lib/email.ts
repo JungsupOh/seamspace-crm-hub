@@ -192,10 +192,12 @@ export async function sendQuoteEmail(params: {
   orgName: string;
   contactName: string;
   quoteNumber: string;
+  paymentUrl?: string;     // 견적 번호 기반 개별 결제 링크 (없으면 /order 기본)
   attachmentBase64?: string;
   attachmentFileName?: string;
   attachments?: Array<{ base64: string; fileName: string }>;
 }): Promise<void> {
+  const payHref = params.paymentUrl || `${APP_URL}/order`;
   const html = layout(`
     <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
       안녕하세요. ${params.contactName} 선생님,<br/>
@@ -214,10 +216,15 @@ export async function sendQuoteEmail(params: {
     <p style="margin:0 0 24px;text-align:center;">
       <a href="https://m.site.naver.com/1EfiC" style="display:inline-block;background:#03C75A;color:#ffffff;text-decoration:none;padding:10px 24px;border-radius:8px;font-size:13px;font-weight:600;">매뉴얼 사이트</a>
       &nbsp;&nbsp;
-      <a href="${APP_URL}/order" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:10px 24px;border-radius:8px;font-size:13px;font-weight:600;">결제하러 가기</a>
+      <a href="${payHref}" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:10px 24px;border-radius:8px;font-size:13px;font-weight:600;">결제하러 가기</a>
       &nbsp;&nbsp;
       <a href="http://pf.kakao.com/_FvrSG" style="display:inline-block;background:#FEE500;color:#3C1E1E;text-decoration:none;padding:10px 24px;border-radius:8px;font-size:13px;font-weight:600;">카카오채널 문의</a>
     </p>
+
+    ${params.paymentUrl ? `
+    <p style="margin:0 0 16px;font-size:12px;color:#71717a;background:#f8fafc;border-left:3px solid #6366f1;padding:10px 14px;">
+      🔒 결제 페이지 진입 시 <strong style="color:#18181b;">본 이메일 주소(${params.to})</strong>를 입력해 주세요. 다른 분이 견적서 번호만으로 결제 정보를 조회할 수 없도록 보호됩니다.
+    </p>` : ''}
 
     <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
       기타 궁금하신 사항은 언제든지 연락주시면, 상세히 안내해 드리겠습니다.

@@ -1,6 +1,7 @@
 // 견적서 PDF 생성 (html2canvas + jsPDF)
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import QRCode from 'qrcode';
 import type { QuoteLineItem } from './pricing';
 import { S2B_MAP } from './pricing';
 
@@ -20,6 +21,7 @@ export interface QuotePdfData {
   supplyPrice: number;
   taxAmount: number;
   notes?: string;
+  paymentUrl?: string;     // 결제 페이지 URL (있으면 PDF에 QR + URL 표시)
 }
 
 function getS2BNumber(plan: string, duration: number): string {
@@ -81,6 +83,20 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
     ? data.items
     : [{ plan: data.plan, duration: data.duration, qty: data.licenseQty, unit_price: data.unitPrice, amount: data.finalValue + (data.discountAmount ?? 0), s2b_number: getS2BNumber(data.plan, data.duration) }];
   const discount = data.discountAmount ?? 0;
+
+  // 결제 URL이 있으면 QR 코드 생성 (dataURL)
+  let qrDataUrl = '';
+  if (data.paymentUrl) {
+    try {
+      qrDataUrl = await QRCode.toDataURL(data.paymentUrl, {
+        width: 180,
+        margin: 1,
+        color: { dark: '#000000', light: '#ffffff' },
+      });
+    } catch {
+      qrDataUrl = '';
+    }
+  }
 
   container.innerHTML = `
     <div style="padding: 48px 52px; width: 794px; box-sizing: border-box;">
@@ -219,6 +235,24 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
           ${data.notes ? `<br>- ${data.notes}` : ''}
         </div>
       </div>
+
+      ${data.paymentUrl ? `
+      <!-- 결제 안내 (QR + URL) -->
+      <div style="border: 1.5px solid #000; margin-top: 14px; padding: 14px 16px; display: flex; gap: 16px; align-items: center;">
+        ${qrDataUrl ? `<img src="${qrDataUrl}" style="width: 92px; height: 92px; flex-shrink: 0;" />` : ''}
+        <div style="flex: 1; font-size: 12px; line-height: 1.7;">
+          <div style="font-size: 14px; font-weight: bold; margin-bottom: 4px;">💳 카드 결제 (모바일 QR / 직접 링크)</div>
+          <div style="color: #333; margin-bottom: 6px;">
+            QR 코드를 스캔하거나 아래 링크로 접속하시면 본 견적서를 바로 결제하실 수 있습니다.
+          </div>
+          <div style="font-family: 'Courier New', monospace; font-size: 11px; word-break: break-all; color: #0a3aa1; padding: 6px 8px; background: #f4f6fb; border: 1px dashed #c4c9d4;">
+            ${data.paymentUrl}
+          </div>
+          <div style="font-size: 10px; color: #666; margin-top: 4px;">
+            * 결제 페이지 진입 시 본 견적서를 받으신 이메일을 입력하셔야 합니다 (보안).
+          </div>
+        </div>
+      </div>` : ''}
     </div>
   `;
 

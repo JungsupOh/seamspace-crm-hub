@@ -135,6 +135,8 @@ export async function issueQuoteForPaymentGroup(params: {
   const supplyPrice = Math.round(finalValue / 1.1);
   const taxAmount = finalValue - supplyPrice;
 
+  const paymentLinkUrl = `${APP_URL}/event/lucky-seven/pay/${encodeURIComponent(paymentGroup.quote_number)}`;
+
   const { blob, fileName } = await generateQuotePdfBlob({
     quoteNumber: paymentGroup.quote_number,
     quoteDate: today,
@@ -150,6 +152,7 @@ export async function issueQuoteForPaymentGroup(params: {
     supplyPrice,
     taxAmount,
     notes: `럭키세븐 5월 이벤트 그룹 ${group.group_code} (멤버 ${memberCount}명, 1장당 100,000원, 7개월 고정)`,
+    paymentUrl: paymentLinkUrl,
   });
 
   // 2) Storage 업로드
@@ -157,7 +160,6 @@ export async function issueQuoteForPaymentGroup(params: {
 
   // 3) 이메일 발송 (sendEmail 헬퍼 사용 — sales@tebahsoft.com cc 자동 적용)
   const base64 = await blobToBase64(blob);
-  const paymentLinkUrl = `${APP_URL}/event/lucky-seven/pay/${encodeURIComponent(paymentGroup.quote_number)}`;
   const html = buildHtml({
     payerName: paymentGroup.payer_name,
     groupCode: group.group_code,
