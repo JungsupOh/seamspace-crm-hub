@@ -18,7 +18,7 @@ import {
 import { QRCodeCanvas } from 'qrcode.react';
 import { apiCreateCoupon, apiSendCoupon } from '@/lib/coupons';
 import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
-import { LuckySevenGroupDialog } from '@/components/LuckySevenGroupDialog';
+import { LuckySevenGroupsView } from '@/components/LuckySevenGroupDialog';
 import { getRecentSendLogs, canSendUH2821, todayUHStage, type AlimtalkRecipient } from '@/lib/alimtalk';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -575,7 +575,10 @@ interface CampaignDetailProps {
 
 function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   const qc = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'leads' | 'licenses'>('leads');
+  const isLuckySeven = campaign.slug === 'lucky-seven';
+  const [activeTab, setActiveTab] = useState<'ls_groups' | 'leads' | 'licenses'>(
+    isLuckySeven ? 'ls_groups' : 'leads',
+  );
 
   // 캠페인 펼칠 때 쿠폰 상태 자동 동기화 (mDiary MySQL → campaign_licenses)
   const { data: syncDone } = useQuery({
@@ -648,6 +651,13 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
         );
       })()}
       <div className="flex border-b border-border mb-3">
+        {isLuckySeven && (
+          <button onClick={() => setActiveTab('ls_groups')}
+            className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5
+              ${activeTab === 'ls_groups' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+            <Users className="h-3.5 w-3.5" />럭키세븐 그룹
+          </button>
+        )}
         <button onClick={() => setActiveTab('leads')}
           className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5
             ${activeTab === 'leads' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
@@ -659,7 +669,9 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
           <Ticket className="h-3.5 w-3.5" />발송된 체험권
         </button>
       </div>
-      {activeTab === 'leads' ? (
+      {activeTab === 'ls_groups' ? (
+        <LuckySevenGroupsView campaignId={campaign.id} campaignName={campaign.name} />
+      ) : activeTab === 'leads' ? (
         <CampaignLeadsTab campaign={campaign} />
       ) : (
         <CampaignLicensesTab campaign={campaign} convertedPhones={convertedPhones} />
@@ -1519,8 +1531,6 @@ interface CampaignCardProps {
 
 function CampaignCard({ campaign, convertedPhones, onEdit, onDelete, canEdit }: CampaignCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const [lsDialogOpen, setLsDialogOpen] = useState(false);
-  const isLuckySeven = campaign.slug === 'lucky-seven';
 
   // 카드 헤더 통계 — 전역 캐시 공유 (캠페인별 select 필터)
   const { data: leads } = useQuery({
@@ -1576,28 +1586,15 @@ function CampaignCard({ campaign, convertedPhones, onEdit, onDelete, canEdit }: 
           <Stat icon={<Ticket className="h-3.5 w-3.5" />} label="발송" value={total} />
         </div>
 
-        {/* 수정/삭제 + 럭키세븐 전용 버튼 */}
+        {/* 수정/삭제 */}
         {canEdit && (
           <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-            {isLuckySeven && (
-              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setLsDialogOpen(true)}>
-                <Users className="h-3 w-3 mr-1" />럭키세븐 그룹
-              </Button>
-            )}
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => onEdit(campaign)}>수정</Button>
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-red-500 hover:text-red-600 hover:bg-red-50"
               onClick={() => onDelete(campaign.id)}>삭제</Button>
           </div>
         )}
       </div>
-      {isLuckySeven && (
-        <LuckySevenGroupDialog
-          open={lsDialogOpen}
-          onClose={() => setLsDialogOpen(false)}
-          campaignId={campaign.id}
-          campaignName={campaign.name}
-        />
-      )}
 
       {/* 펼쳐진 수신자 목록 */}
       {expanded && (

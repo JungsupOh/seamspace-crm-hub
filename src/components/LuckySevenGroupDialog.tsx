@@ -49,10 +49,11 @@ const matchFilter = (status: string, filter: StatusFilter): boolean => {
 };
 
 // 그룹 리스트 + 상세 뷰 (Dialog 또는 인라인 탭에서 재사용)
+// 그룹 행 클릭 → 상세 다이얼로그 (인라인 펼침 제거)
 export function LuckySevenGroupsView({ campaignId, campaignName }: { campaignId: string; campaignName: string }) {
   const [groups, setGroups] = useState<GroupListItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [openDetailId, setOpenDetailId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [filter, setFilter] = useState<StatusFilter>('all');
 
@@ -160,18 +161,29 @@ export function LuckySevenGroupsView({ campaignId, campaignName }: { campaignId:
       ) : (
         <div className="space-y-2">
           {filteredGroups.map((g) => (
-            <GroupCard
+            <GroupRow
               key={g.id}
               group={g}
-              campaignName={campaignName}
-              expanded={expanded === g.id}
-              onToggle={() => setExpanded(expanded === g.id ? null : g.id)}
-              onChange={reload}
-              refreshKey={refreshKey}
+              onClick={() => setOpenDetailId(g.id)}
             />
           ))}
         </div>
       )}
+
+      {/* 그룹 상세 — 행 클릭 시 다이얼로그로 노출 */}
+      {openDetailId && (() => {
+        const openGroup = groups.find((g) => g.id === openDetailId);
+        if (!openGroup) return null;
+        return (
+          <GroupDetailDialog
+            group={openGroup}
+            campaignName={campaignName}
+            onClose={() => setOpenDetailId(null)}
+            onChange={reload}
+            refreshKey={refreshKey}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -189,36 +201,54 @@ export function LuckySevenGroupDialog({ open, onClose, campaignId, campaignName 
   );
 }
 
-function GroupCard({ group, campaignName, expanded, onToggle, onChange, refreshKey }: {
+// 그룹 행 — 클릭하면 상세 다이얼로그 오픈
+function GroupRow({ group, onClick }: { group: GroupListItem; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors flex items-center justify-between p-3 text-left"
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        <div className="text-left min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xs">{group.group_code}</span>
+            <span className="text-xs text-muted-foreground truncate">{group.leader_name} ({group.leader_school})</span>
+          </div>
+          <div className="text-xs text-muted-foreground mt-0.5">
+            멤버 {group.member_count}명 · {group.total_amount.toLocaleString()}원 · 결제 {group.paid_count}/{group.total_count}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <span className={`text-xs font-semibold px-2 py-0.5 rounded ${statusBadge(group.status)}`}>{group.status}</span>
+      </div>
+    </button>
+  );
+}
+
+// 그룹 상세 다이얼로그 — GroupDetail을 Dialog로 감쌈
+function GroupDetailDialog({ group, campaignName, onClose, onChange, refreshKey }: {
   group: GroupListItem;
   campaignName: string;
-  expanded: boolean;
-  onToggle: () => void;
+  onClose: () => void;
   onChange: () => void;
   refreshKey: number;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card overflow-hidden">
-      <button type="button" onClick={onToggle} className="w-full flex items-center justify-between p-3 hover:bg-muted/30 transition-colors">
-        <div className="flex items-center gap-2 min-w-0">
-          {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-          <div className="text-left min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-xs">{group.group_code}</span>
-              <span className="text-xs text-muted-foreground truncate">{group.leader_name} ({group.leader_school})</span>
-            </div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              멤버 {group.member_count}명 · {group.total_amount.toLocaleString()}원 · 결제 {group.paid_count}/{group.total_count}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className={`text-xs font-semibold px-2 py-0.5 rounded ${statusBadge(group.status)}`}>{group.status}</span>
-        </div>
-      </button>
-
-      {expanded && <GroupDetail group={group} campaignName={campaignName} onChange={onChange} refreshKey={refreshKey} />}
-    </div>
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <span className="font-mono text-sm">{group.group_code}</span>
+            <span className="text-sm text-muted-foreground">— {group.leader_name} ({group.leader_school})</span>
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded ${statusBadge(group.status)}`}>{group.status}</span>
+          </DialogTitle>
+        </DialogHeader>
+        <GroupDetail group={group} campaignName={campaignName} onChange={onChange} refreshKey={refreshKey} />
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -374,7 +404,7 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
   const isIssued = group.status === '발급완료';
 
   return (
-    <div className="border-t border-border p-4 space-y-3 bg-muted/10">
+    <div className="space-y-3">
       {/* 멤버 명단 */}
       <div className="rounded-lg bg-card border border-border p-3">
         <h4 className="text-xs font-semibold mb-2">멤버 ({leads.length}명)</h4>
