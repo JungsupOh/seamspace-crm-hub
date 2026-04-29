@@ -232,7 +232,7 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
             - 견적서 유효기간은 4주입니다.<br>
             - 위 견적내용은 외부 유출에 주의해 주시기 바랍니다.
             ${data.notes ? `<br>- ${data.notes}` : ''}
-            ${data.paymentUrl ? `<br>- 직접 결재를 하시려면, 우측 QR이나 아래 링크에서 가능합니다.<div style="margin-left: 10px; margin-top: 2px; font-family: 'Courier New', monospace; font-size: 10px; color: #0a3aa1; white-space: nowrap; overflow: hidden;">${data.paymentUrl}</div><div style="margin-left: 10px; font-size: 10px; color: #666;">(결재 페이지 진입 시 본 견적서를 받으신 이메일 주소를 입력하셔야 합니다.)</div>` : ''}
+            ${data.paymentUrl ? `<br>- 직접 결재를 하시려면, 우측 QR이나 아래 링크에서 가능합니다.<div data-payment-url-target="1" style="margin-left: 10px; margin-top: 3px; font-family: 'Consolas', 'Menlo', 'Monaco', 'DejaVu Sans Mono', monospace; font-size: 11px; font-weight: 600; color: #0a3aa1; white-space: nowrap;">${data.paymentUrl}</div><div style="margin-left: 10px; margin-top: 2px; font-size: 10px; color: #666;">(결재 페이지 진입 시 본 견적서를 받으신 이메일 주소를 입력하셔야 합니다.)</div>` : ''}
           </div>
         </div>
         ${data.paymentUrl && qrDataUrl ? `
@@ -245,6 +245,22 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
   `;
 
   try {
+    // URL 텍스트의 컨테이너 내 위치를 캡처 전 미리 측정 (PDF hyperlink용 좌표)
+    let urlRect: { top: number; left: number; width: number; height: number } | null = null;
+    if (data.paymentUrl) {
+      const urlEl = container.querySelector<HTMLElement>('[data-payment-url-target="1"]');
+      if (urlEl) {
+        const cRect = container.getBoundingClientRect();
+        const r = urlEl.getBoundingClientRect();
+        urlRect = {
+          top: r.top - cRect.top,
+          left: r.left - cRect.left,
+          width: r.width,
+          height: r.height,
+        };
+      }
+    }
+
     const canvas = await html2canvas(container, {
       scale: 2,
       useCORS: true,
@@ -258,6 +274,20 @@ async function buildPdfBlob(data: QuotePdfData): Promise<{ blob: Blob; fileName:
     const pdfW = pdf.internal.pageSize.getWidth();
     const pdfH = (canvas.height * pdfW) / canvas.width;
     pdf.addImage(imgData, 'PNG', 0, 0, pdfW, pdfH);
+
+    // URL 영역에 정확한 클릭 가능 hyperlink 추가
+    // (이미지 안 텍스트의 OCR 인식 오류로 잘못된 URL로 이동하는 문제 방지)
+    if (urlRect && data.paymentUrl) {
+      const containerCssWidth = 794;        // CSS px (html2canvas width와 일치)
+      const mmPerPx = pdfW / containerCssWidth;
+      pdf.link(
+        urlRect.left * mmPerPx,
+        urlRect.top * mmPerPx,
+        urlRect.width * mmPerPx,
+        urlRect.height * mmPerPx,
+        { url: data.paymentUrl },
+      );
+    }
 
     const datePart = data.quoteDate.replace(/-/g, '_');
     const fileName = `seamspace_AI_${data.quoteNumber.replace(/-/g, '_')}-${datePart}.pdf`;
