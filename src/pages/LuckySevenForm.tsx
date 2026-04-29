@@ -355,10 +355,8 @@ export default function LuckySevenForm() {
     if (err) return err;
     for (let i = 0; i < paymentGroups.length; i++) {
       const g = paymentGroups[i];
-      if (g.taxInvoiceRequired) {
-        if (!g.buyerOrgName.trim()) return `묶음 ${i + 1}: 인수자명을 입력해주세요.`;
-        if (!g.buyerBusinessNo.trim()) return `묶음 ${i + 1}: 사업자등록번호를 입력해주세요.`;
-        if (!g.schoolIdUrl) return `묶음 ${i + 1}: 고유번호증을 업로드해주세요.`;
+      if (g.taxInvoiceRequired && !g.schoolIdUrl) {
+        return `묶음 ${i + 1}: 고유번호증을 업로드해주세요.`;
       }
     }
     return null;
@@ -828,18 +826,11 @@ export default function LuckySevenForm() {
 
                     <label className="flex items-center gap-2 cursor-pointer pt-1">
                       <input type="checkbox" checked={pg.taxInvoiceRequired} onChange={(e) => updatePaymentGroup(gi, { taxInvoiceRequired: e.target.checked })} className="accent-primary" />
-                      <span className="text-xs">세금계산서 발급 / 사업자정보 입력</span>
+                      <span className="text-xs">세금계산서 발급 (고유번호증 첨부)</span>
                     </label>
 
                     {pg.taxInvoiceRequired && (
-                      <div className="space-y-2 pt-1">
-                        <Input value={pg.buyerOrgName} onChange={(e) => updatePaymentGroup(gi, { buyerOrgName: e.target.value })} placeholder="인수자명 (학교/교육청)" className="h-9 text-sm" />
-                        <Input value={pg.buyerBusinessNo} onChange={(e) => updatePaymentGroup(gi, { buyerBusinessNo: e.target.value })} placeholder="사업자등록번호" className="h-9 text-sm" />
-                        <Input value={pg.buyerOrgAddr} onChange={(e) => updatePaymentGroup(gi, { buyerOrgAddr: e.target.value })} placeholder="주소" className="h-9 text-sm" />
-                        <Input value={pg.buyerOrgCeo} onChange={(e) => updatePaymentGroup(gi, { buyerOrgCeo: e.target.value })} placeholder="대표자" className="h-9 text-sm" />
-                        <Input value={pg.buyerContact} onChange={(e) => updatePaymentGroup(gi, { buyerContact: e.target.value })} placeholder="담당자 (선택)" className="h-9 text-sm" />
-
-                        {/* 고유번호증 업로드 */}
+                      <div className="pt-1">
                         <SchoolIdUploader
                           schoolIdUrl={pg.schoolIdUrl}
                           schoolIdFileName={pg.schoolIdFileName}
