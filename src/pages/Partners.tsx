@@ -875,7 +875,7 @@ function PartnerDealsSection({
     }).catch(() => setDeals([])).finally(() => setLoading(false));
   }, [partnerId]);
 
-  const [dealPeriod, setDealPeriod] = useState<PeriodValue>('this_year');
+  const [dealPeriod, setDealPeriod] = useState<PeriodValue>('this_month');
   const [dealCustomFrom, setDealCustomFrom] = useState('');
   const [dealCustomTo, setDealCustomTo] = useState('');
 

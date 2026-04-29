@@ -1000,7 +1000,7 @@ export default function Licenses() {
 
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | LicenseStatus>('all');
-  const [periodFilter, setPeriodFilter] = useState<PeriodValue>('this_year');
+  const [periodFilter, setPeriodFilter] = useState<PeriodValue>('this_month');
   const [periodCustomFrom, setPeriodCustomFrom] = useState('');
   const [periodCustomTo, setPeriodCustomTo]     = useState('');
   const [linkingId, setLinkingId]       = useState<string | null>(null);

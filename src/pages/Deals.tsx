@@ -2840,7 +2840,7 @@ export default function Deals() {
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
   const [editingQuote, setEditingQuote]     = useState<DealQuote | null>(null);
   const [pdfGenerating, setPdfGenerating]   = useState<string | null>(null); // quote id
-  const [periodFilter, setPeriodFilter]     = useState<PeriodValue>('this_year');
+  const [periodFilter, setPeriodFilter]     = useState<PeriodValue>('this_month');
   const [periodCustomFrom, setPeriodCustomFrom] = useState('');
   const [periodCustomTo, setPeriodCustomTo]     = useState('');
   const { widths: colW, startResize } = useResizableColumns('deals_col_widths', {
