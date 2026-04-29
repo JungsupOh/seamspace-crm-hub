@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, Loader2, AlertTriangle, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { clearCart, markCouponUsed } from '@/lib/shop';
 import { notifyShopOrder } from '@/lib/telegram';
+import { sendPaymentReceiptEmail } from '@/lib/email';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -13,6 +14,7 @@ export default function ShopComplete() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [error, setError] = useState('');
   const [orderId, setOrderId] = useState('');
+  const [issuedCoupons, setIssuedCoupons] = useState<Array<{ productName: string; couponCode: string }>>([]);
 
   useEffect(() => {
     const paymentKey = params.get('paymentKey');
@@ -36,82 +38,74 @@ export default function ShopComplete() {
         }
         const orderData = JSON.parse(raw);
 
-        // shop_orders에 저장
-        const orderRes = await fetch(`${SUPABASE_URL}/rest/v1/shop_orders`, {
+        // Edge Function 호출 — Toss 승인 + DB INSERT + 디지털 자동발급 + 영수증 응답
+        const confirmRes = await fetch(`${SUPABASE_URL}/functions/v1/confirm-shop-payment`, {
           method: 'POST',
           headers: {
+            'Content-Type': 'application/json',
             Authorization: `Bearer ${SUPABASE_KEY}`,
             apikey: SUPABASE_KEY,
-            'Content-Type': 'application/json',
-            Prefer: 'return=representation',
           },
           body: JSON.stringify({
-            order_id: tossOrderId,
-            status: '결제완료',
-            customer_name: orderData.customer.name,
-            customer_phone: orderData.customer.phone,
-            customer_email: orderData.customer.email || null,
-            zipcode: orderData.shipping?.zipcode || '',
-            address: orderData.shipping?.address || '디지털 상품 (배송 없음)',
-            address_detail: orderData.shipping?.addressDetail || null,
-            delivery_memo: orderData.shipping?.memo || null,
+            paymentKey,
+            orderId: tossOrderId,
+            amount: Number(amount),
+            customer: {
+              name:  orderData.customer.name,
+              phone: orderData.customer.phone,
+              email: orderData.customer.email || '',
+            },
+            shipping: orderData.shipping,
+            items:    orderData.items,
             subtotal: orderData.subtotal,
-            shipping_fee: orderData.shippingFee,
-            discount: orderData.discount ?? 0,
-            coupon_code: orderData.couponCode || null,
-            total_amount: parseInt(amount),
-            payment_key: paymentKey,
-            toss_method: '카드',
-            approved_at: new Date().toISOString(),
+            shippingFee: orderData.shippingFee,
+            discount:    orderData.discount ?? 0,
+            couponCode:  orderData.couponCode ?? null,
           }),
         });
-
-        if (!orderRes.ok) {
-          const err = await orderRes.json().catch(() => ({}));
-          throw new Error(err.message || '주문 저장 실패');
+        const data = await confirmRes.json();
+        if (!confirmRes.ok || data.error) {
+          throw new Error(data.error || '결제 승인 실패');
         }
 
-        // shop_order_items 저장
-        const items = orderData.items.map((item: any) => ({
-          order_id: tossOrderId,
-          product_id: item.productId,
-          product_name: item.productName,
-          option: item.option || null,
-          qty: item.qty,
-          unit_price: item.unitPrice,
-          subtotal: item.unitPrice * item.qty,
-        }));
+        // 영수증 이메일 (실패해도 UI 진행)
+        if (data.customerEmail) {
+          sendPaymentReceiptEmail({
+            to: data.customerEmail,
+            customerName: data.customerName ?? '',
+            orderName: data.orderName ?? '심스페이스 상품',
+            amount: Number(data.amount ?? amount),
+            paidAt: data.approvedAt ?? undefined,
+            receiptUrl: data.receiptUrl ?? undefined,
+            orderId: tossOrderId,
+            method: data.method ?? '카드',
+          }).catch((err) => console.warn('[ShopComplete] 영수증 이메일 실패:', err));
+        }
 
-        await fetch(`${SUPABASE_URL}/rest/v1/shop_order_items`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${SUPABASE_KEY}`,
-            apikey: SUPABASE_KEY,
-            'Content-Type': 'application/json',
-            Prefer: 'return=minimal',
-          },
-          body: JSON.stringify(items),
-        });
-
-        // 텔레그램 알림
-        const itemSummary = orderData.items.map((i: any) =>
-          `${i.productName} × ${i.qty}`
+        // 텔레그램 알림 (어드민용)
+        const itemSummary = orderData.items.map((i: { productName: string; qty: number }) =>
+          `${i.productName} × ${i.qty}`,
         ).join(', ');
         notifyShopOrder({
           orderId: tossOrderId,
           customerName: orderData.customer.name,
           customerPhone: orderData.customer.phone,
           items: itemSummary,
-          totalAmount: parseInt(amount),
-          address: `${orderData.shipping.address} ${orderData.shipping.addressDetail || ''}`.trim(),
+          totalAmount: Number(amount),
+          address: orderData.shipping
+            ? `${orderData.shipping.address} ${orderData.shipping.addressDetail || ''}`.trim()
+            : '디지털 상품 (배송 없음)',
         });
 
-        // 쿠폰 사용 처리 (일련번호 + 주문ID + 전화번호 기록)
+        // 할인쿠폰 사용 처리 (localStorage 기반이라 클라이언트 유지)
         if (orderData.couponCode) {
-          await markCouponUsed(orderData.couponCode, tossOrderId!, orderData.customer.phone);
+          await markCouponUsed(orderData.couponCode, tossOrderId, orderData.customer.phone);
         }
 
-        // 장바구니 비우기 + sessionStorage 정리
+        // 발급된 디지털 쿠폰 화면 표시
+        if (Array.isArray(data.issuedCoupons)) setIssuedCoupons(data.issuedCoupons);
+
+        // 정리
         clearCart();
         sessionStorage.removeItem('shop_order');
         sessionStorage.removeItem('shop_coupon');
@@ -168,10 +162,27 @@ export default function ShopComplete() {
         <p className="text-sm text-muted-foreground mb-4">
           주문번호: <span className="font-mono font-bold text-foreground">{orderId}</span>
         </p>
-        <div className="rounded-lg bg-muted/40 px-4 py-3 text-xs text-muted-foreground space-y-1 mb-6">
-          <p>배송 준비 후 발송해 드리겠습니다.</p>
-          <p>주문 조회: 주문번호와 연락처로 배송 상태를 확인할 수 있습니다.</p>
-        </div>
+
+        {issuedCoupons.length > 0 ? (
+          <div className="rounded-lg bg-teal-50 dark:bg-teal-950/20 border border-teal-200 px-4 py-3 mb-4 text-left space-y-2">
+            <div className="flex items-center gap-1.5 text-xs text-teal-800 dark:text-teal-100">
+              <Smartphone className="h-3.5 w-3.5" />
+              <span>이용권이 SMS로 발송되었습니다</span>
+            </div>
+            {issuedCoupons.map((c, i) => (
+              <div key={i} className="text-xs flex justify-between">
+                <span className="text-muted-foreground">{c.productName}</span>
+                <span className="font-mono font-semibold">{c.couponCode}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg bg-muted/40 px-4 py-3 text-xs text-muted-foreground space-y-1 mb-6">
+            <p>배송 준비 후 발송해 드리겠습니다.</p>
+            <p>주문 조회: 주문번호와 연락처로 배송 상태를 확인할 수 있습니다.</p>
+          </div>
+        )}
+
         <div className="flex gap-3">
           <Link to="/shop" className="flex-1">
             <Button variant="outline" className="w-full">스토어</Button>
