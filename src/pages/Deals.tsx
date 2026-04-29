@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { formatPhone } from '@/lib/utils';
+import { PeriodFilter } from '@/components/PeriodFilter';
+import { getPeriodRange, matchesPeriod, type PeriodValue } from '@/lib/period';
 import { useAuth } from '@/contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -2823,7 +2825,9 @@ export default function Deals() {
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
   const [editingQuote, setEditingQuote]     = useState<DealQuote | null>(null);
   const [pdfGenerating, setPdfGenerating]   = useState<string | null>(null); // quote id
-  const [periodFilter, setPeriodFilter]     = useState(String(new Date().getFullYear()));
+  const [periodFilter, setPeriodFilter]     = useState<PeriodValue>('this_year');
+  const [periodCustomFrom, setPeriodCustomFrom] = useState('');
+  const [periodCustomTo, setPeriodCustomTo]     = useState('');
   const { widths: colW, startResize } = useResizableColumns('deals_col_widths', {
     등록일: 90, 견적번호: 120, 담당자: 130, '학교/기관': 140, 유형: 72, 스테이지: 80, 실결제금액: 100, 계약일: 90, 입금일: 90, 구매처: 90, '📎': 36,
   });
@@ -2893,12 +2897,7 @@ export default function Deals() {
     else { setSortField(f); setSortDir('desc'); }
   };
 
-  // ── 기간 필터 ──────────────────────────────────
-  const currentYear = new Date().getFullYear();
-  const yearOptions = Array.from({ length: currentYear - 2023 }, (_, i) => String(2024 + i));
-  const PERIOD_LABEL: Record<string, string> = { all: '전체', '7d': '최근 1주', '30d': '최근 1달' };
-  const getPeriodLabel = (p: string) => PERIOD_LABEL[p] ?? `${p}년`;
-
+  // ── 기간 필터 ── 공용 PeriodFilter 사용 (이번달/지난달/올해/작년/직접입력)
   // 딜의 기준 날짜: 존재하는 날짜 필드 중 가장 빠른 것
   const getDealDate = (d: AirtableRecord<DealFields>): string => {
     const dates = [
@@ -2911,20 +2910,14 @@ export default function Deals() {
     return dates.length > 0 ? dates.sort()[0] : '';
   };
 
-  const matchesPeriod = (d: AirtableRecord<DealFields>): boolean => {
-    if (periodFilter === 'all') return true;
+  const matchesPeriodDeal = (d: AirtableRecord<DealFields>): boolean => {
     const dateStr = getDealDate(d);
     if (!dateStr) return true; // 날짜 없는 딜은 항상 포함
-    if (periodFilter === '7d') {
-      return new Date(dateStr) >= new Date(Date.now() - 7 * 86400000);
-    }
-    if (periodFilter === '30d') {
-      return new Date(dateStr) >= new Date(Date.now() - 30 * 86400000);
-    }
-    return dateStr.startsWith(periodFilter); // 연도
+    return matchesPeriod(dateStr, periodFilter, periodCustomFrom, periodCustomTo);
   };
 
-  const periodDeals = (deals ?? []).filter(matchesPeriod);
+  const periodDeals = (deals ?? []).filter(matchesPeriodDeal);
+  const { label: periodLabel } = getPeriodRange(periodFilter, periodCustomFrom, periodCustomTo);
 
   const pipeline = DEAL_STAGES.map(s => ({
     stage: s, ...STAGE_META[s],
@@ -3526,7 +3519,7 @@ export default function Deals() {
         <div>
           <h1 className="text-2xl font-semibold">딜 관리</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {getPeriodLabel(periodFilter)} · {pipelineTotals.deal}건 · 계약합계 {fmt(pipelineTotals.contract)}
+            {periodLabel} · {pipelineTotals.deal}건 · 계약합계 {fmt(pipelineTotals.contract)}
           </p>
         </div>
         <div className="flex gap-2">
@@ -3599,30 +3592,15 @@ export default function Deals() {
       {/* 파이프라인 */}
       <div className="surface-card ring-container p-4 space-y-3">
         {/* 기간 필터 */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <p className="text-xs text-muted-foreground font-medium">딜 파이프라인</p>
-          <div className="flex items-center gap-1 flex-wrap justify-end">
-            {(['7d', '30d'] as const).map(p => (
-              <button key={p} onClick={() => setPeriodFilter(p)}
-                className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors
-                  ${periodFilter === p ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
-                {PERIOD_LABEL[p]}
-              </button>
-            ))}
-            <span className="text-muted-foreground/30 text-xs mx-0.5">|</span>
-            {yearOptions.map(y => (
-              <button key={y} onClick={() => setPeriodFilter(y)}
-                className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors
-                  ${periodFilter === y ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
-                {y}년
-              </button>
-            ))}
-            <button onClick={() => setPeriodFilter('all')}
-              className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors
-                ${periodFilter === 'all' ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
-              전체
-            </button>
-          </div>
+          <PeriodFilter
+            value={periodFilter}
+            onChange={setPeriodFilter}
+            customFrom={periodCustomFrom}
+            customTo={periodCustomTo}
+            onCustomChange={(from, to) => { setPeriodCustomFrom(from); setPeriodCustomTo(to); }}
+          />
         </div>
 
         {/* 스테이지 버튼 */}

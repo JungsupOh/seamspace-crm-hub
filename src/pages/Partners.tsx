@@ -23,6 +23,8 @@ import { searchSchools, type SchoolInfo } from '@/lib/neis';
 import { saveDealUsers } from '@/lib/deal-users';
 import { Users } from 'lucide-react';
 import { sendInviteEmail } from '@/lib/email';
+import { PeriodFilter } from '@/components/PeriodFilter';
+import { getPeriodRange, matchesPeriod, sumByPeriod, type PeriodValue } from '@/lib/period';
 import { supabase } from '@/lib/supabase';
 import { notifyPartnerDeal } from '@/lib/telegram';
 
@@ -872,22 +874,18 @@ function PartnerDealsSection({
     }).catch(() => setDeals([])).finally(() => setLoading(false));
   }, [partnerId]);
 
-  const [dealPeriod, setDealPeriod] = useState('all');
-  const now2 = new Date();
-  const filteredByPeriod = deals.filter(d => {
-    if (dealPeriod === 'all') return true;
-    const date = d.contract_date ?? '';
-    const y = now2.getFullYear(), m = now2.getMonth();
-    const pad2 = (n: number) => String(n).padStart(2, '0');
-    if (dealPeriod === 'this_month') { const ym = `${y}-${pad2(m + 1)}`; return date >= `${ym}-01` && date <= `${ym}-31`; }
-    if (dealPeriod === 'last_month') { const d2 = new Date(y, m - 1, 1); const ym = `${d2.getFullYear()}-${pad2(d2.getMonth() + 1)}`; return date >= `${ym}-01` && date <= `${ym}-31`; }
-    if (dealPeriod === 'this_year') return date >= `${y}-01-01` && date <= `${y}-12-31`;
-    return true;
-  });
+  const [dealPeriod, setDealPeriod] = useState<PeriodValue>('this_year');
+  const [dealCustomFrom, setDealCustomFrom] = useState('');
+  const [dealCustomTo, setDealCustomTo] = useState('');
 
-  const totalPayment = filteredByPeriod.reduce((s, d) => s + (d.payment_amount ?? 0), 0);
-  const totalCommission = filteredByPeriod.reduce((s, d) => s + (d.commission_amount ?? 0), 0);
-  const totalSettlement = filteredByPeriod.reduce((s, d) => s + (d.settlement_amount ?? 0), 0);
+  // 계약금액: contract_date 기준 / 매출·수수료·정산: deposit_date 기준 (회계 정합성)
+  const totalContract = sumByPeriod(deals, d => d.contract_date, d => d.payment_amount, dealPeriod, dealCustomFrom, dealCustomTo);
+  const totalPayment = sumByPeriod(deals, d => d.deposit_date, d => d.payment_amount, dealPeriod, dealCustomFrom, dealCustomTo);
+  const totalCommission = sumByPeriod(deals, d => d.deposit_date, d => d.commission_amount, dealPeriod, dealCustomFrom, dealCustomTo);
+  const totalSettlement = sumByPeriod(deals, d => d.deposit_date, d => d.settlement_amount, dealPeriod, dealCustomFrom, dealCustomTo);
+
+  // 테이블 표시용 — 계약일 기준 매칭 (목록에서는 계약일 우선)
+  const filteredByPeriod = deals.filter(d => matchesPeriod(d.contract_date, dealPeriod, dealCustomFrom, dealCustomTo));
 
   const openAddDialog = () => {
     setDialogMode('add');
@@ -1088,20 +1086,17 @@ function PartnerDealsSection({
 
   return (
     <section className="space-y-4">
-      {/* 기간 필터 + 버튼 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          {([
-            { id: 'all', label: '전체' }, { id: 'this_month', label: '이번달' },
-            { id: 'last_month', label: '지난달' }, { id: 'this_year', label: '올해' },
-          ] as const).map(({ id, label }) => (
-            <button key={id} onClick={() => setDealPeriod(id)}
-              className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors
-                ${dealPeriod === id ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
-              {label}
-            </button>
-          ))}
-          <span className="text-xs text-muted-foreground ml-2">{filteredByPeriod.length}건</span>
+      {/* 기간 필터 + 버튼 — 공용 컴포넌트 */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <PeriodFilter
+            value={dealPeriod}
+            onChange={setDealPeriod}
+            customFrom={dealCustomFrom}
+            customTo={dealCustomTo}
+            onCustomChange={(from, to) => { setDealCustomFrom(from); setDealCustomTo(to); }}
+          />
+          <span className="text-xs text-muted-foreground">{filteredByPeriod.length}건</span>
         </div>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={handleAutoLink} disabled={linking}>
@@ -1365,7 +1360,7 @@ export default function Partners() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [detailPartner, setDetailPartner] = useState<Partner | null>(null);
   const [search, setSearch] = useState('');
-  const [periodFilter, setPeriodFilter] = useState('this_month');
+  const [periodFilter, setPeriodFilter] = useState<PeriodValue>('this_month');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo]   = useState('');
 
@@ -1380,40 +1375,8 @@ export default function Partners() {
     </div>
   );
 
-  const now   = new Date();
-  const yyyy  = now.getFullYear();
-  const mm    = now.getMonth(); // 0-indexed
-
-  // ── 기간 필터 범위 계산 ─────────────────────────
-  const getPeriodRange = (): { from: string; to: string; label: string } => {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    switch (periodFilter) {
-      case 'this_month': {
-        const ym = `${yyyy}-${pad(mm + 1)}`;
-        return { from: `${ym}-01`, to: `${ym}-31`, label: `${ym} 매출` };
-      }
-      case 'last_month': {
-        const d = new Date(yyyy, mm - 1, 1);
-        const ym = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
-        return { from: `${ym}-01`, to: `${ym}-31`, label: `${ym} 매출` };
-      }
-      case 'this_year':
-        return { from: `${yyyy}-01-01`, to: `${yyyy}-12-31`, label: `${yyyy}년 매출` };
-      case 'last_year':
-        return { from: `${yyyy - 1}-01-01`, to: `${yyyy - 1}-12-31`, label: `${yyyy - 1}년 매출` };
-      case 'custom':
-        return { from: customFrom || '2000-01-01', to: customTo || '2099-12-31', label: customFrom && customTo ? `${customFrom} ~ ${customTo}` : '커스텀 기간' };
-      default: // all
-        return { from: '2000-01-01', to: '2099-12-31', label: '전체 매출' };
-    }
-  };
-
-  const { from: periodFrom, to: periodTo, label: periodLabel } = getPeriodRange();
-
-  const matchesPeriod = (date: string) => {
-    if (periodFilter === 'all') return true;
-    return date >= periodFrom && date <= periodTo;
-  };
+  const { label: periodLabel } = getPeriodRange(periodFilter, customFrom, customTo);
+  const matchesPeriodFn = (date: string) => matchesPeriod(date, periodFilter, customFrom, customTo);
 
   const list = partners ?? [];
   const q = search.toLowerCase();
@@ -1422,9 +1385,9 @@ export default function Partners() {
       .some(v => v?.toLowerCase().includes(q))
   );
 
-  // 파트너별 기간 매출 계산
-  // 1) partner_deals (파트너 포털/어드민이 직접 등록) — partner_id 기준 매핑
-  // 2) CRM 03_Deals (Lead_Source 기준 매핑) — partner_deals.linked_deal_id로 묶인 것 제외 (중복 방지)
+  // 파트너별 기간 매출 계산 — "매출" = 입금일 기준 (회계 정합성)
+  // 1) partner_deals (파트너 포털/어드민이 직접 등록) — partner_id 기준, deposit_date로 매칭
+  // 2) CRM 03_Deals (Lead_Source 기준 매핑) — partner_deals.linked_deal_id로 묶인 것 제외, Payment_Date로 매칭
   const monthlyByPartner: Record<string, number> = {};
   let totalThisMonth = 0;
   let totalThisMonthDeals = 0;
@@ -1434,8 +1397,7 @@ export default function Partners() {
 
   for (const pd of allPartnerDeals ?? []) {
     if (pd.linked_deal_id) linkedDealIds.add(pd.linked_deal_id);
-    const date = pd.contract_date || pd.deposit_date;
-    if (!date || !matchesPeriod(date)) continue;
+    if (!pd.deposit_date || !matchesPeriodFn(pd.deposit_date)) continue;
     const partner = partnerById.get(pd.partner_id);
     if (!partner) continue;
     const amount = pd.payment_amount ?? 0;
@@ -1448,8 +1410,8 @@ export default function Partners() {
   for (const d of allDeals ?? []) {
     if (linkedDealIds.has(d.id)) continue;  // partner_deal에 이미 카운트됨
     const src = d.fields.Lead_Source?.trim();
-    const date = d.fields.Contract_Date || d.fields.Payment_Date;
-    if (!src || !date || !matchesPeriod(date)) continue;
+    const date = d.fields.Payment_Date;
+    if (!src || !date || !matchesPeriodFn(date)) continue;
     const amount = d.fields.Final_Contract_Value ?? 0;
     monthlyByPartner[src] = (monthlyByPartner[src] ?? 0) + amount;
     totalThisMonth += amount;
@@ -1536,31 +1498,15 @@ export default function Partners() {
         )}
       </div>
 
-      {/* 기간 필터 */}
+      {/* 기간 필터 — 공용 컴포넌트 */}
       <div className="surface-card ring-container p-3">
-        <div className="flex items-center flex-wrap gap-1.5">
-          {([
-            { id: 'this_month', label: '이번달' },
-            { id: 'last_month', label: '지난달' },
-            { id: 'this_year',  label: '올해' },
-            { id: 'last_year',  label: '작년' },
-            { id: 'all',        label: '전체' },
-            { id: 'custom',     label: '커스텀' },
-          ] as const).map(({ id, label }) => (
-            <button key={id} onClick={() => setPeriodFilter(id)}
-              className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors
-                ${periodFilter === id ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
-              {label}
-            </button>
-          ))}
-          {periodFilter === 'custom' && (
-            <div className="flex items-center gap-1.5 ml-1">
-              <Input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="h-6 text-xs w-32 px-2" />
-              <span className="text-xs text-muted-foreground">~</span>
-              <Input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="h-6 text-xs w-32 px-2" />
-            </div>
-          )}
-        </div>
+        <PeriodFilter
+          value={periodFilter}
+          onChange={setPeriodFilter}
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomChange={(from, to) => { setCustomFrom(from); setCustomTo(to); }}
+        />
       </div>
 
       {/* 기간 매출 요약 */}
