@@ -71,7 +71,7 @@ export default function LuckySevenPay() {
         });
       }
       const toss = window.TossPayments(TOSS_CLIENT_KEY);
-      const orderName = `[심스페이스] 이벤트 이용권 - ${data.members.length}매`;
+      const orderName = `[이벤트특가] 심스페이스 이용권 - ${data.members.length}매`;
 
       // sessionStorage에 콜백 처리에 필요한 정보 저장
       sessionStorage.setItem('ls_pay', JSON.stringify({
