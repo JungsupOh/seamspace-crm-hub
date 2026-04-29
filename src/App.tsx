@@ -29,6 +29,7 @@ import ShopCheckout from "./pages/ShopCheckout";
 import ShopComplete from "./pages/ShopComplete";
 import ShopFail from "./pages/ShopFail";
 import ShopOrderLookup from "./pages/ShopOrderLookup";
+import ShopLuckySeven from "./pages/ShopLuckySeven";
 import LuckySevenForm from "./pages/LuckySevenForm";
 import LuckySevenPay from "./pages/LuckySevenPay";
 import LuckySevenPayComplete from "./pages/LuckySevenPayComplete";
@@ -156,6 +157,8 @@ function AppRoutes() {
       <Route path="/shop/complete" element={<ShopComplete />} />
       <Route path="/shop/fail" element={<ShopFail />} />
       <Route path="/shop/lookup" element={<ShopOrderLookup />} />
+      {/* 럭키세븐 — Shop 카드 → 상세 이미지 → 신청 폼 진입 */}
+      <Route path="/shop/lucky-seven" element={<ShopLuckySeven />} />
       {/* /order-test는 내부 결제 테스트용 — 실제 Toss 결제 흐름 */}
       <Route path="/order-test" element={<OrderTest />} />
       <Route path="/order-test/complete" element={<OrderComplete />} />

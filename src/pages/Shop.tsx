@@ -43,7 +43,7 @@ export default function Shop() {
         {isLoading ? (
           <div className="text-center py-16 text-muted-foreground">로딩 중...</div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
             <Link to="/shop/keyring" className="group text-center">
               <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-2">
                 <img src="/banner/keyring(Thmb).png" alt="감정 키링 10종" className="w-full group-hover:scale-105 transition-transform duration-300" />
@@ -91,6 +91,19 @@ export default function Shop() {
                 <span className="text-sm font-bold">40,000원</span>
                 <span className="text-xs text-muted-foreground">/ 1학급 1개월</span>
               </div>
+            </Link>
+            <Link to="/shop/lucky-seven" className="group text-center">
+              <div className="relative rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-2 aspect-square">
+                <img src="/events/lucky-seven/lucky-seven-detail-1.png" alt="럭키세븐 이벤트" className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-300" />
+                <span className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">5월 한정</span>
+              </div>
+              <h3 className="font-bold text-sm">럭키세븐 이벤트</h3>
+              <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                <span className="text-xs font-bold text-red-500">58%</span>
+                <span className="text-sm font-bold">100,000원</span>
+                <span className="text-xs text-muted-foreground line-through">240,000원</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">학급플랜 7개월권 / 1인</p>
             </Link>
           </div>
         )}
