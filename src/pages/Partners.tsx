@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useDeals, useCreateDeal, useContacts } from '@/hooks/use-airtable';
 import type { AirtableRecord, DealFields, ContactFields } from '@/types/airtable';
 import { airtable } from '@/lib/airtable';
-import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals, createDealBuyers, getDealBuyers, deleteDealBuyers } from '@/lib/partner-deals';
+import { getPartnerDeals, getAllPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals, createDealBuyers, getDealBuyers, deleteDealBuyers } from '@/lib/partner-deals';
 import type { PartnerDeal, PartnerDealBuyer } from '@/lib/partner-deals';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
@@ -1356,6 +1356,11 @@ export default function Partners() {
   const qc = useQueryClient();
   const { data: partners, isLoading } = useQuery({ queryKey: ['partners'], queryFn: getPartners });
   const { data: allDeals } = useDeals();
+  const { data: allPartnerDeals } = useQuery({
+    queryKey: ['all_partner_deals'],
+    queryFn: getAllPartnerDeals,
+    staleTime: 60_000,
+  });
   const [selected, setSelected] = useState<Partner | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [detailPartner, setDetailPartner] = useState<Partner | null>(null);
@@ -1418,10 +1423,30 @@ export default function Partners() {
   );
 
   // 파트너별 기간 매출 계산
+  // 1) partner_deals (파트너 포털/어드민이 직접 등록) — partner_id 기준 매핑
+  // 2) CRM 03_Deals (Lead_Source 기준 매핑) — partner_deals.linked_deal_id로 묶인 것 제외 (중복 방지)
   const monthlyByPartner: Record<string, number> = {};
   let totalThisMonth = 0;
   let totalThisMonthDeals = 0;
+  const partnerById = new Map<string, Partner>();
+  for (const p of partners ?? []) partnerById.set(p.id, p);
+  const linkedDealIds = new Set<string>();
+
+  for (const pd of allPartnerDeals ?? []) {
+    if (pd.linked_deal_id) linkedDealIds.add(pd.linked_deal_id);
+    const date = pd.contract_date || pd.deposit_date;
+    if (!date || !matchesPeriod(date)) continue;
+    const partner = partnerById.get(pd.partner_id);
+    if (!partner) continue;
+    const amount = pd.payment_amount ?? 0;
+    if (amount <= 0) continue;
+    monthlyByPartner[partner.name] = (monthlyByPartner[partner.name] ?? 0) + amount;
+    totalThisMonth += amount;
+    totalThisMonthDeals++;
+  }
+
   for (const d of allDeals ?? []) {
+    if (linkedDealIds.has(d.id)) continue;  // partner_deal에 이미 카운트됨
     const src = d.fields.Lead_Source?.trim();
     const date = d.fields.Contract_Date || d.fields.Payment_Date;
     if (!src || !date || !matchesPeriod(date)) continue;
@@ -1575,7 +1600,14 @@ export default function Partners() {
             <thead>
               <tr className="border-b border-border bg-muted/60">
                 {['파트너명', '사업자번호', '대표자', '수수료율', '담당자', periodLabel, '서류', '상태'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{h}</th>
+                  <th
+                    key={h}
+                    className={`px-4 py-3 text-xs font-medium text-muted-foreground whitespace-nowrap ${
+                      h === periodLabel ? 'text-right' : 'text-left'
+                    }`}
+                  >
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -1608,7 +1640,7 @@ export default function Partners() {
                       <div className="text-muted-foreground/60">{p.contact_phone || p.contact_email}</div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-sm tabular-nums">
+                  <td className="px-4 py-3 text-sm tabular-nums text-right">
                     {monthlyByPartner[p.name]
                       ? <span className="font-medium text-teal-700">{monthlyByPartner[p.name].toLocaleString()}원</span>
                       : <span className="text-muted-foreground/40">-</span>}
