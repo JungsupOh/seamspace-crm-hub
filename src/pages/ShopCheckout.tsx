@@ -64,10 +64,13 @@ export default function ShopCheckout() {
     }).open();
   };
 
-  const canSubmit = form.name.trim() && form.phone.trim() && (!needsShipping || (form.zipcode && form.address));
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
+  const canSubmit = form.name.trim() && form.phone.trim() && emailValid && (!needsShipping || (form.zipcode && form.address));
 
   const handlePayment = async () => {
-    if (!canSubmit) { toast.error('필수 정보를 입력해주세요'); return; }
+    if (!form.name.trim() || !form.phone.trim()) { toast.error('이름과 연락처를 입력해주세요'); return; }
+    if (!emailValid) { toast.error('영수증 발송을 위해 이메일을 정확히 입력해주세요'); return; }
+    if (needsShipping && (!form.zipcode || !form.address)) { toast.error('배송지를 입력해주세요'); return; }
     setSubmitting(true);
 
     try {
@@ -164,8 +167,9 @@ export default function ShopCheckout() {
             <Input value={form.phone} onChange={e => f('phone', formatPhone(e.target.value))} placeholder="010-0000-0000" className="h-10" />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs">이메일</Label>
+            <Label className="text-xs">이메일 *</Label>
             <Input value={form.email} onChange={e => f('email', e.target.value)} placeholder="email@example.com" type="email" className="h-10" />
+            <p className="text-[10px] text-muted-foreground">결제 영수증과 매출전표가 이 이메일로 발송됩니다.</p>
           </div>
         </div>
 
