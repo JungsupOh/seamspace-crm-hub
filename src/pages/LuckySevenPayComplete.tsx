@@ -6,7 +6,6 @@ import { Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchPaymentGroupByQuoteNumber, refreshGroupStatus } from '@/lib/luckySeven';
 import { notifyLuckySevenPayment } from '@/lib/telegram';
-import { sendPaymentReceiptEmail } from '@/lib/email';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -40,19 +39,7 @@ export default function LuckySevenPayComplete() {
         const data = await res.json();
         if (!res.ok || data.error) throw new Error(data.error || '결제 승인 실패');
 
-        // 영수증 이메일 발송 (실패해도 UI 진행)
-        if (data.payerEmail) {
-          sendPaymentReceiptEmail({
-            to: data.payerEmail,
-            customerName: data.payerName ?? '',
-            orderName: data.orderName ?? '심스페이스 이용권',
-            amount: data.amount ?? amount,
-            paidAt: data.approvedAt ?? undefined,
-            receiptUrl: data.receiptUrl ?? undefined,
-            orderId: orderId,
-            method: data.method ?? '카드',
-          }).catch((err) => console.warn('[LuckySevenPayComplete] 영수증 이메일 실패:', err));
-        }
+        // 영수증 이메일은 Toss가 자동 발송 — 중복 방지를 위해 우리 발송 X
 
         // 2) 그룹 상태 갱신 + 텔레그램 알림 + 캠페인 정보 조회
         const detail = await fetchPaymentGroupByQuoteNumber(orderId);

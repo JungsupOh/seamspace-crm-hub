@@ -4,7 +4,6 @@ import { CheckCircle2, Loader2, AlertTriangle, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { clearCart, markCouponUsed } from '@/lib/shop';
 import { notifyShopOrder } from '@/lib/telegram';
-import { sendPaymentReceiptEmail } from '@/lib/email';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -68,19 +67,7 @@ export default function ShopComplete() {
           throw new Error(data.error || '결제 승인 실패');
         }
 
-        // 영수증 이메일 (실패해도 UI 진행)
-        if (data.customerEmail) {
-          sendPaymentReceiptEmail({
-            to: data.customerEmail,
-            customerName: data.customerName ?? '',
-            orderName: data.orderName ?? '심스페이스 상품',
-            amount: Number(data.amount ?? amount),
-            paidAt: data.approvedAt ?? undefined,
-            receiptUrl: data.receiptUrl ?? undefined,
-            orderId: tossOrderId,
-            method: data.method ?? '카드',
-          }).catch((err) => console.warn('[ShopComplete] 영수증 이메일 실패:', err));
-        }
+        // 영수증 이메일은 Toss가 자동 발송 — 중복 방지를 위해 우리 발송 X
 
         // 텔레그램 알림 (어드민용)
         const itemSummary = orderData.items.map((i: { productName: string; qty: number }) =>
