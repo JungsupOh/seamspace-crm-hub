@@ -114,8 +114,23 @@ export default function ShopOrders() {
     return ids.every((id) => DIGITAL_PRODUCTS.has(id));
   };
 
+  const isMixed = (orderId: string): boolean => {
+    const ids = itemsByOrder.data?.get(orderId);
+    if (!ids || ids.length === 0) return false;
+    const hasDigital  = ids.some((id) => DIGITAL_PRODUCTS.has(id));
+    const hasPhysical = ids.some((id) => !DIGITAL_PRODUCTS.has(id));
+    return hasDigital && hasPhysical;
+  };
+
+  // 디지털 전용 주문은 상품관리에서 제외 (딜관리에서 처리)
+  // itemsByOrder가 로딩 중이면 모두 표시 (잠깐 노출되어도 OK)
+  const physicalOrders = useMemo(() => {
+    if (!itemsByOrder.data) return orders;
+    return orders.filter((o) => !isDigitalOnly(o.order_id));
+  }, [orders, itemsByOrder.data]);
+
   const filtered = useMemo(() => {
-    let list = orders;
+    let list = physicalOrders;
     if (statusFilter !== 'all') list = list.filter((o) => o.status === statusFilter);
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
@@ -126,13 +141,13 @@ export default function ShopOrders() {
       );
     }
     return list;
-  }, [orders, statusFilter, searchQuery]);
+  }, [physicalOrders, statusFilter, searchQuery]);
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: orders.length };
-    for (const s of STATUS_LIST) c[s] = orders.filter((o) => o.status === s).length;
+    const c: Record<string, number> = { all: physicalOrders.length };
+    for (const s of STATUS_LIST) c[s] = physicalOrders.filter((o) => o.status === s).length;
     return c;
-  }, [orders]);
+  }, [physicalOrders]);
 
   const updateMutation = useMutation({
     mutationFn: async (params: {
@@ -170,7 +185,7 @@ export default function ShopOrders() {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">상품관리</h1>
-          <p className="text-sm text-muted-foreground mt-1">/shop 결제건 — 실물 상품 배송 / 디지털 상품 발급 현황</p>
+          <p className="text-sm text-muted-foreground mt-1">실물 상품 배송 관리 — 디지털만 있는 주문은 <span className="underline">/딜관리</span>에서 관리됩니다.</p>
         </div>
         <Input
           value={searchQuery}
@@ -219,7 +234,7 @@ export default function ShopOrders() {
             </thead>
             <tbody>
               {filtered.map((o) => {
-                const digital = isDigitalOnly(o.order_id);
+                const mixed = isMixed(o.order_id);
                 return (
                   <tr
                     key={o.id}
@@ -229,8 +244,8 @@ export default function ShopOrders() {
                     <td className="px-3 py-2 text-muted-foreground">{o.created_at?.slice(0, 10)}</td>
                     <td className="px-3 py-2 font-mono text-xs">{o.order_id}</td>
                     <td className="px-3 py-2">
-                      {digital ? (
-                        <Badge variant="outline" className="gap-1 text-[10px]"><Smartphone className="h-3 w-3" /> 디지털</Badge>
+                      {mixed ? (
+                        <Badge variant="outline" className="gap-1 text-[10px] border-violet-300 text-violet-700"><Package className="h-3 w-3" /> 혼합</Badge>
                       ) : (
                         <Badge variant="outline" className="gap-1 text-[10px]"><Package className="h-3 w-3" /> 실물</Badge>
                       )}
@@ -241,9 +256,7 @@ export default function ShopOrders() {
                     </td>
                     <td className="px-3 py-2 text-right font-medium">{(o.total_amount ?? 0).toLocaleString()}원</td>
                     <td className="px-3 py-2 text-xs">
-                      {digital ? (
-                        <span className="text-muted-foreground">—</span>
-                      ) : o.tracking_number ? (
+                      {o.tracking_number ? (
                         <div>
                           <div>{o.carrier ?? '-'}</div>
                           <div className="font-mono text-[10px] text-muted-foreground">{o.tracking_number}</div>
@@ -268,7 +281,6 @@ export default function ShopOrders() {
       {selectedOrder && (
         <OrderDetailDialog
           order={selectedOrder}
-          digitalOnly={isDigitalOnly(selectedOrder.order_id)}
           onClose={() => setSelectedOrderId(null)}
           onUpdate={(p) => updateMutation.mutate({ id: selectedOrder.id, ...p })}
           updating={updateMutation.isPending}
@@ -281,22 +293,35 @@ export default function ShopOrders() {
 // ── 상세 다이얼로그 ───────────────────────────────────
 function OrderDetailDialog(props: {
   order: ShopOrder;
-  digitalOnly: boolean;
   onClose: () => void;
   onUpdate: (p: { status?: typeof STATUS_LIST[number]; carrier?: string; trackingNumber?: string }) => void;
   updating: boolean;
 }) {
-  const { order, digitalOnly, onClose, onUpdate, updating } = props;
+  const { order, onClose, onUpdate, updating } = props;
   const [carrier, setCarrier] = useState(order.carrier ?? '');
   const [trackingNumber, setTrackingNumber] = useState(order.tracking_number ?? '');
   const [resending, setResending] = useState(false);
 
-  // 디지털 상품 주문에 한해 발급된 쿠폰 조회 (재발송용)
+  const itemsQuery = useQuery({
+    queryKey: ['shop-order-items', order.order_id],
+    queryFn: () => fetchOrderItems(order.order_id),
+  });
+
+  const items = itemsQuery.data ?? [];
+  const physicalItems = items.filter((it) => !DIGITAL_PRODUCTS.has(it.product_id));
+  const digitalItems  = items.filter((it) => DIGITAL_PRODUCTS.has(it.product_id));
+  const hasDigital    = digitalItems.length > 0;
+  const hasPhysical   = physicalItems.length > 0;
+
+  // 디지털 아이템이 있는 경우만 발급 쿠폰 조회 (재발송용)
   const licensesQuery = useQuery({
     queryKey: ['shop-order-licenses', order.order_id],
     queryFn: () => fetchIssuedLicensesByOrderId(order.order_id),
-    enabled: digitalOnly,
+    enabled: hasDigital,
   });
+
+  const physicalSubtotal = physicalItems.reduce((s, it) => s + (it.subtotal ?? 0), 0);
+  const digitalSubtotal  = digitalItems.reduce((s, it) => s + (it.subtotal ?? 0), 0);
 
   const handleResendAlimtok = async () => {
     const licenses = licensesQuery.data ?? [];
@@ -334,11 +359,6 @@ function OrderDetailDialog(props: {
     setTrackingNumber(order.tracking_number ?? '');
   }, [order.id, order.carrier, order.tracking_number]);
 
-  const itemsQuery = useQuery({
-    queryKey: ['shop-order-items', order.order_id],
-    queryFn: () => fetchOrderItems(order.order_id),
-  });
-
   const next = NEXT_STATUS[order.status as keyof typeof NEXT_STATUS];
 
   // 미저장 변경 여부
@@ -375,7 +395,7 @@ function OrderDetailDialog(props: {
             <span className={`inline-block px-2 py-0.5 rounded text-xs ${STATUS_BADGE[order.status as keyof typeof STATUS_BADGE] ?? ''}`}>
               {order.status}
             </span>
-            {digitalOnly && <Badge variant="outline" className="gap-1 text-[10px]"><Smartphone className="h-3 w-3" /> 디지털</Badge>}
+            {hasDigital && hasPhysical && <Badge variant="outline" className="gap-1 text-[10px] border-violet-300 text-violet-700"><Package className="h-3 w-3" /> 혼합</Badge>}
           </DialogTitle>
         </DialogHeader>
 
@@ -393,10 +413,16 @@ function OrderDetailDialog(props: {
             </div>
           </section>
 
-          {/* 디지털 쿠폰 (디지털 상품인 경우) */}
-          {digitalOnly && (
+          {/* 디지털 쿠폰 (디지털 아이템이 있는 경우 — 혼합 카트 포함) */}
+          {hasDigital && (
             <section>
-              <p className="text-xs font-semibold mb-2 text-muted-foreground">발급 이용권</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  <Smartphone className="h-3 w-3 inline-block mr-1" />
+                  발급 이용권 (딜관리에서 처리)
+                </p>
+                <span className="text-[10px] text-muted-foreground">디지털 합계 {digitalSubtotal.toLocaleString()}원</span>
+              </div>
               {licensesQuery.isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               ) : (licensesQuery.data ?? []).length === 0 ? (
@@ -429,8 +455,8 @@ function OrderDetailDialog(props: {
             </section>
           )}
 
-          {/* 배송지 (실물만) */}
-          {!digitalOnly && (
+          {/* 배송지 (실물 아이템 있는 경우) */}
+          {hasPhysical && (
             <section>
               <p className="text-xs font-semibold mb-2 text-muted-foreground">배송지</p>
               <div className="bg-muted/30 rounded p-3 text-xs space-y-0.5">
@@ -458,22 +484,47 @@ function OrderDetailDialog(props: {
             </section>
           )}
 
-          {/* 상품 */}
+          {/* 상품 — 실물/디지털 분리 표시 */}
           <section>
-            <p className="text-xs font-semibold mb-2 text-muted-foreground">상품</p>
+            <p className="text-xs font-semibold mb-2 text-muted-foreground">상품 내역</p>
             {itemsQuery.isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             ) : (
-              <div className="rounded border divide-y text-xs">
-                {(itemsQuery.data ?? []).map((it) => (
-                  <div key={it.id} className="px-3 py-2 flex justify-between">
-                    <div>
-                      <div>{it.product_name} {it.option && <span className="text-muted-foreground">({it.option})</span>}</div>
-                      <div className="text-muted-foreground">× {it.qty}</div>
+              <div className="space-y-2">
+                {hasPhysical && (
+                  <div className="rounded border divide-y text-xs">
+                    <div className="px-3 py-1.5 bg-muted/30 text-[10px] text-muted-foreground flex justify-between">
+                      <span><Package className="h-3 w-3 inline mr-1" />실물 (배송 필요)</span>
+                      <span>합계 {physicalSubtotal.toLocaleString()}원</span>
                     </div>
-                    <div className="text-right">{(it.subtotal ?? 0).toLocaleString()}원</div>
+                    {physicalItems.map((it) => (
+                      <div key={it.id} className="px-3 py-2 flex justify-between">
+                        <div>
+                          <div>{it.product_name} {it.option && <span className="text-muted-foreground">({it.option})</span>}</div>
+                          <div className="text-muted-foreground">× {it.qty}</div>
+                        </div>
+                        <div className="text-right">{(it.subtotal ?? 0).toLocaleString()}원</div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
+                {hasDigital && (
+                  <div className="rounded border divide-y text-xs opacity-70">
+                    <div className="px-3 py-1.5 bg-muted/30 text-[10px] text-muted-foreground flex justify-between">
+                      <span><Smartphone className="h-3 w-3 inline mr-1" />디지털 (딜관리에서 처리)</span>
+                      <span>합계 {digitalSubtotal.toLocaleString()}원</span>
+                    </div>
+                    {digitalItems.map((it) => (
+                      <div key={it.id} className="px-3 py-2 flex justify-between">
+                        <div>
+                          <div>{it.product_name} {it.option && <span className="text-muted-foreground">({it.option})</span>}</div>
+                          <div className="text-muted-foreground">× {it.qty}</div>
+                        </div>
+                        <div className="text-right">{(it.subtotal ?? 0).toLocaleString()}원</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             <div className="mt-2 space-y-0.5 text-xs">
@@ -482,12 +533,12 @@ function OrderDetailDialog(props: {
               {order.discount > 0 && (
                 <div className="flex justify-between text-teal-600"><span>할인</span><span>-{order.discount.toLocaleString()}원</span></div>
               )}
-              <div className="flex justify-between font-semibold border-t pt-1 mt-1"><span>결제 금액</span><span>{order.total_amount.toLocaleString()}원</span></div>
+              <div className="flex justify-between font-semibold border-t pt-1 mt-1"><span>결제 금액 (실물+디지털)</span><span>{order.total_amount.toLocaleString()}원</span></div>
             </div>
           </section>
 
-          {/* 배송 정보 입력 (실물만) */}
-          {!digitalOnly && order.status !== '취소' && order.status !== '배송완료' && (
+          {/* 배송 정보 입력 (실물 아이템 있고 미완료 상태일 때) */}
+          {hasPhysical && order.status !== '취소' && order.status !== '배송완료' && (
             <section>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold text-muted-foreground">배송 정보</p>
