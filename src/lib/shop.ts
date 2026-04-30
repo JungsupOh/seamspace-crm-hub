@@ -92,6 +92,10 @@ export function getCart(): CartItem[] {
 
 export function saveCart(items: CartItem[]) {
   localStorage.setItem(CART_KEY, JSON.stringify({ items }));
+  // 같은 탭 안의 다른 컴포넌트가 즉시 반영하도록 커스텀 이벤트 발생
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('seamspace_cart_changed'));
+  }
 }
 
 export function addToCart(item: CartItem) {
@@ -125,6 +129,9 @@ export function removeFromCart(productId: string, option?: string) {
 
 export function clearCart() {
   localStorage.removeItem(CART_KEY);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('seamspace_cart_changed'));
+  }
 }
 
 // 배송 불필요 상품 (디지털/알림톡 발송)

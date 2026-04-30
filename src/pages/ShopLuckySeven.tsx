@@ -14,7 +14,16 @@ const DETAIL_IMAGES = [
 
 export default function ShopLuckySeven() {
   const [cartCount, setCartCount] = useState(0);
-  useEffect(() => { setCartCount(getCart().reduce((s, i) => s + i.qty, 0)); }, []);
+  useEffect(() => {
+    const refresh = () => setCartCount(getCart().reduce((s, i) => s + i.qty, 0));
+    refresh();
+    window.addEventListener('seamspace_cart_changed', refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('seamspace_cart_changed', refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-muted/20">

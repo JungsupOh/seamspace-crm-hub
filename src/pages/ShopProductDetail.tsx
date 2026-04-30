@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, ShoppingCart, Minus, Plus } from 'lucide-react';
@@ -18,7 +18,17 @@ export default function ShopProductDetail() {
     enabled: !!id,
   });
 
-  const cartCount = getCart().reduce((s, i) => s + i.qty, 0);
+  const [cartCount, setCartCount] = useState(0);
+  useEffect(() => {
+    const refresh = () => setCartCount(getCart().reduce((s, i) => s + i.qty, 0));
+    refresh();
+    window.addEventListener('seamspace_cart_changed', refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('seamspace_cart_changed', refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
 
   if (isLoading) return (
     <div className="min-h-screen flex items-center justify-center bg-muted/20">
