@@ -1,12 +1,13 @@
 // 상품관리 — /shop 결제건 어드민 (실물 배송 관리 위주)
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Package, Truck, CheckCircle2, X, ExternalLink, Smartphone, Save, Send } from 'lucide-react';
+import { Loader2, Package, Truck, CheckCircle2, X, ExternalLink, Smartphone, Save, Send, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { formatPhone } from '@/lib/utils';
@@ -45,6 +46,63 @@ async function fetchOrders(): Promise<ShopOrder[]> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/shop_orders?order=created_at.desc&limit=500`, { headers: HEADERS });
   if (!r.ok) throw new Error('주문 목록 조회 실패');
   return r.json();
+}
+
+// 주문 cascade 삭제: shop_order_items + 디지털 발급분(deals/quotes/users/licenses) + shop_orders
+async function deleteShopOrder(orderId: string): Promise<{ items: number; licenses: number; deals: number }> {
+  const counts = { items: 0, licenses: 0, deals: 0 };
+
+  // 1) 디지털 발급분: deals (quote_number 패턴 = orderId 또는 orderId-N)
+  const dealsRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/deals?quote_number=like.${encodeURIComponent(orderId)}*&select=id`,
+    { headers: HEADERS },
+  );
+  const dealIds: string[] = dealsRes.ok ? (await dealsRes.json() as { id: string }[]).map(d => d.id) : [];
+
+  if (dealIds.length > 0) {
+    const inFilter = `(${dealIds.map(id => `"${id}"`).join(',')})`;
+    // 1-1) deal_licenses
+    const licDel = await fetch(
+      `${SUPABASE_URL}/rest/v1/deal_licenses?deal_id=in.${inFilter}`,
+      { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+    );
+    if (licDel.ok) counts.licenses = ((await licDel.json()) as unknown[]).length;
+    // 1-2) deal_quotes
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/deal_quotes?deal_id=in.${inFilter}`,
+      { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=minimal' } },
+    );
+    // 1-3) deal_users
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/deal_users?deal_id=in.${inFilter}`,
+      { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=minimal' } },
+    );
+    // 1-4) deals
+    const dDel = await fetch(
+      `${SUPABASE_URL}/rest/v1/deals?id=in.${inFilter}`,
+      { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+    );
+    if (dDel.ok) counts.deals = ((await dDel.json()) as unknown[]).length;
+  }
+
+  // 2) shop_order_items
+  const itemsDel = await fetch(
+    `${SUPABASE_URL}/rest/v1/shop_order_items?order_id=eq.${encodeURIComponent(orderId)}`,
+    { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+  );
+  if (itemsDel.ok) counts.items = ((await itemsDel.json()) as unknown[]).length;
+
+  // 3) shop_orders
+  const oDel = await fetch(
+    `${SUPABASE_URL}/rest/v1/shop_orders?order_id=eq.${encodeURIComponent(orderId)}`,
+    { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=minimal' } },
+  );
+  if (!oDel.ok) {
+    const err = await oDel.json().catch(() => ({}));
+    throw new Error((err as { message?: string }).message || `주문 삭제 실패 (${oDel.status})`);
+  }
+
+  return counts;
 }
 
 async function fetchOrderItems(orderId: string): Promise<ShopOrderItem[]> {
@@ -284,6 +342,11 @@ export default function ShopOrders() {
           onClose={() => setSelectedOrderId(null)}
           onUpdate={(p) => updateMutation.mutate({ id: selectedOrder.id, ...p })}
           updating={updateMutation.isPending}
+          onDeleted={() => {
+            setSelectedOrderId(null);
+            qc.invalidateQueries({ queryKey: ['shop-orders'] });
+            qc.invalidateQueries({ queryKey: ['shop-orders-items-bulk'] });
+          }}
         />
       )}
     </div>
@@ -296,11 +359,32 @@ function OrderDetailDialog(props: {
   onClose: () => void;
   onUpdate: (p: { status?: typeof STATUS_LIST[number]; carrier?: string; trackingNumber?: string }) => void;
   updating: boolean;
+  onDeleted: () => void;
 }) {
-  const { order, onClose, onUpdate, updating } = props;
+  const { order, onClose, onUpdate, updating, onDeleted } = props;
   const [carrier, setCarrier] = useState(order.carrier ?? '');
   const [trackingNumber, setTrackingNumber] = useState(order.tracking_number ?? '');
   const [resending, setResending] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      const counts = await deleteShopOrder(order.order_id);
+      const parts: string[] = [`주문 1건`];
+      if (counts.items > 0) parts.push(`상품 ${counts.items}건`);
+      if (counts.deals > 0) parts.push(`딜 ${counts.deals}건`);
+      if (counts.licenses > 0) parts.push(`라이선스 ${counts.licenses}건`);
+      toast.success(`삭제 완료 (${parts.join(', ')})`);
+      setDeleteConfirmOpen(false);
+      onDeleted();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '주문 삭제 실패');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const itemsQuery = useQuery({
     queryKey: ['shop-order-items', order.order_id],
@@ -599,7 +683,62 @@ function OrderDetailDialog(props: {
               </a>
             </Button>
           </section>
+
+          {/* 주문 삭제 — 위험 영역 */}
+          <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-destructive">주문 삭제</div>
+              <div className="text-xs text-muted-foreground">
+                {hasDigital
+                  ? '⚠️ 디지털 발급분(딜/이용권)도 함께 삭제됩니다. mDiary 쿠폰은 외부 시스템이라 삭제 안 됨.'
+                  : order.status === '결제완료' || order.status === '배송준비' || order.status === '배송중'
+                  ? '⚠️ 결제 환불은 별도 처리 필요. 주문 데이터만 삭제됩니다.'
+                  : '주문 데이터를 영구 삭제합니다.'}
+              </div>
+            </div>
+            <Button size="sm" variant="destructive" disabled={updating || deleting} onClick={() => setDeleteConfirmOpen(true)}>
+              <Trash2 className="h-4 w-4 mr-1" /> 주문 삭제
+            </Button>
+          </section>
         </div>
+
+        <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>주문 {order.order_id} 삭제</AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2 text-sm">
+                  <p>다음 데이터가 영구 삭제됩니다:</p>
+                  <ul className="list-disc list-inside text-xs text-muted-foreground space-y-0.5">
+                    <li>주문 정보 (shop_orders) 1건</li>
+                    <li>주문 상품 ({items.length}건)</li>
+                    {hasDigital && <li>자동 생성된 딜 + 견적 + 이용권 (디지털 {digitalItems.length}건)</li>}
+                  </ul>
+                  {(order.status === '결제완료' || order.status === '배송준비' || order.status === '배송중') && (
+                    <p className="text-destructive font-medium pt-1">
+                      ⚠️ Toss 환불은 별도로 처리하세요.
+                    </p>
+                  )}
+                  {hasDigital && (
+                    <p className="text-destructive font-medium">
+                      ⚠️ mDiary 발급된 쿠폰은 외부 시스템이라 그대로 남습니다.
+                    </p>
+                  )}
+                  <p className="pt-1">계속하시겠습니까?</p>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>취소</AlertDialogCancel>
+              <AlertDialogAction asChild>
+                <Button variant="destructive" disabled={deleting} onClick={handleDelete}>
+                  {deleting && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+                  삭제
+                </Button>
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </DialogContent>
     </Dialog>
   );
