@@ -1,7 +1,7 @@
 // 상품관리 — /shop 결제건 어드민 (실물 배송 관리 위주)
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Package, Truck, CheckCircle2, X, ExternalLink, Smartphone, Save } from 'lucide-react';
+import { Loader2, Package, Truck, CheckCircle2, X, ExternalLink, Smartphone, Save, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { formatPhone } from '@/lib/utils';
+import { apiSendCoupon } from '@/lib/coupons';
 import type { ShopOrder, ShopOrderItem } from '@/lib/shop';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -53,6 +54,29 @@ async function fetchOrderItems(orderId: string): Promise<ShopOrderItem[]> {
   );
   if (!r.ok) return [];
   return r.json();
+}
+
+// 주문 ID 기반으로 발급된 쿠폰 목록 조회 (deals.quote_number 가 orderId 또는 orderId-N 형태)
+async function fetchIssuedLicensesByOrderId(orderId: string): Promise<Array<{
+  coupon_code: string; duration: string; user_count: string; contact_name: string; contact_phone: string;
+}>> {
+  // 1) quote_number 패턴 매칭으로 deal id 조회 (orderId, orderId-1, orderId-2, ...)
+  const dealsRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/deals?quote_number=like.${encodeURIComponent(orderId)}*&select=id`,
+    { headers: HEADERS },
+  );
+  if (!dealsRes.ok) return [];
+  const deals: Array<{ id: string }> = await dealsRes.json();
+  if (deals.length === 0) return [];
+
+  // 2) 각 deal에 묶인 deal_licenses 조회
+  const dealIds = deals.map((d) => d.id).join(',');
+  const licRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/deal_licenses?deal_id=in.(${dealIds})&select=coupon_code,duration,user_count,contact_name,contact_phone`,
+    { headers: HEADERS },
+  );
+  if (!licRes.ok) return [];
+  return licRes.json();
 }
 
 export default function ShopOrders() {
@@ -265,6 +289,44 @@ function OrderDetailDialog(props: {
   const { order, digitalOnly, onClose, onUpdate, updating } = props;
   const [carrier, setCarrier] = useState(order.carrier ?? '');
   const [trackingNumber, setTrackingNumber] = useState(order.tracking_number ?? '');
+  const [resending, setResending] = useState(false);
+
+  // 디지털 상품 주문에 한해 발급된 쿠폰 조회 (재발송용)
+  const licensesQuery = useQuery({
+    queryKey: ['shop-order-licenses', order.order_id],
+    queryFn: () => fetchIssuedLicensesByOrderId(order.order_id),
+    enabled: digitalOnly,
+  });
+
+  const handleResendAlimtok = async () => {
+    const licenses = licensesQuery.data ?? [];
+    if (licenses.length === 0) {
+      toast.error('발급된 쿠폰을 찾지 못했습니다 (딜관리 기록 없음).');
+      return;
+    }
+    setResending(true);
+    let ok = 0, fail = 0;
+    for (const lic of licenses) {
+      try {
+        await apiSendCoupon({
+          first_name: lic.contact_name || order.customer_name,
+          phone:      (lic.contact_phone || order.customer_phone).replace(/\D/g, ''),
+          coupon_code: lic.coupon_code,
+          user_limit: lic.user_count,
+          duration:   lic.duration,
+          send_type:  'buyer',
+        });
+        ok++;
+      } catch (e) {
+        console.error('재발송 실패:', lic.coupon_code, e);
+        fail++;
+      }
+    }
+    setResending(false);
+    if (ok > 0 && fail === 0) toast.success(`알림톡 ${ok}건 재발송 성공`);
+    else if (ok > 0 && fail > 0) toast.warning(`${ok}건 성공, ${fail}건 실패`);
+    else toast.error(`재발송 실패 (${fail}건)`);
+  };
 
   // order(서버 응답)이 갱신되면 폼 상태도 동기화
   useEffect(() => {
@@ -330,6 +392,42 @@ function OrderDetailDialog(props: {
               <div className="flex justify-between"><span className="text-muted-foreground">주문일</span><span>{order.created_at?.slice(0, 16).replace('T', ' ')}</span></div>
             </div>
           </section>
+
+          {/* 디지털 쿠폰 (디지털 상품인 경우) */}
+          {digitalOnly && (
+            <section>
+              <p className="text-xs font-semibold mb-2 text-muted-foreground">발급 이용권</p>
+              {licensesQuery.isLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              ) : (licensesQuery.data ?? []).length === 0 ? (
+                <p className="text-xs text-muted-foreground">발급 이력 없음</p>
+              ) : (
+                <div className="rounded border bg-teal-50 dark:bg-teal-950/20 divide-y divide-teal-100 text-xs">
+                  {(licensesQuery.data ?? []).map((lic) => (
+                    <div key={lic.coupon_code} className="px-3 py-2 flex justify-between items-center">
+                      <span className="font-mono font-semibold">{lic.coupon_code}</span>
+                      <span className="text-muted-foreground text-[10px]">
+                        {lic.duration}개월 / {lic.user_count}명
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Button
+                onClick={handleResendAlimtok}
+                disabled={resending || licensesQuery.isLoading || (licensesQuery.data ?? []).length === 0}
+                size="sm"
+                variant="outline"
+                className="mt-2 w-full"
+              >
+                {resending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+                알림톡 재발송 ({(licensesQuery.data ?? []).length}건)
+              </Button>
+              <p className="text-[10px] text-muted-foreground mt-1.5">
+                구매자 핸드폰({formatPhone(order.customer_phone)})으로 이용권 코드 알림톡을 다시 보냅니다.
+              </p>
+            </section>
+          )}
 
           {/* 배송지 (실물만) */}
           {!digitalOnly && (
