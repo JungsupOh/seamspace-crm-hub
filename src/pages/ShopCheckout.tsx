@@ -214,6 +214,36 @@ export default function ShopCheckout() {
             placeholder="상세 주소 (동/호수)" className="h-10" />
           <Input value={form.memo} onChange={e => f('memo', e.target.value)}
             placeholder="배송 메모 (선택)" className="h-10" />
+
+          {/* 도서산간 추가 배송비 알림 — 입력된 주소에서 지역이 감지됐을 때 */}
+          {shippingBreakdown.remoteArea && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 mt-1">
+              <div className="flex items-start gap-2">
+                <span className="text-base leading-none">📍</span>
+                <div className="flex-1 text-xs">
+                  <p className="font-semibold text-amber-900">
+                    도서산간 지역 — {shippingBreakdown.remoteArea}
+                  </p>
+                  <div className="mt-1.5 space-y-0.5 text-amber-800">
+                    <div className="flex justify-between">
+                      <span>· 도서산간 추가 배송비</span>
+                      <span>+{shippingBreakdown.remoteSurcharge.toLocaleString()}원</span>
+                    </div>
+                    {shippingBreakdown.discount > 0 && (
+                      <div className="flex justify-between">
+                        <span>· 5만원당 3,000원 할인</span>
+                        <span>-{shippingBreakdown.discount.toLocaleString()}원</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between font-semibold border-t border-amber-200 pt-1 mt-1">
+                      <span>· 최종 배송비</span>
+                      <span>{shippingBreakdown.total === 0 ? '무료' : `${shippingBreakdown.total.toLocaleString()}원`}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
         ) : (
         <div className="bg-white rounded-2xl border border-border p-4">
