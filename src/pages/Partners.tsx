@@ -887,8 +887,10 @@ function PartnerDealsSection({
     school_name?: string;
     buyer_name?: string;
     buyer_phone?: string;
+    buyer_email?: string;
     plan_name?: string;
     quantity?: number;
+    duration?: number;
     payment_amount: number;
     commission_amount: number;
     settlement_amount: number;
@@ -897,10 +899,22 @@ function PartnerDealsSection({
     remarks?: string;
     linked_deal_id?: string;
     rawPartner?: PartnerDeal;
+    rawCrm?: AirtableRecord<DealFields>;
   };
+
+  // CRM 행 상세 보기 (파트너 관점에서 추린 정보)
+  const [crmDetail, setCrmDetail] = useState<UnifiedRow | null>(null);
 
   const linkedDealIdSet = new Set(
     deals.filter(d => d.linked_deal_id).map(d => d.linked_deal_id!),
+  );
+
+  // 추가 dedup — partner_deals에 linked_deal_id가 비어있어도 같은 매출(전화+금액)이면 중복 처리
+  const normalizePhone = (s?: string) => (s ?? '').replace(/\D/g, '');
+  const partnerSigSet = new Set(
+    deals
+      .map(d => `${normalizePhone(d.buyer_phone)}::${d.payment_amount ?? 0}`)
+      .filter(s => !s.startsWith('::')),
   );
 
   const unifiedRows: UnifiedRow[] = [
@@ -911,8 +925,10 @@ function PartnerDealsSection({
       school_name: d.school_name,
       buyer_name: d.buyer_name,
       buyer_phone: d.buyer_phone,
+      buyer_email: d.buyer_email,
       plan_name: d.plan_name,
       quantity: d.quantity,
+      duration: d.month_count,
       payment_amount: d.payment_amount ?? 0,
       commission_amount: d.commission_amount ?? 0,
       settlement_amount: d.settlement_amount ?? 0,
@@ -924,6 +940,13 @@ function PartnerDealsSection({
     })),
     ...crmDeals
       .filter(c => !linkedDealIdSet.has(c.id))
+      .filter(c => {
+        const phone = normalizePhone(c.fields.Contact_Phone);
+        const amt = c.fields.Final_Contract_Value ?? 0;
+        // 전화번호 모르면 dedup 불가 → keep (수동 검토 대상)
+        if (phone.length < 10) return true;
+        return !partnerSigSet.has(`${phone}::${amt}`);
+      })
       .map((c): UnifiedRow => {
         const amt = c.fields.Final_Contract_Value ?? 0;
         const calc = calcCommission(amt, commissionRate);
@@ -934,14 +957,17 @@ function PartnerDealsSection({
           school_name: c.fields.Org_Name,
           buyer_name: c.fields.Contact_Name,
           buyer_phone: c.fields.Contact_Phone,
+          buyer_email: c.fields.Contact_Email,
           plan_name: c.fields.Quote_Plan,
           quantity: c.fields.Quote_Qty,
+          duration: c.fields.License_Duration,
           payment_amount: amt,
           commission_amount: calc.commission,
           settlement_amount: calc.settlement,
           license_issue_date: c.fields.License_Send_Date,
           deposit_date: c.fields.Payment_Date,
           remarks: c.fields.Deal_Stage,
+          rawCrm: c,
         };
       }),
   ].sort((a, b) => (b.contract_date ?? '').localeCompare(a.contract_date ?? ''));
@@ -1233,9 +1259,12 @@ function PartnerDealsSection({
                   return (
                     <tr
                       key={`${r.source}-${r.rawId}`}
-                      className={`${isPartner ? 'hover:bg-muted/30 cursor-pointer' : 'bg-muted/10 cursor-default'}`}
-                      onClick={() => { if (isPartner && r.rawPartner) openEditDialog(r.rawPartner); }}
-                      title={!isPartner ? '이 딜은 /deals 메뉴에서 수정해주세요' : undefined}
+                      className={`${isPartner ? 'hover:bg-muted/30 cursor-pointer' : 'bg-muted/10 hover:bg-muted/30 cursor-pointer'}`}
+                      onClick={() => {
+                        if (isPartner && r.rawPartner) openEditDialog(r.rawPartner);
+                        else if (!isPartner) setCrmDetail(r);
+                      }}
+                      title={!isPartner ? '클릭하여 상세 정보 보기 (수정은 /deals 메뉴에서)' : undefined}
                     >
                       <td className="px-3 py-2.5">
                         <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
@@ -1272,6 +1301,55 @@ function PartnerDealsSection({
           </div>
         </div>
       )}
+
+      {/* CRM 등록 딜 상세 보기 (어드민 등록 = 파트너관리에서는 read-only) */}
+      <Dialog open={!!crmDetail} onOpenChange={(open) => { if (!open) setCrmDetail(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span>딜 상세</span>
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">어드민</span>
+            </DialogTitle>
+          </DialogHeader>
+          {crmDetail && (
+            <div className="space-y-3 text-sm">
+              <div className="bg-muted/30 rounded p-3 space-y-1.5">
+                <div className="flex justify-between"><span className="text-xs text-muted-foreground">계약일</span><span>{crmDetail.contract_date || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-xs text-muted-foreground">학교</span><span>{crmDetail.school_name || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-xs text-muted-foreground">구매자</span><span>{crmDetail.buyer_name || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-xs text-muted-foreground">연락처</span><span>{crmDetail.buyer_phone || '-'}</span></div>
+                {crmDetail.buyer_email && (
+                  <div className="flex justify-between"><span className="text-xs text-muted-foreground">이메일</span><span className="text-xs">{crmDetail.buyer_email}</span></div>
+                )}
+              </div>
+
+              <div className="bg-muted/30 rounded p-3 space-y-1.5">
+                <div className="flex justify-between"><span className="text-xs text-muted-foreground">플랜</span><span>{crmDetail.plan_name || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-xs text-muted-foreground">수량</span><span>{crmDetail.quantity ?? '-'}</span></div>
+                {crmDetail.duration && (
+                  <div className="flex justify-between"><span className="text-xs text-muted-foreground">기간</span><span>{crmDetail.duration}개월</span></div>
+                )}
+              </div>
+
+              <div className="bg-muted/30 rounded p-3 space-y-1.5">
+                <div className="flex justify-between"><span className="text-xs text-muted-foreground">결제금액</span><span className="font-medium">{crmDetail.payment_amount.toLocaleString()}원</span></div>
+                <div className="flex justify-between"><span className="text-xs text-muted-foreground">수수료 ({commissionRate}%)</span><span className="text-amber-600">{crmDetail.commission_amount.toLocaleString()}원</span></div>
+                <div className="flex justify-between border-t pt-1.5"><span className="text-xs text-muted-foreground">정산금액</span><span className="font-semibold text-teal-700">{crmDetail.settlement_amount.toLocaleString()}원</span></div>
+              </div>
+
+              <div className="bg-muted/30 rounded p-3 space-y-1.5">
+                <div className="flex justify-between"><span className="text-xs text-muted-foreground">이용권 발급일</span><span>{crmDetail.license_issue_date || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-xs text-muted-foreground">입금일</span><span>{crmDetail.deposit_date || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-xs text-muted-foreground">단계</span><span>{crmDetail.remarks || '-'}</span></div>
+              </div>
+
+              <p className="text-[10px] text-muted-foreground text-center">
+                이 딜은 어드민(CRM)에서 등록되었습니다. 수정은 /deals 메뉴에서 가능합니다.
+              </p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* 딜 추가/수정 팝업 */}
       <Dialog open={dialogOpen} onOpenChange={open => { if (!open) setDialogOpen(false); }}>
@@ -1490,11 +1568,23 @@ export default function Partners() {
   const partnerById = new Map<string, Partner>();
   for (const p of partners ?? []) partnerById.set(p.id, p);
   const linkedDealIds = new Set<string>();
+  // 파트너별 전화+금액 시그니처 — linked_deal_id 비어있어도 중복 매출 제거용
+  const partnerSigByName = new Map<string, Set<string>>();
+  const normPhone = (s?: string) => (s ?? '').replace(/\D/g, '');
 
   for (const pd of allPartnerDeals ?? []) {
     if (pd.linked_deal_id) linkedDealIds.add(pd.linked_deal_id);
-    if (!pd.deposit_date || !matchesPeriodFn(pd.deposit_date)) continue;
     const partner = partnerById.get(pd.partner_id);
+    if (partner) {
+      const phone = normPhone(pd.buyer_phone);
+      if (phone.length >= 10) {
+        const sig = `${phone}::${pd.payment_amount ?? 0}`;
+        const set = partnerSigByName.get(partner.name) ?? new Set<string>();
+        set.add(sig);
+        partnerSigByName.set(partner.name, set);
+      }
+    }
+    if (!pd.deposit_date || !matchesPeriodFn(pd.deposit_date)) continue;
     if (!partner) continue;
     const amount = pd.payment_amount ?? 0;
     if (amount <= 0) continue;
@@ -1509,6 +1599,12 @@ export default function Partners() {
     const date = d.fields.Payment_Date;
     if (!src || !date || !matchesPeriodFn(date)) continue;
     const amount = d.fields.Final_Contract_Value ?? 0;
+    // 전화+금액 시그니처 매칭 시 중복으로 간주하고 skip
+    const phone = normPhone(d.fields.Contact_Phone);
+    if (phone.length >= 10) {
+      const sigSet = partnerSigByName.get(src);
+      if (sigSet?.has(`${phone}::${amount}`)) continue;
+    }
     monthlyByPartner[src] = (monthlyByPartner[src] ?? 0) + amount;
     totalThisMonth += amount;
     totalThisMonthDeals++;
