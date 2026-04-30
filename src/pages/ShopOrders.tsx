@@ -25,8 +25,8 @@ const DIGITAL_PRODUCTS = new Set(['minddiary']);
 
 // 상품별 한 글자 아이콘 + 색상
 const PRODUCT_ICON: Record<string, { label: string; bg: string; fg: string; name: string }> = {
-  boardgame: { label: '보', bg: 'bg-purple-700',  fg: 'text-white',         name: '마음여행 보드게임' },
-  keyring:   { label: '키', bg: 'bg-yellow-300',  fg: 'text-yellow-900',    name: '감정 키링 10종' },
+  boardgame: { label: '보', bg: 'bg-indigo-700',  fg: 'text-white',         name: '마음여행 보드게임' },
+  keyring:   { label: '키', bg: 'bg-yellow-200',  fg: 'text-yellow-800',    name: '감정 키링 10종' },
   minddiary: { label: '마', bg: 'bg-purple-200',  fg: 'text-purple-800',    name: 'AI 마음일기' },
 };
 
@@ -164,6 +164,10 @@ export default function ShopOrders() {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [deleteRowOrderId, setDeleteRowOrderId] = useState<string | null>(null);
   const [deletingRow, setDeletingRow] = useState(false);
+  // 일괄 삭제 — 체크박스 선택
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const ordersQuery = useQuery({ queryKey: ['shop-orders'], queryFn: fetchOrders });
   const orders = ordersQuery.data ?? [];
@@ -291,6 +295,56 @@ export default function ShopOrders() {
 
   const selectedOrder = orders.find((o) => o.order_id === selectedOrderId) ?? null;
 
+  const toggleBulk = (orderId: string) => {
+    setBulkSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every(o => bulkSelected.has(o.order_id));
+  const someFilteredSelected = filtered.some(o => bulkSelected.has(o.order_id));
+
+  const toggleBulkAll = () => {
+    setBulkSelected(prev => {
+      if (allFilteredSelected) {
+        // 모두 해제 — 현재 필터된 행만
+        const next = new Set(prev);
+        filtered.forEach(o => next.delete(o.order_id));
+        return next;
+      } else {
+        // 모두 선택
+        const next = new Set(prev);
+        filtered.forEach(o => next.add(o.order_id));
+        return next;
+      }
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    setBulkDeleting(true);
+    const ids = Array.from(bulkSelected);
+    let ok = 0, fail = 0;
+    for (const id of ids) {
+      try {
+        await deleteShopOrder(id);
+        ok++;
+      } catch (e) {
+        console.error('삭제 실패:', id, e);
+        fail++;
+      }
+    }
+    setBulkDeleting(false);
+    setBulkDeleteOpen(false);
+    setBulkSelected(new Set());
+    qc.invalidateQueries({ queryKey: ['shop-orders'] });
+    qc.invalidateQueries({ queryKey: ['shop-orders-items-bulk'] });
+    if (fail === 0) toast.success(`${ok}건 삭제 완료`);
+    else toast.warning(`${ok}건 성공 / ${fail}건 실패`);
+  };
+
   const handleRowDelete = async (orderId: string) => {
     setDeletingRow(true);
     try {
@@ -342,14 +396,14 @@ export default function ShopOrders() {
         </div>
         <div className="bg-card rounded-xl ring-1 ring-border p-4">
           <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5">
-            <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-purple-700 text-white">보</span>
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-indigo-700 text-white">보</span>
             마음여행 보드게임
           </p>
           <p className="text-2xl font-bold tabular-nums">{(revenueByProduct.boardgame ?? 0).toLocaleString()}원</p>
         </div>
         <div className="bg-card rounded-xl ring-1 ring-border p-4">
           <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5">
-            <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-yellow-300 text-yellow-900">키</span>
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-yellow-200 text-yellow-800">키</span>
             감정 키링 10종
           </p>
           <p className="text-2xl font-bold tabular-nums">{(revenueByProduct.keyring ?? 0).toLocaleString()}원</p>
@@ -390,6 +444,21 @@ export default function ShopOrders() {
         </div>
       </div>
 
+      {/* 일괄 삭제 액션 바 — 선택 시 표시 */}
+      {bulkSelected.size > 0 && (
+        <div className="flex items-center justify-between gap-3 bg-destructive/5 border border-destructive/30 rounded-lg px-3 py-2">
+          <div className="text-sm">
+            <strong className="font-semibold">{bulkSelected.size}건</strong> 선택됨
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="ghost" onClick={() => setBulkSelected(new Set())}>선택 해제</Button>
+            <Button size="sm" variant="destructive" onClick={() => setBulkDeleteOpen(true)}>
+              <Trash2 className="h-3.5 w-3.5 mr-1" /> 선택한 {bulkSelected.size}건 삭제
+            </Button>
+          </div>
+        </div>
+      )}
+
       {ordersQuery.isLoading ? (
         <div className="py-12 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></div>
       ) : filtered.length === 0 ? (
@@ -399,6 +468,16 @@ export default function ShopOrders() {
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-xs">
               <tr>
+                <th className="px-3 py-2 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    ref={el => { if (el) el.indeterminate = !allFilteredSelected && someFilteredSelected; }}
+                    onChange={toggleBulkAll}
+                    aria-label="전체 선택"
+                    className="cursor-pointer"
+                  />
+                </th>
                 <th className="text-left px-3 py-2">주문일</th>
                 <th className="text-left px-3 py-2">주문번호</th>
                 <th className="text-left px-3 py-2">상품</th>
@@ -412,12 +491,22 @@ export default function ShopOrders() {
             <tbody>
               {filtered.map((o) => {
                 const productIds = uniqueProductIds(o.order_id);
+                const isChecked = bulkSelected.has(o.order_id);
                 return (
                   <tr
                     key={o.id}
                     onClick={() => setSelectedOrderId(o.order_id)}
-                    className="border-t hover:bg-muted/30 cursor-pointer group"
+                    className={`border-t hover:bg-muted/30 cursor-pointer group ${isChecked ? 'bg-destructive/5' : ''}`}
                   >
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => toggleBulk(o.order_id)}
+                        className="cursor-pointer"
+                        aria-label={`${o.order_id} 선택`}
+                      />
+                    </td>
                     <td className="px-3 py-2 text-muted-foreground">{o.created_at?.slice(0, 10)}</td>
                     <td className="px-3 py-2 font-mono text-xs">{o.order_id}</td>
                     <td className="px-3 py-2">
@@ -487,6 +576,33 @@ export default function ShopOrders() {
           }}
         />
       )}
+
+      {/* 일괄 삭제 확인 */}
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{bulkSelected.size}건 일괄 삭제</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>선택된 주문 {bulkSelected.size}건의 주문/상품/딜/이용권이 모두 삭제됩니다.</p>
+                <p className="text-destructive font-medium">
+                  ⚠️ Toss 환불은 별도로 처리해야 합니다. 삭제한 데이터는 복구할 수 없습니다.
+                </p>
+                <p>계속하시겠습니까?</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting}>취소</AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <Button variant="destructive" disabled={bulkDeleting} onClick={handleBulkDelete}>
+                {bulkDeleting && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+                {bulkSelected.size}건 삭제
+              </Button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 인라인 삭제 확인 — 행에서 휴지통 버튼 누른 경우 */}
       <AlertDialog open={!!deleteRowOrderId} onOpenChange={(o) => { if (!o) setDeleteRowOrderId(null); }}>
