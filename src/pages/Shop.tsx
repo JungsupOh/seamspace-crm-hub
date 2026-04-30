@@ -18,14 +18,22 @@ export default function Shop() {
       <header className="bg-white border-b sticky top-0 z-30">
         <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
           <Link to="/shop" className="font-bold text-lg">심스페이스 스토어</Link>
-          <div className="flex items-center gap-1">
-            <Link to="/shop/lookup" className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground" title="주문 조회">
-              <ClipboardList className="h-5 w-5" />
+          <div className="flex items-center gap-2">
+            <Link
+              to="/shop/lookup"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground"
+            >
+              <ClipboardList className="h-4 w-4" />
+              <span>주문 조회</span>
             </Link>
-            <Link to="/shop/cart" className="relative p-2 hover:bg-muted rounded-lg transition-colors">
-              <ShoppingCart className="h-5 w-5" />
+            <Link
+              to="/shop/cart"
+              className="relative flex items-center gap-1.5 px-3 py-1.5 text-sm hover:bg-muted rounded-lg transition-colors"
+            >
+              <ShoppingCart className="h-4 w-4" />
+              <span>장바구니</span>
               {cartCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 bg-primary text-primary-foreground text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                <span className="bg-primary text-primary-foreground text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
                   {cartCount}
                 </span>
               )}
@@ -34,7 +42,7 @@ export default function Shop() {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-8">
+      <main className="max-w-3xl mx-auto px-4 py-8">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold mb-2">심스페이스 상품</h1>
           <p className="text-muted-foreground text-sm">행복한 사회정서학습을 위한 교구</p>
@@ -43,16 +51,16 @@ export default function Shop() {
         {isLoading ? (
           <div className="text-center py-16 text-muted-foreground">로딩 중...</div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <Link to="/shop/keyring" className="group text-center">
-              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-2">
+              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-3">
                 <img src="/banner/keyring(Thmb).png" alt="감정 키링 10종" className="w-full group-hover:scale-105 transition-transform duration-300" />
               </div>
               {products?.find(p => p.id === 'keyring') && (() => {
                 const p = products.find(p => p.id === 'keyring')!;
                 const discount = p.original_price ? Math.round((1 - p.price / p.original_price) * 100) : 0;
                 return (<>
-                  <h3 className="font-bold text-sm">{p.name}</h3>
+                  <h3 className="font-bold text-base">{p.name}</h3>
                   <div className="flex items-center justify-center gap-1.5 mt-0.5">
                     {discount > 0 && <span className="text-xs font-bold text-red-500">{discount}%</span>}
                     <span className="text-sm font-bold">{p.price.toLocaleString()}원</span>
@@ -64,14 +72,14 @@ export default function Shop() {
               })()}
             </Link>
             <Link to="/shop/boardgame" className="group text-center">
-              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-2">
+              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-3">
                 <img src="/banner/boardgame(Thmb).png" alt="마음여행 보드게임" className="w-full group-hover:scale-105 transition-transform duration-300" />
               </div>
               {products?.find(p => p.id === 'boardgame') && (() => {
                 const p = products.find(p => p.id === 'boardgame')!;
                 const discount = p.original_price ? Math.round((1 - p.price / p.original_price) * 100) : 0;
                 return (<>
-                  <h3 className="font-bold text-sm">{p.name}</h3>
+                  <h3 className="font-bold text-base">{p.name}</h3>
                   <div className="flex items-center justify-center gap-1.5 mt-0.5">
                     {discount > 0 && <span className="text-xs font-bold text-red-500">{discount}%</span>}
                     <span className="text-sm font-bold">{p.price.toLocaleString()}원</span>
@@ -83,10 +91,10 @@ export default function Shop() {
               })()}
             </Link>
             <Link to="/shop/minddiary" className="group text-center">
-              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-2">
+              <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-3">
                 <img src="/banner/MindDiary(Thmb).png" alt="AI 마음일기" className="w-full group-hover:scale-105 transition-transform duration-300" />
               </div>
-              <h3 className="font-bold text-sm">AI 마음일기</h3>
+              <h3 className="font-bold text-base">AI 마음일기</h3>
               <div className="flex items-center justify-center gap-1.5 mt-0.5">
                 <span className="text-sm font-bold">40,000원</span>
                 <span className="text-xs text-muted-foreground">/ 1학급 1개월</span>
@@ -97,7 +105,7 @@ export default function Shop() {
                 <img src="/events/lucky-seven/lucky-seven-thumnail-2.png" alt="럭키세븐 이벤트" className="w-full block group-hover:scale-105 transition-transform duration-300" />
                 <span className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">5월 한정</span>
               </div>
-              <h3 className="font-bold text-sm">럭키세븐 이벤트</h3>
+              <h3 className="font-bold text-base">럭키세븐 이벤트</h3>
               <div className="flex items-center justify-center gap-1.5 mt-0.5">
                 <span className="text-xs font-bold text-red-500">58%</span>
                 <span className="text-sm font-bold">100,000원</span>
