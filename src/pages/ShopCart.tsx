@@ -151,6 +151,11 @@ export default function ShopCart() {
               {(50000 - subtotal).toLocaleString()}원 더 담으면 무료배송!
             </p>
           )}
+          {needsShipping && (
+            <p className="text-[10px] text-muted-foreground">
+              제주·도서산간은 결제 단계에서 추가 배송비가 표시됩니다 (5만원당 3,000원씩 차감).
+            </p>
+          )}
           {couponDiscount > 0 && (
             <div className="flex justify-between text-sm text-teal-600">
               <span>쿠폰 할인</span>

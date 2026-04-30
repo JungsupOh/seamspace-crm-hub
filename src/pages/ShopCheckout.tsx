@@ -34,7 +34,9 @@ export default function ShopCheckout() {
     setItems(cart);
   }, [navigate]);
 
-  const { subtotal, shippingFee, total, needsShipping } = getCartTotal(items);
+  // 주소 입력에 따라 도서산간 배송비 재계산
+  const fullAddress = `${form.address} ${form.addressDetail}`.trim();
+  const { subtotal, shippingFee, total, needsShipping, shippingBreakdown } = getCartTotal(items, fullAddress);
 
   // 쿠폰 할인 정보 (장바구니에서 전달)
   const [couponInfo] = useState(() => {
@@ -139,10 +141,33 @@ export default function ShopCheckout() {
               <span>{(item.unitPrice * item.qty).toLocaleString()}원</span>
             </div>
           ))}
-          <div className="border-t mt-2 pt-2 flex justify-between text-sm">
-            <span className="text-muted-foreground">배송비</span>
-            <span>{shippingFee === 0 ? '무료' : `${shippingFee.toLocaleString()}원`}</span>
-          </div>
+          {needsShipping && (
+            <div className="border-t mt-2 pt-2 space-y-0.5">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">배송비</span>
+                <span>{shippingFee === 0 ? '무료' : `${shippingFee.toLocaleString()}원`}</span>
+              </div>
+              {(shippingBreakdown.remoteSurcharge > 0 || shippingBreakdown.discount > 0) && (
+                <div className="text-[10px] text-muted-foreground space-y-0.5 pl-2">
+                  <div className="flex justify-between">
+                    <span>· 기본 배송비</span><span>{shippingBreakdown.base.toLocaleString()}원</span>
+                  </div>
+                  {shippingBreakdown.remoteSurcharge > 0 && (
+                    <div className="flex justify-between">
+                      <span>· 도서산간 추가 ({shippingBreakdown.remoteArea})</span>
+                      <span>+{shippingBreakdown.remoteSurcharge.toLocaleString()}원</span>
+                    </div>
+                  )}
+                  {shippingBreakdown.discount > 0 && (
+                    <div className="flex justify-between text-teal-600">
+                      <span>· 5만원당 3,000원 할인</span>
+                      <span>-{shippingBreakdown.discount.toLocaleString()}원</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {couponInfo && couponInfo.discount > 0 && (
             <div className="flex justify-between text-sm text-teal-600">
               <span>쿠폰 할인 ({couponInfo.name})</span>
@@ -177,6 +202,9 @@ export default function ShopCheckout() {
         {needsShipping ? (
         <div className="bg-white rounded-2xl border border-border p-4 space-y-3">
           <p className="text-sm font-medium">배송지</p>
+          <p className="text-[10px] text-muted-foreground -mt-1.5">
+            제주·도서산간은 추가 배송비가 발생합니다 (5만원당 3,000원씩 차감).
+          </p>
           <div className="flex gap-2">
             <Input value={form.zipcode} readOnly placeholder="우편번호" className="h-10 w-28" />
             <Button variant="outline" className="h-10" onClick={openPostcode}>주소 검색</Button>
