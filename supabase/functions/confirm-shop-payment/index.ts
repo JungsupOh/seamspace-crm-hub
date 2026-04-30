@@ -14,6 +14,7 @@ import { CORS, confirmTossPayment, buildReceiptFields, jsonResponse } from "../_
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TOSS_SECRET  = Deno.env.get("TOSS_SECRET_KEY")!;
+const ALIMTOK_COUPON_URL = "http://tebahsoft.iptime.org:8310/main/alimtok_coupon/";
 
 const DB_HEADERS = {
   Authorization: `Bearer ${SUPABASE_KEY}`,
@@ -163,7 +164,7 @@ Deno.serve(async (req: Request) => {
           continue;
         }
 
-        // 4-2) 알림톡 발송 (실패해도 흐름 계속, 상세 로그 남김)
+        // 4-2) 알림톡 발송 — iptime 백엔드를 직접 호출 (send-coupon Edge Function 우회)
         let alimtokOk = false;
         try {
           const sendBody = {
@@ -172,12 +173,12 @@ Deno.serve(async (req: Request) => {
             coupon_code: couponCodeIssued,
             user_limit: String(meta.userLimit),
             duration:   String(meta.duration),
-            send_type:  "buyer",
+            tpl_code:   "TS_6206",
           };
           console.log("[confirm-shop-payment] 알림톡 요청:", JSON.stringify(sendBody));
-          const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-coupon`, {
+          const sendRes = await fetch(ALIMTOK_COUPON_URL, {
             method: "POST",
-            headers: { Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(sendBody),
           });
           const sendText = await sendRes.text();
