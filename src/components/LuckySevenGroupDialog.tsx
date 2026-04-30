@@ -3,17 +3,19 @@
 import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, FileText, CheckCircle2, Clock, RefreshCw, Mail, Award, ChevronDown, ChevronRight, Briefcase } from 'lucide-react';
+import { Loader2, FileText, CheckCircle2, Clock, RefreshCw, Mail, Award, ChevronDown, ChevronRight, Briefcase, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   refreshGroupStatus,
   issueLuckySevenLicenses,
   createDealFromLuckySevenGroup,
   findDealIdForGroupCode,
+  deleteLuckySevenGroup,
   type LSGroupRow,
   type LSPaymentGroupRow,
   type LSLeadRow,
 } from '@/lib/luckySeven';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { issueQuoteForPaymentGroup } from '@/lib/luckySevenEmail';
 import { notifyLuckySevenPayment } from '@/lib/telegram';
 
@@ -246,13 +248,13 @@ function GroupDetailDialog({ group, campaignName, onClose, onChange, refreshKey 
             <span className={`text-xs font-semibold px-2 py-0.5 rounded ${statusBadge(group.status)}`}>{group.status}</span>
           </DialogTitle>
         </DialogHeader>
-        <GroupDetail group={group} campaignName={campaignName} onChange={onChange} refreshKey={refreshKey} />
+        <GroupDetail group={group} campaignName={campaignName} onClose={onClose} onChange={onChange} refreshKey={refreshKey} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: GroupListItem; campaignName: string; onChange: () => void; refreshKey: number }) {
+function GroupDetail({ group, campaignName, onClose, onChange, refreshKey }: { group: GroupListItem; campaignName: string; onClose: () => void; onChange: () => void; refreshKey: number }) {
   const [detail, setDetail] = useState<{ paymentGroups: LSPaymentGroupRow[]; leads: LSLeadRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -402,6 +404,31 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
 
   const allPaid = paymentGroups.length > 0 && paymentGroups.every((p) => p.status === '결제완료');
   const isIssued = group.status === '발급완료';
+  const hasPaidPayment = paymentGroups.some((p) => p.status === '결제완료');
+
+  // ── 그룹 삭제 ────────────────────────────────────
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteGroup = async () => {
+    setDeleting(true);
+    try {
+      const counts = await deleteLuckySevenGroup(group);
+      const parts: string[] = [];
+      if (counts.leads > 0) parts.push(`멤버 ${counts.leads}명`);
+      if (counts.paymentGroups > 0) parts.push(`결제묶음 ${counts.paymentGroups}건`);
+      if (counts.licenses > 0) parts.push(`라이선스 ${counts.licenses}건`);
+      if (counts.deals > 0) parts.push(`딜 ${counts.deals}건`);
+      toast.success(`그룹 ${group.group_code} 삭제 완료${parts.length ? ` (${parts.join(', ')})` : ''}`);
+      setDeleteConfirmOpen(false);
+      onChange();  // 부모 리스트 갱신
+      onClose();   // 상세 다이얼로그 닫기
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '그룹 삭제 실패');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -520,6 +547,61 @@ function GroupDetail({ group, campaignName, onChange, refreshKey }: { group: Gro
         sending={busy}
         onConfirm={handleConfirmIssue}
       />
+
+      {/* 그룹 삭제 — 위험 영역 */}
+      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 flex items-center justify-between">
+        <div>
+          <div className="text-sm font-semibold text-destructive">그룹 삭제</div>
+          <div className="text-xs text-muted-foreground">
+            {hasPaidPayment
+              ? '⚠️ 결제완료된 결제묶음이 있습니다. 환불은 별도 처리 필요.'
+              : '신청 정보·결제묶음·딜·견적·라이선스가 모두 삭제됩니다.'}
+          </div>
+        </div>
+        <Button size="sm" variant="destructive" disabled={busy || deleting} onClick={() => setDeleteConfirmOpen(true)}>
+          <Trash2 className="h-4 w-4 mr-1" /> 그룹 삭제
+        </Button>
+      </div>
+
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>그룹 {group.group_code} 삭제</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>다음 데이터가 영구 삭제됩니다:</p>
+                <ul className="list-disc list-inside text-xs text-muted-foreground space-y-0.5">
+                  <li>멤버 {leads.length}명 (campaign_leads)</li>
+                  <li>결제 묶음 {paymentGroups.length}건 (lucky_seven_payment_groups)</li>
+                  {existingDealId && <li>자동 생성된 딜 1건 + 견적/사용자</li>}
+                  {isIssued && <li>발급된 라이선스 (campaign_licenses)</li>}
+                  <li>그룹 자체 (lucky_seven_groups)</li>
+                </ul>
+                {hasPaidPayment && (
+                  <p className="text-destructive font-medium pt-1">
+                    ⚠️ 결제완료 건이 있습니다. Toss 환불은 별도로 처리하세요.
+                  </p>
+                )}
+                {isIssued && (
+                  <p className="text-destructive font-medium">
+                    ⚠️ 라이선스가 이미 발급되어 사용자에게 전달되었습니다. mDiary 쿠폰은 외부 시스템이라 삭제되지 않습니다.
+                  </p>
+                )}
+                <p className="pt-1">계속하시겠습니까?</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>취소</AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <Button variant="destructive" disabled={deleting} onClick={handleDeleteGroup}>
+                {deleting && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+                삭제
+              </Button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

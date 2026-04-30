@@ -645,3 +645,92 @@ export async function issueLuckySevenLicenses(group: LSGroupRow, members: LSLead
     body: JSON.stringify({ status: '발급완료' }),
   });
 }
+
+// ─────────────────────────────────────────────────
+// 그룹 삭제 (어드민) — cascade 처리
+// ─────────────────────────────────────────────────
+// 삭제 대상:
+//   1) campaign_licenses (이 그룹의 lead_id로 매칭된 라이선스)
+//   2) campaign_leads (ls_group_id = group.id)
+//   3) lucky_seven_payment_groups (group_id = group.id)
+//   4) deal_users / deal_quotes (자동 생성된 딜)
+//   5) deals (quote_number = group_code)
+//   6) lucky_seven_groups (마지막)
+// 발급된 mDiary 쿠폰은 외부 시스템이라 그대로 두되, 어드민이 알 수 있도록 카운트 반환.
+export async function deleteLuckySevenGroup(group: LSGroupRow): Promise<{
+  leads: number; licenses: number; paymentGroups: number; deals: number; deal_quotes: number; deal_users: number;
+}> {
+  const counts = { leads: 0, licenses: 0, paymentGroups: 0, deals: 0, deal_quotes: 0, deal_users: 0 };
+
+  // 1) 멤버 lead_id 조회
+  const leadsRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/campaign_leads?ls_group_id=eq.${group.id}&select=id`,
+    { headers: HEADERS },
+  );
+  const leadIds: string[] = leadsRes.ok ? (await leadsRes.json() as { id: string }[]).map(l => l.id) : [];
+
+  // 2) campaign_licenses 삭제 (lead_id 기준)
+  if (leadIds.length > 0) {
+    const inFilter = `(${leadIds.map(id => `"${id}"`).join(',')})`;
+    const licDel = await fetch(
+      `${SUPABASE_URL}/rest/v1/campaign_licenses?lead_id=in.${inFilter}`,
+      { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+    );
+    if (licDel.ok) {
+      const rows = await licDel.json() as unknown[];
+      counts.licenses = Array.isArray(rows) ? rows.length : 0;
+    }
+  }
+
+  // 3) deals + 자식 삭제 (quote_number = group_code)
+  const dealRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(group.group_code)}&select=id`,
+    { headers: HEADERS },
+  );
+  const dealIds: string[] = dealRes.ok ? (await dealRes.json() as { id: string }[]).map(d => d.id) : [];
+  for (const dealId of dealIds) {
+    const dq = await fetch(
+      `${SUPABASE_URL}/rest/v1/deal_quotes?deal_id=eq.${dealId}`,
+      { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+    );
+    if (dq.ok) counts.deal_quotes += ((await dq.json()) as unknown[]).length;
+    const du = await fetch(
+      `${SUPABASE_URL}/rest/v1/deal_users?deal_id=eq.${dealId}`,
+      { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+    );
+    if (du.ok) counts.deal_users += ((await du.json()) as unknown[]).length;
+  }
+  if (dealIds.length > 0) {
+    const inFilter = `(${dealIds.map(id => `"${id}"`).join(',')})`;
+    const dDel = await fetch(
+      `${SUPABASE_URL}/rest/v1/deals?id=in.${inFilter}`,
+      { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+    );
+    if (dDel.ok) counts.deals = ((await dDel.json()) as unknown[]).length;
+  }
+
+  // 4) lucky_seven_payment_groups 삭제
+  const pgDel = await fetch(
+    `${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?group_id=eq.${group.id}`,
+    { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+  );
+  if (pgDel.ok) counts.paymentGroups = ((await pgDel.json()) as unknown[]).length;
+
+  // 5) campaign_leads 삭제 (ls_group_id 기준)
+  const leadDel = await fetch(
+    `${SUPABASE_URL}/rest/v1/campaign_leads?ls_group_id=eq.${group.id}`,
+    { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+  );
+  if (leadDel.ok) counts.leads = ((await leadDel.json()) as unknown[]).length;
+
+  // 6) 그룹 자체 삭제
+  const gDel = await fetch(
+    `${SUPABASE_URL}/rest/v1/lucky_seven_groups?id=eq.${group.id}`,
+    { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=minimal' } },
+  );
+  if (!gDel.ok) {
+    throw new Error(`그룹 삭제 실패 (${gDel.status})`);
+  }
+
+  return counts;
+}
