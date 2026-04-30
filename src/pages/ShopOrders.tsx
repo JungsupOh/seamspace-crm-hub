@@ -13,6 +13,8 @@ import { toast } from 'sonner';
 import { formatPhone } from '@/lib/utils';
 import { apiSendCoupon } from '@/lib/coupons';
 import type { ShopOrder, ShopOrderItem } from '@/lib/shop';
+import { PeriodFilter } from '@/components/PeriodFilter';
+import { matchesPeriod, type PeriodValue } from '@/lib/period';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -20,6 +22,20 @@ const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY,
 
 // 디지털 전용 상품 ID (배송 불필요)
 const DIGITAL_PRODUCTS = new Set(['minddiary']);
+
+// 상품별 한 글자 아이콘 + 색상
+const PRODUCT_ICON: Record<string, { label: string; bg: string; fg: string; name: string }> = {
+  boardgame: { label: '보', bg: 'bg-purple-700',  fg: 'text-white',         name: '마음여행 보드게임' },
+  keyring:   { label: '키', bg: 'bg-yellow-300',  fg: 'text-yellow-900',    name: '감정 키링 10종' },
+  minddiary: { label: '마', bg: 'bg-purple-200',  fg: 'text-purple-800',    name: 'AI 마음일기' },
+};
+
+// 상품 필터 옵션 — 마음일기는 딜관리에서 별도로 보므로 제외
+const PRODUCT_FILTER_OPTIONS = [
+  { id: 'all',       label: '전체' },
+  { id: 'boardgame', label: '보드게임' },
+  { id: 'keyring',   label: '키링' },
+];
 
 const STATUS_LIST = ['결제완료', '배송준비', '배송중', '배송완료', '취소'] as const;
 type Status = typeof STATUS_LIST[number] | 'all';
@@ -140,26 +156,32 @@ async function fetchIssuedLicensesByOrderId(orderId: string): Promise<Array<{
 export default function ShopOrders() {
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<Status>('all');
+  const [productFilter, setProductFilter] = useState<string>('all');
+  const [period, setPeriod] = useState<PeriodValue>('this_month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [deleteRowOrderId, setDeleteRowOrderId] = useState<string | null>(null);
+  const [deletingRow, setDeletingRow] = useState(false);
 
   const ordersQuery = useQuery({ queryKey: ['shop-orders'], queryFn: fetchOrders });
   const orders = ordersQuery.data ?? [];
 
-  // 디지털 전용 주문 판별 (모든 아이템이 디지털인지)
+  // 주문별 상품/금액 조회 (배지 + 매출 합계 계산용)
   const itemsByOrder = useQuery({
     queryKey: ['shop-orders-items-bulk'],
     queryFn: async () => {
       const r = await fetch(
-        `${SUPABASE_URL}/rest/v1/shop_order_items?select=order_id,product_id&limit=2000`,
+        `${SUPABASE_URL}/rest/v1/shop_order_items?select=order_id,product_id,subtotal,qty&limit=2000`,
         { headers: HEADERS },
       );
-      if (!r.ok) return new Map<string, string[]>();
-      const rows: { order_id: string; product_id: string }[] = await r.json();
-      const map = new Map<string, string[]>();
+      if (!r.ok) return new Map<string, Array<{ product_id: string; subtotal: number; qty: number }>>();
+      const rows: { order_id: string; product_id: string; subtotal: number; qty: number }[] = await r.json();
+      const map = new Map<string, Array<{ product_id: string; subtotal: number; qty: number }>>();
       for (const row of rows) {
         const arr = map.get(row.order_id) ?? [];
-        arr.push(row.product_id);
+        arr.push({ product_id: row.product_id, subtotal: row.subtotal ?? 0, qty: row.qty ?? 0 });
         map.set(row.order_id, arr);
       }
       return map;
@@ -167,17 +189,25 @@ export default function ShopOrders() {
   });
 
   const isDigitalOnly = (orderId: string): boolean => {
-    const ids = itemsByOrder.data?.get(orderId);
-    if (!ids || ids.length === 0) return false;
-    return ids.every((id) => DIGITAL_PRODUCTS.has(id));
+    const its = itemsByOrder.data?.get(orderId);
+    if (!its || its.length === 0) return false;
+    return its.every((it) => DIGITAL_PRODUCTS.has(it.product_id));
   };
 
-  const isMixed = (orderId: string): boolean => {
-    const ids = itemsByOrder.data?.get(orderId);
-    if (!ids || ids.length === 0) return false;
-    const hasDigital  = ids.some((id) => DIGITAL_PRODUCTS.has(id));
-    const hasPhysical = ids.some((id) => !DIGITAL_PRODUCTS.has(id));
-    return hasDigital && hasPhysical;
+  // 주문에 들어있는 고유 상품 ID 목록 (배지/필터용)
+  const uniqueProductIds = (orderId: string): string[] => {
+    const its = itemsByOrder.data?.get(orderId);
+    if (!its) return [];
+    return Array.from(new Set(its.map(it => it.product_id)));
+  };
+
+  // 주문의 실물(보드게임/키링) 합계 — 매출 카드용 (마음일기 제외)
+  const physicalRevenue = (orderId: string): number => {
+    const its = itemsByOrder.data?.get(orderId);
+    if (!its) return 0;
+    return its
+      .filter(it => !DIGITAL_PRODUCTS.has(it.product_id))
+      .reduce((s, it) => s + (it.subtotal ?? 0), 0);
   };
 
   // 디지털 전용 주문은 상품관리에서 제외 (딜관리에서 처리)
@@ -187,8 +217,16 @@ export default function ShopOrders() {
     return orders.filter((o) => !isDigitalOnly(o.order_id));
   }, [orders, itemsByOrder.data]);
 
+  // 기간 필터 — created_at 기준 (주문일)
+  const periodFiltered = useMemo(() => {
+    return physicalOrders.filter(o => matchesPeriod(o.created_at?.slice(0, 10), period, customFrom, customTo));
+  }, [physicalOrders, period, customFrom, customTo]);
+
   const filtered = useMemo(() => {
-    let list = physicalOrders;
+    let list = periodFiltered;
+    if (productFilter !== 'all') {
+      list = list.filter(o => uniqueProductIds(o.order_id).includes(productFilter));
+    }
     if (statusFilter !== 'all') list = list.filter((o) => o.status === statusFilter);
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
@@ -199,13 +237,28 @@ export default function ShopOrders() {
       );
     }
     return list;
-  }, [physicalOrders, statusFilter, searchQuery]);
+  }, [periodFiltered, productFilter, statusFilter, searchQuery, itemsByOrder.data]);
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: physicalOrders.length };
-    for (const s of STATUS_LIST) c[s] = physicalOrders.filter((o) => o.status === s).length;
+    const c: Record<string, number> = { all: periodFiltered.length };
+    for (const s of STATUS_LIST) c[s] = periodFiltered.filter((o) => o.status === s).length;
     return c;
-  }, [physicalOrders]);
+  }, [periodFiltered]);
+
+  // 매출 합계 — 필터 적용된 주문 기준, 보드게임/키링만 (마음일기 제외)
+  const revenueByProduct = useMemo(() => {
+    const totals: Record<string, number> = { boardgame: 0, keyring: 0, total: 0 };
+    if (!itemsByOrder.data) return totals;
+    for (const o of filtered) {
+      const its = itemsByOrder.data.get(o.order_id) ?? [];
+      for (const it of its) {
+        if (DIGITAL_PRODUCTS.has(it.product_id)) continue;
+        totals[it.product_id] = (totals[it.product_id] ?? 0) + (it.subtotal ?? 0);
+        totals.total += it.subtotal ?? 0;
+      }
+    }
+    return totals;
+  }, [filtered, itemsByOrder.data]);
 
   const updateMutation = useMutation({
     mutationFn: async (params: {
@@ -238,6 +291,24 @@ export default function ShopOrders() {
 
   const selectedOrder = orders.find((o) => o.order_id === selectedOrderId) ?? null;
 
+  const handleRowDelete = async (orderId: string) => {
+    setDeletingRow(true);
+    try {
+      const counts = await deleteShopOrder(orderId);
+      const parts: string[] = [];
+      if (counts.items > 0) parts.push(`상품 ${counts.items}건`);
+      if (counts.deals > 0) parts.push(`딜 ${counts.deals}건`);
+      toast.success(`주문 삭제 완료${parts.length ? ` (${parts.join(', ')})` : ''}`);
+      setDeleteRowOrderId(null);
+      qc.invalidateQueries({ queryKey: ['shop-orders'] });
+      qc.invalidateQueries({ queryKey: ['shop-orders-items-bulk'] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '삭제 실패');
+    } finally {
+      setDeletingRow(false);
+    }
+  };
+
   return (
     <div className="container mx-auto py-6 space-y-4">
       <div className="flex items-end justify-between gap-3 flex-wrap">
@@ -253,23 +324,70 @@ export default function ShopOrders() {
         />
       </div>
 
-      {/* 상태 필터 칩 */}
-      <div className="flex gap-2 flex-wrap">
-        <button
-          onClick={() => setStatusFilter('all')}
-          className={`px-3 py-1.5 rounded-full text-xs border ${statusFilter === 'all' ? 'bg-foreground text-background border-foreground' : 'bg-background hover:bg-muted'}`}
-        >
-          전체 <span className="opacity-70 ml-1">{counts.all}</span>
-        </button>
-        {STATUS_LIST.map((s) => (
+      {/* 기간 필터 */}
+      <PeriodFilter
+        value={period}
+        onChange={setPeriod}
+        customFrom={customFrom}
+        customTo={customTo}
+        onCustomChange={(f, t) => { setCustomFrom(f); setCustomTo(t); }}
+      />
+
+      {/* 매출 합계 카드 — 보드게임 + 키링 (마음일기 제외) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="bg-card rounded-xl ring-1 ring-border p-4">
+          <p className="text-xs text-muted-foreground mb-1">총 매출 (실물)</p>
+          <p className="text-2xl font-bold tabular-nums">{revenueByProduct.total.toLocaleString()}원</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">필터 적용 · 마음일기 제외</p>
+        </div>
+        <div className="bg-card rounded-xl ring-1 ring-border p-4">
+          <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5">
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-purple-700 text-white">보</span>
+            마음여행 보드게임
+          </p>
+          <p className="text-2xl font-bold tabular-nums">{(revenueByProduct.boardgame ?? 0).toLocaleString()}원</p>
+        </div>
+        <div className="bg-card rounded-xl ring-1 ring-border p-4">
+          <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1.5">
+            <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-yellow-300 text-yellow-900">키</span>
+            감정 키링 10종
+          </p>
+          <p className="text-2xl font-bold tabular-nums">{(revenueByProduct.keyring ?? 0).toLocaleString()}원</p>
+        </div>
+      </div>
+
+      {/* 상품 필터 + 상태 필터 칩 */}
+      <div className="space-y-2">
+        <div className="flex gap-2 flex-wrap items-center">
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground mr-1">상품</span>
+          {PRODUCT_FILTER_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              onClick={() => setProductFilter(opt.id)}
+              className={`px-3 py-1.5 rounded-full text-xs border ${productFilter === opt.id ? 'bg-foreground text-background border-foreground' : 'bg-background hover:bg-muted'}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2 flex-wrap items-center">
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground mr-1">상태</span>
           <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
-            className={`px-3 py-1.5 rounded-full text-xs border ${statusFilter === s ? 'bg-foreground text-background border-foreground' : 'bg-background hover:bg-muted'}`}
+            onClick={() => setStatusFilter('all')}
+            className={`px-3 py-1.5 rounded-full text-xs border ${statusFilter === 'all' ? 'bg-foreground text-background border-foreground' : 'bg-background hover:bg-muted'}`}
           >
-            {s} <span className="opacity-70 ml-1">{counts[s] ?? 0}</span>
+            전체 <span className="opacity-70 ml-1">{counts.all}</span>
           </button>
-        ))}
+          {STATUS_LIST.map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={`px-3 py-1.5 rounded-full text-xs border ${statusFilter === s ? 'bg-foreground text-background border-foreground' : 'bg-background hover:bg-muted'}`}
+            >
+              {s} <span className="opacity-70 ml-1">{counts[s] ?? 0}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {ordersQuery.isLoading ? (
@@ -283,36 +401,47 @@ export default function ShopOrders() {
               <tr>
                 <th className="text-left px-3 py-2">주문일</th>
                 <th className="text-left px-3 py-2">주문번호</th>
-                <th className="text-left px-3 py-2">유형</th>
+                <th className="text-left px-3 py-2">상품</th>
                 <th className="text-left px-3 py-2">고객</th>
                 <th className="text-right px-3 py-2">금액</th>
                 <th className="text-left px-3 py-2">배송</th>
                 <th className="text-left px-3 py-2">상태</th>
+                <th className="px-3 py-2 w-10"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((o) => {
-                const mixed = isMixed(o.order_id);
+                const productIds = uniqueProductIds(o.order_id);
                 return (
                   <tr
                     key={o.id}
                     onClick={() => setSelectedOrderId(o.order_id)}
-                    className="border-t hover:bg-muted/30 cursor-pointer"
+                    className="border-t hover:bg-muted/30 cursor-pointer group"
                   >
                     <td className="px-3 py-2 text-muted-foreground">{o.created_at?.slice(0, 10)}</td>
                     <td className="px-3 py-2 font-mono text-xs">{o.order_id}</td>
                     <td className="px-3 py-2">
-                      {mixed ? (
-                        <Badge variant="outline" className="gap-1 text-[10px] border-violet-300 text-violet-700"><Package className="h-3 w-3" /> 혼합</Badge>
-                      ) : (
-                        <Badge variant="outline" className="gap-1 text-[10px]"><Package className="h-3 w-3" /> 실물</Badge>
-                      )}
+                      <div className="flex gap-1">
+                        {productIds.map((pid) => {
+                          const meta = PRODUCT_ICON[pid];
+                          if (!meta) return null;
+                          return (
+                            <span
+                              key={pid}
+                              title={meta.name}
+                              className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold ${meta.bg} ${meta.fg}`}
+                            >
+                              {meta.label}
+                            </span>
+                          );
+                        })}
+                      </div>
                     </td>
                     <td className="px-3 py-2">
                       <div>{o.customer_name}</div>
                       <div className="text-xs text-muted-foreground">{formatPhone(o.customer_phone)}</div>
                     </td>
-                    <td className="px-3 py-2 text-right font-medium">{(o.total_amount ?? 0).toLocaleString()}원</td>
+                    <td className="px-3 py-2 text-right font-medium tabular-nums">{(o.total_amount ?? 0).toLocaleString()}원</td>
                     <td className="px-3 py-2 text-xs">
                       {o.tracking_number ? (
                         <div>
@@ -327,6 +456,15 @@ export default function ShopOrders() {
                       <span className={`inline-block px-2 py-0.5 rounded text-xs ${STATUS_BADGE[o.status as keyof typeof STATUS_BADGE] ?? ''}`}>
                         {o.status}
                       </span>
+                    </td>
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => setDeleteRowOrderId(o.order_id)}
+                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-opacity"
+                        title="주문 삭제"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </td>
                   </tr>
                 );
@@ -349,6 +487,31 @@ export default function ShopOrders() {
           }}
         />
       )}
+
+      {/* 인라인 삭제 확인 — 행에서 휴지통 버튼 누른 경우 */}
+      <AlertDialog open={!!deleteRowOrderId} onOpenChange={(o) => { if (!o) setDeleteRowOrderId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>주문 {deleteRowOrderId} 삭제</AlertDialogTitle>
+            <AlertDialogDescription>
+              주문/상품/딜/이용권이 cascade 삭제됩니다. Toss 환불은 별도로 처리하세요. 계속하시겠습니까?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingRow}>취소</AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <Button
+                variant="destructive"
+                disabled={deletingRow}
+                onClick={() => deleteRowOrderId && handleRowDelete(deleteRowOrderId)}
+              >
+                {deletingRow && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+                삭제
+              </Button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -362,7 +525,7 @@ function OrderDetailDialog(props: {
   onDeleted: () => void;
 }) {
   const { order, onClose, onUpdate, updating, onDeleted } = props;
-  const [carrier, setCarrier] = useState(order.carrier ?? '');
+  const [carrier, setCarrier] = useState(order.carrier || '한진택배');
   const [trackingNumber, setTrackingNumber] = useState(order.tracking_number ?? '');
   const [resending, setResending] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -439,7 +602,7 @@ function OrderDetailDialog(props: {
 
   // order(서버 응답)이 갱신되면 폼 상태도 동기화
   useEffect(() => {
-    setCarrier(order.carrier ?? '');
+    setCarrier(order.carrier || '한진택배');
     setTrackingNumber(order.tracking_number ?? '');
   }, [order.id, order.carrier, order.tracking_number]);
 
