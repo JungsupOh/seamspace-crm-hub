@@ -1053,12 +1053,13 @@ function PartnerDealsSection({
   };
 
   const handleDialogSubmit = async () => {
+    // 학교명은 필수, 구매자는 선택(추후 입력 가능)
+    if (!dialogForm.school_name?.trim()) { toast.error('학교명을 입력해주세요'); return; }
     const validBuyers = buyers.filter(b => b.buyer_name.trim());
-    if (validBuyers.length === 0) { toast.error('구매자를 최소 1명 입력해주세요'); return; }
     setSaving(true);
     try {
       const { commission, settlement } = calcCommission(dialogForm.payment_amount ?? 0, commissionRate);
-      const firstBuyer = validBuyers[0];
+      const firstBuyer = validBuyers[0] ?? { buyer_name: '', buyer_phone: '' };
       // 상품 라인 → 저장용 QuoteLineItem 형태로 변환
       const itemsPayload: QuoteLineItem[] = items
         .filter(it => it.plan && it.duration > 0 && it.qty > 0)
@@ -1469,78 +1470,6 @@ function PartnerDealsSection({
                 </div>
               )}
             </div>
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <Label className="text-xs flex items-center gap-1"><Users className="h-3.5 w-3.5" />구매자 ({buyers.length}명)</Label>
-                <button onClick={addBuyer} className="text-xs text-primary hover:underline flex items-center gap-0.5"><Plus className="h-3 w-3" />추가</button>
-              </div>
-              <div className="space-y-2">
-                {buyers.map((b, idx) => (
-                  <div key={idx} className="border border-border rounded-md p-2.5 bg-muted/30 relative">
-                    {buyers.length > 1 && (
-                      <button onClick={() => removeBuyer(idx)} className="absolute top-1.5 right-1.5 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><X className="h-3 w-3" /></button>
-                    )}
-                    <div className="grid grid-cols-3 gap-2 mb-2">
-                      <div><span className="text-[10px] text-muted-foreground">이름 *</span><Input value={b.buyer_name} onChange={e => updateBuyer(idx, 'buyer_name', e.target.value)} placeholder="홍길동" className="h-7 text-xs" /></div>
-                      <div><span className="text-[10px] text-muted-foreground">연락처</span><Input value={b.buyer_phone} onChange={e => updateBuyer(idx, 'buyer_phone', formatPhone(e.target.value))} placeholder="010-0000-0000" className="h-7 text-xs" /></div>
-                      <div><span className="text-[10px] text-muted-foreground">이메일</span><Input value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" /></div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div><span className="text-[10px] text-muted-foreground">학생 수</span><Input type="number" value={b.student_count} onChange={e => updateBuyer(idx, 'student_count', parseInt(e.target.value) || 0)} className="h-7 text-xs" /></div>
-                      <div><span className="text-[10px] text-muted-foreground">개월 수</span><Input type="number" value={b.month_count} onChange={e => updateBuyer(idx, 'month_count', parseInt(e.target.value) || '')} placeholder="12" className="h-7 text-xs" /></div>
-                      <div>
-                        <span className="text-[10px] text-muted-foreground">플랜</span>
-                        {isBuyerPlanCustom(idx, b.plan_name) ? (
-                          // 기타(직접입력) 모드 — 입력란만 + ×로 목록 복귀
-                          <div className="relative">
-                            <Input
-                              value={b.plan_name}
-                              onChange={e => updateBuyer(idx, 'plan_name', e.target.value)}
-                              placeholder="기타(직접입력)"
-                              className="h-7 text-xs pr-6"
-                              autoFocus={!b.plan_name}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                updateBuyer(idx, 'plan_name', '');
-                                setBuyerPlanCustomMode(prev => {
-                                  const next = new Set(prev);
-                                  next.delete(idx);
-                                  return next;
-                                });
-                              }}
-                              className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted text-muted-foreground"
-                              title="목록에서 다시 선택"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </div>
-                        ) : (
-                          <Select
-                            value={b.plan_name ?? ''}
-                            onValueChange={v => {
-                              if (v === '__custom__') {
-                                setBuyerPlanCustomMode(prev => new Set(prev).add(idx));
-                                updateBuyer(idx, 'plan_name', '');
-                              } else {
-                                updateBuyer(idx, 'plan_name', v);
-                              }
-                            }}
-                          >
-                            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="선택" /></SelectTrigger>
-                            <SelectContent>
-                              {PARTNER_PLAN_LIST.map(p => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}
-                              <SelectItem value="__custom__" className="text-xs">기타(직접입력)</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
             {/* 상품 (자동 단가/금액 계산) */}
             <div className="border border-border rounded-md p-3 bg-muted/20">
               <div className="flex items-center justify-between mb-2">
@@ -1631,6 +1560,79 @@ function PartnerDealsSection({
                 </div>
               </div>
             </div>
+            {/* 구매자 — 계약 후 추후 입력 가능 (학교에서 늦게 전달되는 경우) */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-xs flex items-center gap-1"><Users className="h-3.5 w-3.5" />구매자 ({buyers.length}명) <span className="text-[10px] text-muted-foreground font-normal">— 추후 입력 가능</span></Label>
+                <button onClick={addBuyer} className="text-xs text-primary hover:underline flex items-center gap-0.5"><Plus className="h-3 w-3" />추가</button>
+              </div>
+              <div className="space-y-2">
+                {buyers.map((b, idx) => (
+                  <div key={idx} className="border border-border rounded-md p-2.5 bg-muted/30 relative">
+                    {buyers.length > 1 && (
+                      <button onClick={() => removeBuyer(idx)} className="absolute top-1.5 right-1.5 p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><X className="h-3 w-3" /></button>
+                    )}
+                    <div className="grid grid-cols-3 gap-2 mb-2">
+                      <div><span className="text-[10px] text-muted-foreground">이름 *</span><Input value={b.buyer_name} onChange={e => updateBuyer(idx, 'buyer_name', e.target.value)} placeholder="홍길동" className="h-7 text-xs" /></div>
+                      <div><span className="text-[10px] text-muted-foreground">연락처</span><Input value={b.buyer_phone} onChange={e => updateBuyer(idx, 'buyer_phone', formatPhone(e.target.value))} placeholder="010-0000-0000" className="h-7 text-xs" /></div>
+                      <div><span className="text-[10px] text-muted-foreground">이메일</span><Input value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" /></div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div><span className="text-[10px] text-muted-foreground">학생 수</span><Input type="number" value={b.student_count} onChange={e => updateBuyer(idx, 'student_count', parseInt(e.target.value) || 0)} className="h-7 text-xs" /></div>
+                      <div><span className="text-[10px] text-muted-foreground">개월 수</span><Input type="number" value={b.month_count} onChange={e => updateBuyer(idx, 'month_count', parseInt(e.target.value) || '')} placeholder="12" className="h-7 text-xs" /></div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">플랜</span>
+                        {isBuyerPlanCustom(idx, b.plan_name) ? (
+                          <div className="relative">
+                            <Input
+                              value={b.plan_name}
+                              onChange={e => updateBuyer(idx, 'plan_name', e.target.value)}
+                              placeholder="기타(직접입력)"
+                              className="h-7 text-xs pr-6"
+                              autoFocus={!b.plan_name}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateBuyer(idx, 'plan_name', '');
+                                setBuyerPlanCustomMode(prev => {
+                                  const next = new Set(prev);
+                                  next.delete(idx);
+                                  return next;
+                                });
+                              }}
+                              className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted text-muted-foreground"
+                              title="목록에서 다시 선택"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <Select
+                            value={b.plan_name ?? ''}
+                            onValueChange={v => {
+                              if (v === '__custom__') {
+                                setBuyerPlanCustomMode(prev => new Set(prev).add(idx));
+                                updateBuyer(idx, 'plan_name', '');
+                              } else {
+                                updateBuyer(idx, 'plan_name', v);
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="선택" /></SelectTrigger>
+                            <SelectContent>
+                              {PARTNER_PLAN_LIST.map(p => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}
+                              <SelectItem value="__custom__" className="text-xs">기타(직접입력)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className="space-y-1.5">
               <Label className="text-xs">비고</Label>
               <Input value={df('remarks')} onChange={e => setDialogForm(p => ({ ...p, remarks: e.target.value }))} className="h-9 text-sm" />
