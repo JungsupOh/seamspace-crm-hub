@@ -832,6 +832,12 @@ function PartnerDealsSection({
   type BuyerInput = { buyer_name: string; buyer_phone: string; buyer_email: string; student_count: number; month_count: number | ''; plan_name: string };
   const emptyBuyer = (): BuyerInput => ({ buyer_name: '', buyer_phone: '', buyer_email: '', student_count: 0, month_count: '', plan_name: '' });
   const [buyers, setBuyers] = useState<BuyerInput[]>([emptyBuyer()]);
+  // 구매자별 플랜 입력 모드 — true면 기타(직접입력) 모드 유지
+  const [buyerPlanCustomMode, setBuyerPlanCustomMode] = useState<Set<number>>(new Set());
+  const isBuyerPlanCustom = (idx: number, planName: string): boolean => {
+    if (buyerPlanCustomMode.has(idx)) return true;
+    return !!planName && !PARTNER_PLAN_LIST.includes(planName);
+  };
 
   // 상품 (견적 라인) — 자동 단가/금액 계산
   type ItemInput = { plan: string; duration: number; qty: number };
@@ -1011,6 +1017,7 @@ function PartnerDealsSection({
     setBuyers([emptyBuyer()]);
     setItems([emptyItem()]);
     setPaymentAmountManual(false);
+    setBuyerPlanCustomMode(new Set());
     setSchoolQuery('');
     setSchoolResults([]);
     setShowSchoolDropdown(false);
@@ -1021,6 +1028,7 @@ function PartnerDealsSection({
     setDialogMode('edit');
     setDialogDealId(deal.id);
     setDialogForm(deal);
+    setBuyerPlanCustomMode(new Set());
     setSchoolQuery(deal.school_name ?? '');
     // 기존 상품 라인 로드 (없으면 빈 라인 1개)
     if (Array.isArray(deal.items) && deal.items.length > 0) {
@@ -1482,24 +1490,50 @@ function PartnerDealsSection({
                       <div><span className="text-[10px] text-muted-foreground">개월 수</span><Input type="number" value={b.month_count} onChange={e => updateBuyer(idx, 'month_count', parseInt(e.target.value) || '')} placeholder="12" className="h-7 text-xs" /></div>
                       <div>
                         <span className="text-[10px] text-muted-foreground">플랜</span>
-                        <Select
-                          value={PARTNER_PLAN_LIST.includes(b.plan_name ?? '') ? (b.plan_name ?? '') : ((b.plan_name ?? '') ? '__custom__' : '')}
-                          onValueChange={v => {
-                            if (v === '__custom__') {
-                              updateBuyer(idx, 'plan_name', PARTNER_PLAN_LIST.includes(b.plan_name ?? '') ? '' : (b.plan_name ?? ''));
-                            } else {
-                              updateBuyer(idx, 'plan_name', v);
-                            }
-                          }}
-                        >
-                          <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="선택" /></SelectTrigger>
-                          <SelectContent>
-                            {PARTNER_PLAN_LIST.map(p => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}
-                            <SelectItem value="__custom__" className="text-xs">기타</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        {b.plan_name && !PARTNER_PLAN_LIST.includes(b.plan_name) && (
-                          <Input value={b.plan_name} onChange={e => updateBuyer(idx, 'plan_name', e.target.value)} placeholder="직접입력" className="h-6 text-xs mt-1" />
+                        {isBuyerPlanCustom(idx, b.plan_name) ? (
+                          // 기타(직접입력) 모드 — 입력란만 + ×로 목록 복귀
+                          <div className="relative">
+                            <Input
+                              value={b.plan_name}
+                              onChange={e => updateBuyer(idx, 'plan_name', e.target.value)}
+                              placeholder="기타(직접입력)"
+                              className="h-7 text-xs pr-6"
+                              autoFocus={!b.plan_name}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateBuyer(idx, 'plan_name', '');
+                                setBuyerPlanCustomMode(prev => {
+                                  const next = new Set(prev);
+                                  next.delete(idx);
+                                  return next;
+                                });
+                              }}
+                              className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted text-muted-foreground"
+                              title="목록에서 다시 선택"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <Select
+                            value={b.plan_name ?? ''}
+                            onValueChange={v => {
+                              if (v === '__custom__') {
+                                setBuyerPlanCustomMode(prev => new Set(prev).add(idx));
+                                updateBuyer(idx, 'plan_name', '');
+                              } else {
+                                updateBuyer(idx, 'plan_name', v);
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="선택" /></SelectTrigger>
+                            <SelectContent>
+                              {PARTNER_PLAN_LIST.map(p => <SelectItem key={p} value={p} className="text-xs">{p}</SelectItem>)}
+                              <SelectItem value="__custom__" className="text-xs">기타(직접입력)</SelectItem>
+                            </SelectContent>
+                          </Select>
                         )}
                       </div>
                     </div>
