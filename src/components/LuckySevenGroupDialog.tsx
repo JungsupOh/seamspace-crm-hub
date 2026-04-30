@@ -260,6 +260,9 @@ function GroupDetail({ group, campaignName, onClose, onChange, refreshKey }: { g
   const [busy, setBusy] = useState(false);
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
   const [existingDealId, setExistingDealId] = useState<string | null>(null);
+  // 그룹 삭제 (early return 위로 이동 — Rules of Hooks)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const reloadDetail = async () => {
     setLoading(true);
@@ -405,10 +408,6 @@ function GroupDetail({ group, campaignName, onClose, onChange, refreshKey }: { g
   const allPaid = paymentGroups.length > 0 && paymentGroups.every((p) => p.status === '결제완료');
   const isIssued = group.status === '발급완료';
   const hasPaidPayment = paymentGroups.some((p) => p.status === '결제완료');
-
-  // ── 그룹 삭제 ────────────────────────────────────
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
   const handleDeleteGroup = async () => {
     setDeleting(true);
