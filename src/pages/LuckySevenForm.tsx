@@ -689,9 +689,7 @@ export default function LuckySevenForm() {
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold">
                         {isLeaderRow ? (
-                          <span className="text-primary">
-                            1번 선생님 {isAutoLeader ? '(= 대표자 자동)' : '(대표자와 다름)'}
-                          </span>
+                          <span className="text-primary">1번 선생님</span>
                         ) : `${idx + 1}번 선생님`}
                       </span>
                       {idx > 0 && members.length > MIN_MEMBERS && (
@@ -700,6 +698,22 @@ export default function LuckySevenForm() {
                         </button>
                       )}
                     </div>
+
+                    {/* 1번 멤버 전용 — 대표자와 동일 토글 (Step 1 체크박스와 동일 state) */}
+                    {isLeaderRow && (
+                      <label className="flex items-center gap-2 cursor-pointer rounded bg-card border border-primary/30 px-2.5 py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={firstMemberIsLeader}
+                          onChange={(e) => setFirstMemberIsLeader(e.target.checked)}
+                          className="accent-primary"
+                        />
+                        <span className="text-xs">
+                          대표자({leaderName || '미입력'})와 동일
+                          <span className="text-[10px] text-muted-foreground ml-1">— 해제 시 별도 입력</span>
+                        </span>
+                      </label>
+                    )}
 
                     {/* 소속 학교 — 자동 채움(isAutoLeader) 시 disabled, 나머지는 NEIS 검색 */}
                     {isAutoLeader ? (
