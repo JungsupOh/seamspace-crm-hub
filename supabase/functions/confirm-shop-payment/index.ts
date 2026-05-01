@@ -15,6 +15,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TOSS_SECRET  = Deno.env.get("TOSS_SECRET_KEY")!;
 const ALIMTOK_COUPON_URL = "http://tebahsoft.iptime.org:8310/main/alimtok_coupon/";
+const ALIMTOK_SEND_URL   = "http://tebahsoft.iptime.org:8310/main/alimtok_send/";
 
 const DB_HEADERS = {
   Authorization: `Bearer ${SUPABASE_KEY}`,
@@ -129,6 +130,29 @@ Deno.serve(async (req: Request) => {
       headers: { ...DB_HEADERS, Prefer: "return=minimal" },
       body: JSON.stringify(itemRows),
     }).catch((e) => console.warn("[confirm-shop-payment] shop_order_items 실패:", e));
+
+    // ── Step 3-1: UH_5411 상품결제완료 알림톡 — 구매자에게 1건 ────
+    try {
+      const orderName = items.length === 1
+        ? items[0].productName
+        : `${items[0].productName} 외 ${items.length - 1}건`;
+      const sendBody = {
+        name:         customer.name,
+        phone:        customer.phone,  // 대시 포함 형식 허용 (서버가 알아서 처리)
+        product_name: orderName,
+        tpl_code:     "UH_5411",
+      };
+      console.log("[confirm-shop-payment] UH_5411 요청:", JSON.stringify(sendBody));
+      const r = await fetch(ALIMTOK_SEND_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sendBody),
+      });
+      const text = await r.text();
+      console.log(`[confirm-shop-payment] UH_5411 응답 ${r.status}:`, text);
+    } catch (e) {
+      console.error("[confirm-shop-payment] UH_5411 예외:", e);
+    }
 
     // ── Step 4: 디지털 상품 자동 발급 ─────────────────
     const issuedCoupons: Array<{ productName: string; couponCode: string; alimtokOk: boolean }> = [];

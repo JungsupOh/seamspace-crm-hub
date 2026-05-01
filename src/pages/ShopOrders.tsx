@@ -285,6 +285,37 @@ export default function ShopOrders() {
         body: JSON.stringify(body),
       });
       if (!r.ok) throw new Error('업데이트 실패');
+
+      // 배송중 전환 시 UH_5417 알림톡 발송
+      if (params.status === '배송중') {
+        const order = orders.find(o => o.id === params.id);
+        if (order) {
+          const orderItems = itemsByOrder.data?.get(order.order_id) ?? [];
+          const physical = orderItems.filter(it => !DIGITAL_PRODUCTS.has(it.product_id));
+          const productNames = physical.map(it => PRODUCT_ICON[it.product_id]?.name || it.product_id).filter(Boolean);
+          const productName = productNames.length === 0
+            ? (orderItems[0] ? PRODUCT_ICON[orderItems[0].product_id]?.name ?? '심스페이스 상품' : '심스페이스 상품')
+            : productNames.length === 1 ? productNames[0]
+            : `${productNames[0]} 외 ${productNames.length - 1}건`;
+          const tracking = params.trackingNumber ?? order.tracking_number ?? '';
+          const deliveryAddress = `${order.address ?? ''} ${order.address_detail ?? ''}`.trim();
+          const sendBody = {
+            tpl_code:        'UH_5417',
+            name:            order.customer_name,
+            phone:           order.customer_phone,
+            product_name:    productName,
+            delivery_address: deliveryAddress,
+            invoice_number:  tracking,
+          };
+          fetch(`${SUPABASE_URL}/functions/v1/send-shop-alimtok`, {
+            method: 'POST',
+            headers: { ...HEADERS },
+            body: JSON.stringify(sendBody),
+          }).then(res => {
+            if (!res.ok) console.warn('[ShopOrders] UH_5417 응답', res.status);
+          }).catch(e => console.warn('[ShopOrders] UH_5417 예외:', e));
+        }
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['shop-orders'] });
