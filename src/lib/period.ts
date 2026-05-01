@@ -4,13 +4,14 @@
 // 옵션: 이번달 / 지난달 / 올해 / 작년 / 직접입력 (5가지)
 // 직접입력은 from-to YYYY-MM-DD 두 값을 받음.
 
-export type PeriodValue = 'this_month' | 'last_month' | 'this_year' | 'last_year' | 'custom';
+export type PeriodValue = 'all' | 'this_month' | 'last_month' | 'this_year' | 'last_year' | 'custom';
 
 export const PERIOD_OPTIONS: { id: PeriodValue; label: string }[] = [
   { id: 'this_month', label: '이번달' },
   { id: 'last_month', label: '지난달' },
   { id: 'this_year',  label: '올해' },
   { id: 'last_year',  label: '작년' },
+  { id: 'all',        label: '전체' },
   { id: 'custom',     label: '직접입력' },
 ];
 
@@ -28,6 +29,8 @@ export function getPeriodRange(
   const yyyy = now.getFullYear();
   const mm = now.getMonth();
   switch (value) {
+    case 'all':
+      return { from: '2000-01-01', to: '2099-12-31', label: '전체' };
     case 'this_month': {
       const start = new Date(yyyy, mm, 1);
       const end = new Date(yyyy, mm + 1, 0);
