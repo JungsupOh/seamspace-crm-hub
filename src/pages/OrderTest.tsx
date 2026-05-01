@@ -800,10 +800,10 @@ export default function OrderTest() {
       {/* 사이드 배너 (데스크톱: 좌측, 모바일: 숨김 — 하단에 스택으로 표시) */}
       <aside className="hidden lg:flex flex-col gap-3 w-[180px] shrink-0 pt-16">
         <a href="/shop/keyring" className="rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow border border-border">
-          <img src="/banner/keyring(Thmb).png" alt="심스페이스 감정 키링" className="w-full" />
+          <img src="/banner/keyring(Thmb).webp" alt="심스페이스 감정 키링" className="w-full" />
         </a>
         <a href="/shop/boardgame" className="rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow border border-border">
-          <img src="/banner/boardgame(Thmb).png" alt="심스페이스 보드게임" className="w-full" />
+          <img src="/banner/boardgame(Thmb).webp" alt="심스페이스 보드게임" className="w-full" />
         </a>
       </aside>
 
@@ -1832,10 +1832,10 @@ export default function OrderTest() {
       <div className="lg:hidden flex flex-col gap-3 mt-8 px-1">
         <p className="text-xs text-muted-foreground text-center">다른 상품도 둘러보세요</p>
         <a href="/shop/keyring" className="rounded-xl overflow-hidden shadow-sm border border-border">
-          <img src="/banner/keyring(Thmb).png" alt="심스페이스 감정 키링" className="w-full" />
+          <img src="/banner/keyring(Thmb).webp" alt="심스페이스 감정 키링" className="w-full" />
         </a>
         <a href="/shop/boardgame" className="rounded-xl overflow-hidden shadow-sm border border-border">
-          <img src="/banner/boardgame(Thmb).png" alt="심스페이스 보드게임" className="w-full" />
+          <img src="/banner/boardgame(Thmb).webp" alt="심스페이스 보드게임" className="w-full" />
         </a>
       </div>
       </div>

@@ -93,10 +93,11 @@ export default function ShopProductDetail() {
         {product.detail_image_url && (
           <div className="bg-white rounded-2xl overflow-hidden border border-border mb-6">
             <img
-              src={product.detail_image_url}
+              src={product.detail_image_url.replace(/\.(png|jpe?g)$/i, '.webp')}
               alt={product.name}
               className="w-full h-auto"
               loading="lazy"
+              decoding="async"
             />
           </div>
         )}

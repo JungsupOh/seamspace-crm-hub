@@ -7,9 +7,9 @@ import { getCart } from '@/lib/shop';
 import { useState, useEffect } from 'react';
 
 const DETAIL_IMAGES = [
-  '/events/lucky-seven/lucky-seven-detail-1.png',
-  '/events/lucky-seven/lucky-seven-detail-2.png',
-  '/events/lucky-seven/lucky-seven-detail-3.png',
+  '/events/lucky-seven/lucky-seven-detail-1.webp',
+  '/events/lucky-seven/lucky-seven-detail-2.webp',
+  '/events/lucky-seven/lucky-seven-detail-3.webp',
 ];
 
 export default function ShopLuckySeven() {
@@ -59,6 +59,7 @@ export default function ShopLuckySeven() {
               alt={`럭키세븐 이벤트 상세 ${i + 1}`}
               className="w-full h-auto block"
               loading={i === 0 ? 'eager' : 'lazy'}
+              decoding="async"
             />
           ))}
         </div>
