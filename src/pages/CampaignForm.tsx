@@ -13,6 +13,8 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
 
+import { issueCampaignCoupon, type CouponSettings } from '@/lib/campaign-coupons';
+
 interface Campaign {
   id: string;
   name: string;
@@ -23,6 +25,7 @@ interface Campaign {
   start_date?: string;
   end_date?: string;
   status: 'active' | 'ended' | 'planned';
+  coupon_settings?: CouponSettings | null;
 }
 
 const SOURCE_OPTIONS = ['대면연수', '온라인연수', '전시회(행사)참가', '지인추천', '기타'];
@@ -34,6 +37,7 @@ export default function CampaignForm() {
   const [notFound, setNotFound] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [issuedCouponCode, setIssuedCouponCode] = useState<string | null>(null);
 
   // 폼 필드
   const [schoolQuery, setSchoolQuery] = useState('');
@@ -156,11 +160,13 @@ export default function CampaignForm() {
 
       const res = await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads`, {
         method: 'POST',
-        headers: { ...HEADERS, Prefer: 'return=minimal' },
+        headers: { ...HEADERS, Prefer: 'return=representation' },
         body: JSON.stringify(payload),
       });
 
       if (!res.ok) throw new Error('제출 실패');
+      const insertedRows = await res.json().catch(() => []);
+      const insertedLead: { id?: string } = Array.isArray(insertedRows) ? insertedRows[0] ?? {} : {};
 
       // 텔레그램 알림
       notifyCampaignLead({
@@ -172,6 +178,27 @@ export default function CampaignForm() {
         source: payload.source === '기타' ? `기타 — ${payload.source_etc ?? ''}` : payload.source,
         isExistingCustomer: isExisting,
       });
+
+      // 캠페인 쿠폰 자동 발급 (설정된 경우만)
+      if (campaign.coupon_settings?.enabled && insertedLead.id) {
+        try {
+          const issued = await issueCampaignCoupon({
+            campaign,
+            lead: {
+              id: insertedLead.id,
+              phone_normalized: phoneNorm,
+              name: payload.name,
+              phone: payload.phone,
+            },
+          });
+          if (issued) {
+            setIssuedCouponCode(issued.code);
+          }
+        } catch (e) {
+          console.warn('[CampaignForm] 쿠폰 발급 실패', e);
+          // 리드 등록 자체는 성공 처리
+        }
+      }
 
       setSubmitted(true);
     } catch {
@@ -229,6 +256,13 @@ export default function CampaignForm() {
             입력하신 연락처로 이용권이 발송될 예정입니다.
             <br />잠시만 기다려주세요!
           </p>
+          {issuedCouponCode && (
+            <div className="bg-teal-50 dark:bg-teal-950/20 border border-teal-200 rounded-lg px-4 py-3 mb-4 text-left">
+              <p className="text-xs text-teal-700 dark:text-teal-300 font-medium mb-1">🎁 할인 쿠폰이 발급되었습니다</p>
+              <p className="font-mono font-bold text-base text-teal-900 dark:text-teal-100">{issuedCouponCode}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">알림톡으로도 동일한 코드가 발송됩니다.</p>
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">
             문의: sales@tebahsoft.com
           </p>

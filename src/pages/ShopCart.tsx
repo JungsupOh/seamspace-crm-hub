@@ -36,7 +36,7 @@ export default function ShopCart() {
     setCouponApplying(true);
     setCouponError('');
     try {
-      const result = await validateShopCoupon(couponCode.trim(), subtotal);
+      const result = await validateShopCoupon(couponCode.trim(), subtotal, items);
       if (result.valid) {
         setCouponDiscount(result.discount);
         setCouponError('');

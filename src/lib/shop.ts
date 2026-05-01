@@ -185,6 +185,7 @@ export interface ShopCoupon {
   expires_at: string;
   is_used: boolean;
   active: boolean;
+  applicable_products?: string[] | null;
 }
 
 export interface CouponValidation {
@@ -192,9 +193,20 @@ export interface CouponValidation {
   discount: number;
   couponName?: string;
   error?: string;
+  // 어떤 상품에 적용되었는지 (UI에 표시용)
+  applicableLabel?: string;
 }
 
-export async function validateShopCoupon(code: string, subtotal: number): Promise<CouponValidation> {
+// cartItems가 주어지면 applicable_products와 비교해 적용 가능 여부 판단.
+// - applicable_products NULL/빈배열: 전체 적용 (기존 동작)
+// - 카트의 product_id가 모두 applicable에 포함: 정상 할인
+// - 일부만 일치: applicable 상품 합계에만 할인 적용
+// - 하나도 일치 X: 거부
+export async function validateShopCoupon(
+  code: string,
+  subtotal: number,
+  cartItems?: Array<{ productId: string; unitPrice: number; qty: number }>,
+): Promise<CouponValidation> {
   if (!code.trim()) return { valid: false, discount: 0, error: '쿠폰 코드를 입력해주세요.' };
 
   const r = await fetch(
@@ -215,7 +227,25 @@ export async function validateShopCoupon(code: string, subtotal: number): Promis
   if (new Date(coupon.expires_at) < new Date()) {
     return { valid: false, discount: 0, error: '만료된 쿠폰입니다.' };
   }
-  if (subtotal < coupon.min_order) {
+
+  // 적용 가능 상품 — 일치하는 상품의 합계만 할인 대상
+  const applicable = coupon.applicable_products && coupon.applicable_products.length > 0
+    ? coupon.applicable_products
+    : null;
+  let applicableSubtotal = subtotal;
+  let applicableLabel: string | undefined;
+  if (applicable && cartItems && cartItems.length > 0) {
+    const matched = cartItems.filter(it => applicable.includes(it.productId));
+    if (matched.length === 0) {
+      const labels: Record<string, string> = { boardgame: '보드게임', keyring: '키링', minddiary: 'AI마음일기' };
+      const names = applicable.map(p => labels[p] ?? p).join(', ');
+      return { valid: false, discount: 0, error: `이 쿠폰은 ${names}에만 사용 가능합니다.` };
+    }
+    applicableSubtotal = matched.reduce((s, it) => s + it.unitPrice * it.qty, 0);
+    applicableLabel = matched.length === cartItems.length ? undefined : '일부 상품에만 적용';
+  }
+
+  if (applicableSubtotal < coupon.min_order) {
     return { valid: false, discount: 0, error: `${coupon.min_order.toLocaleString()}원 이상 주문 시 사용 가능합니다.` };
   }
 
@@ -223,11 +253,11 @@ export async function validateShopCoupon(code: string, subtotal: number): Promis
   if (coupon.discount_type === 'amount') {
     discount = coupon.discount_value;
   } else {
-    discount = Math.round(subtotal * coupon.discount_value / 100);
+    discount = Math.round(applicableSubtotal * coupon.discount_value / 100);
   }
-  discount = Math.min(discount, subtotal);
+  discount = Math.min(discount, applicableSubtotal);
 
-  return { valid: true, discount, couponName: coupon.batch_name };
+  return { valid: true, discount, couponName: coupon.batch_name, applicableLabel };
 }
 
 // 쿠폰 사용 처리 (Supabase RPC — 주문ID + 전화번호 기록)

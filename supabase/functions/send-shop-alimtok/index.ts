@@ -10,17 +10,14 @@ const CORS = {
 
 const ALIMTOK_SEND_URL = "http://tebahsoft.iptime.org:8310/main/alimtok_send/";
 
-// 지원 템플릿 — shop 전용
-type ShopTplCode = "UH_5417" | "UH_5411";
-
+// shop/캠페인 알림톡용 — tpl_code는 템플릿마다 다르므로 자유 string
 interface RequestBody {
-  tpl_code:         ShopTplCode;
+  tpl_code:         string;
   name:             string;
   phone:            string;
   product_name?:    string;
   delivery_address?: string;
   invoice_number?:  string;
-  // 향후 확장 가능
   group_name?:      string;
   user_limit?:      string;
   duration?:        string;

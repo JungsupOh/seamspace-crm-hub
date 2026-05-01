@@ -30,6 +30,8 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
 
 // ── Types ─────────────────────────────────────────
+import type { CouponSettings } from '@/lib/campaign-coupons';
+
 interface Campaign {
   id: string;
   name: string;
@@ -43,8 +45,15 @@ interface Campaign {
   status: 'active' | 'ended' | 'planned';
   budget?: number;
   actual_cost?: number;
+  coupon_settings?: CouponSettings | null;
   created_at: string;
 }
+
+const COUPON_PRODUCT_OPTIONS = [
+  { id: 'boardgame', label: '마음여행 보드게임' },
+  { id: 'keyring',   label: '감정 키링' },
+  { id: 'minddiary', label: 'AI 마음일기 (1개월권)' },
+];
 
 // 리드 상태 정의
 const LEAD_STATUSES = ['신규', '1차발송', '응답', '2차발송', '체험발송', '전환', '보류', '이탈', '스팸'] as const;
@@ -323,6 +332,22 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
     budget:      initial?.budget      ?? '',
     actual_cost: initial?.actual_cost ?? '',
   });
+  const [coupon, setCoupon] = useState<CouponSettings>(() => initial?.coupon_settings ?? {
+    enabled:             false,
+    code_prefix:         '',
+    discount_type:       'percent',
+    discount_value:      10,
+    applicable_products: [],
+    expires_in_days:     30,
+    max_count:           null,
+    alimtok_tpl_code:    '',
+  });
+  const toggleProduct = (pid: string) => {
+    setCoupon(c => {
+      const arr = c.applicable_products ?? [];
+      return { ...c, applicable_products: arr.includes(pid) ? arr.filter(x => x !== pid) : [...arr, pid] };
+    });
+  };
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -346,11 +371,26 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
     mutationFn: async () => {
       const { budget, actual_cost, slug: rawSlug, ...rest } = form;
       const userSlug = rawSlug.trim();
+      // 쿠폰 활성 시 prefix 정규화 (대문자 + 영문/숫자만)
+      let couponPayload: CouponSettings | null = null;
+      if (coupon.enabled) {
+        const cleanPrefix = coupon.code_prefix.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (cleanPrefix.length < 3) throw new Error('쿠폰 prefix는 3자 이상의 영문/숫자여야 합니다');
+        couponPayload = {
+          ...coupon,
+          code_prefix: cleanPrefix,
+          discount_value: Number(coupon.discount_value) || 0,
+          expires_in_days: Number(coupon.expires_in_days) || 30,
+          max_count: coupon.max_count && Number(coupon.max_count) > 0 ? Number(coupon.max_count) : null,
+          alimtok_tpl_code: coupon.alimtok_tpl_code?.trim() || undefined,
+        };
+      }
       const body: Partial<Campaign> = {
         ...rest,
         status: form.status as Campaign['status'],
         budget: budget ? Number(budget) : undefined,
         actual_cost: actual_cost ? Number(actual_cost) : undefined,
+        coupon_settings: couponPayload,
       };
       if (isEdit) {
         // slug 입력 있으면 사용, 없으면 기존 slug 유지 (없을 시 자동 생성 — 구 events 마이그레이션 대응)
@@ -467,6 +507,123 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
               <Label className="text-xs">집행 비용 (원)</Label>
               <Input type="number" value={form.actual_cost} onChange={e => f('actual_cost', e.target.value)} placeholder="0" className="h-8 text-sm" />
             </div>
+          </div>
+
+          {/* 쿠폰 발급 설정 */}
+          <div className="border border-border rounded-md p-3 bg-muted/20 space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={coupon.enabled}
+                onChange={e => setCoupon(c => ({ ...c, enabled: e.target.checked }))}
+                className="accent-primary"
+              />
+              <span className="text-sm font-semibold">쿠폰 발급 — 리드 등록 시 자동으로 발급/알림톡 발송</span>
+            </label>
+
+            {coupon.enabled && (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">코드 prefix * <span className="text-muted-foreground">(영문 대문자/숫자)</span></Label>
+                    <Input
+                      value={coupon.code_prefix}
+                      onChange={e => setCoupon(c => ({ ...c, code_prefix: e.target.value.toUpperCase() }))}
+                      placeholder="EXPO2026"
+                      maxLength={10}
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">예시 코드</Label>
+                    <div className="h-8 flex items-center text-xs font-mono text-muted-foreground">
+                      {coupon.code_prefix ? `${coupon.code_prefix}-A3K9F2` : '— prefix 입력 후'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">할인 종류</Label>
+                    <Select value={coupon.discount_type} onValueChange={v => setCoupon(c => ({ ...c, discount_type: v as 'amount' | 'percent' }))}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="percent">정률 (%)</SelectItem>
+                        <SelectItem value="amount">정액 (원)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">할인 값</Label>
+                    <Input
+                      type="number"
+                      value={coupon.discount_value}
+                      onChange={e => setCoupon(c => ({ ...c, discount_value: Number(e.target.value) || 0 }))}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">유효기간 (일)</Label>
+                    <Input
+                      type="number"
+                      value={coupon.expires_in_days}
+                      onChange={e => setCoupon(c => ({ ...c, expires_in_days: Number(e.target.value) || 30 }))}
+                      placeholder="30"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[10px]">적용 상품 <span className="text-muted-foreground">(미선택 시 전체 적용)</span></Label>
+                  <div className="flex flex-wrap gap-2">
+                    {COUPON_PRODUCT_OPTIONS.map(opt => {
+                      const active = coupon.applicable_products?.includes(opt.id);
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => toggleProduct(opt.id)}
+                          className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                            active
+                              ? 'bg-primary text-primary-foreground border-primary'
+                              : 'bg-background text-muted-foreground border-border hover:bg-muted'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">총 발급 한도 <span className="text-muted-foreground">(0=무제한)</span></Label>
+                    <Input
+                      type="number"
+                      value={coupon.max_count ?? ''}
+                      onChange={e => setCoupon(c => ({ ...c, max_count: e.target.value ? Number(e.target.value) : null }))}
+                      placeholder="0"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">알림톡 템플릿 코드 <span className="text-muted-foreground">(선택)</span></Label>
+                    <Input
+                      value={coupon.alimtok_tpl_code ?? ''}
+                      onChange={e => setCoupon(c => ({ ...c, alimtok_tpl_code: e.target.value }))}
+                      placeholder="UH_XXXX"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-muted-foreground">
+                  💡 발급된 쿠폰은 결제 시 자동으로 적용 상품 검증 후 할인됩니다. 알림톡 템플릿이 비어있으면 알림톡은 발송되지 않습니다(향후 등록 후 채워주세요).
+                </p>
+              </>
+            )}
           </div>
 
           <Button className="w-full h-9" disabled={!form.name.trim() || save.isPending} onClick={() => save.mutate()}>
@@ -621,6 +778,41 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   const licConverted = syncedLicenses?.filter(l => convertedPhones.has(normalize(l.contact_phone))).length ?? 0;
   const convRate    = licTotal > 0 ? Math.round((licConverted / licTotal) * 100) : 0;
 
+  // 쿠폰 펀널 — 캠페인이 쿠폰 발급형일 때만
+  const couponEnabled = campaign.coupon_settings?.enabled === true;
+  const { data: campaignCoupons } = useQuery({
+    queryKey: ['campaign_coupons', campaign.id],
+    queryFn: async () => {
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/shop_coupons?campaign_id=eq.${campaign.id}&select=id,is_used,used_order_id`,
+        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+      );
+      return r.ok ? (await r.json() as { id: number; is_used: boolean; used_order_id: string | null }[]) : [];
+    },
+    enabled: couponEnabled,
+    staleTime: 60_000,
+  });
+  // 사용된 쿠폰의 주문 매출
+  const usedOrderIds = (campaignCoupons ?? []).filter(c => c.is_used && c.used_order_id).map(c => c.used_order_id!);
+  const { data: couponOrders } = useQuery({
+    queryKey: ['campaign_coupon_orders', campaign.id, usedOrderIds.join(',')],
+    queryFn: async () => {
+      if (usedOrderIds.length === 0) return [];
+      const inFilter = `(${usedOrderIds.map(id => `"${id}"`).join(',')})`;
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/shop_orders?order_id=in.${inFilter}&select=order_id,total_amount`,
+        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+      );
+      return r.ok ? (await r.json() as { order_id: string; total_amount: number }[]) : [];
+    },
+    enabled: couponEnabled && usedOrderIds.length > 0,
+    staleTime: 60_000,
+  });
+  const couponIssued  = campaignCoupons?.length ?? 0;
+  const couponUsed    = campaignCoupons?.filter(c => c.is_used).length ?? 0;
+  const couponRevenue = (couponOrders ?? []).reduce((s, o) => s + (o.total_amount ?? 0), 0);
+  const couponConvRate = couponIssued > 0 ? Math.round((couponUsed / couponIssued) * 100) : 0;
+
   return (
     <div>
       {/* 동기화 후 이용권 통계 + CAC */}
@@ -650,6 +842,22 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
           </div>
         );
       })()}
+
+      {/* 쿠폰 펀널 — 쿠폰 발급형 캠페인일 때만 */}
+      {couponEnabled && (
+        <div className="mb-3 px-3 py-2.5 rounded-lg bg-primary/5 border border-primary/20 flex items-center gap-5 text-xs flex-wrap">
+          <span className="font-medium text-primary">쿠폰 펀널</span>
+          <span>발급 <strong className="text-base font-semibold tabular-nums">{couponIssued}</strong>건</span>
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          <span>결제 <strong className="text-base font-semibold tabular-nums">{couponUsed}</strong>건 <span className="text-muted-foreground">({couponConvRate}%)</span></span>
+          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          <span>매출 <strong className="text-base font-semibold tabular-nums text-emerald-700">{couponRevenue.toLocaleString()}</strong>원</span>
+          <span className="ml-auto text-[10px] text-muted-foreground font-mono">
+            {campaign.coupon_settings?.code_prefix && `${campaign.coupon_settings.code_prefix}-XXXXXX`}
+          </span>
+        </div>
+      )}
+
       <div className="flex border-b border-border mb-3">
         {isLuckySeven && (
           <button onClick={() => setActiveTab('ls_groups')}
