@@ -14,6 +14,7 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
 
 import { issueCampaignCoupon, type CouponSettings } from '@/lib/campaign-coupons';
+import { issueTrialLicense, type TrialLicenseSettings } from '@/lib/campaign-trial-license';
 import { DEFAULT_FORM_SETTINGS, type FormSettings } from './Campaigns';
 
 interface Campaign {
@@ -28,6 +29,7 @@ interface Campaign {
   status: 'active' | 'ended' | 'planned';
   coupon_settings?: CouponSettings | null;
   form_settings?: FormSettings | null;
+  trial_license_settings?: TrialLicenseSettings | null;
 }
 
 const SOURCE_OPTIONS = ['대면연수', '온라인연수', '전시회(행사)참가', '지인추천', '기타'];
@@ -40,6 +42,7 @@ export default function CampaignForm() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [issuedCouponCode, setIssuedCouponCode] = useState<string | null>(null);
+  const [issuedTrialCode, setIssuedTrialCode] = useState<string | null>(null);
 
   // 폼 필드
   const [schoolQuery, setSchoolQuery] = useState('');
@@ -243,6 +246,27 @@ export default function CampaignForm() {
         }
       }
 
+      // 체험 이용권 자동 발급 (설정 + auto_issue 활성)
+      if (campaign.trial_license_settings?.enabled && campaign.trial_license_settings.auto_issue && insertedLead.id) {
+        try {
+          const result = await issueTrialLicense({
+            campaign,
+            lead: {
+              id: insertedLead.id,
+              name: payload.name,
+              phone: payload.phone,
+              phone_normalized: phoneNorm,
+              school_name: payload.school_name,
+            },
+          });
+          if (result?.code) {
+            setIssuedTrialCode(result.code);
+          }
+        } catch (e) {
+          console.warn('[CampaignForm] 체험 이용권 발급 실패', e);
+        }
+      }
+
       setSubmitted(true);
     } catch {
       alert('제출 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
@@ -299,6 +323,13 @@ export default function CampaignForm() {
             입력하신 연락처로 이용권이 발송될 예정입니다.
             <br />잠시만 기다려주세요!
           </p>
+          {issuedTrialCode && (
+            <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 rounded-lg px-4 py-3 mb-3 text-left">
+              <p className="text-xs text-blue-700 dark:text-blue-300 font-medium mb-1">🎫 체험 이용권이 발급되었습니다</p>
+              <p className="font-mono font-bold text-base text-blue-900 dark:text-blue-100">{issuedTrialCode}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">알림톡으로 동일한 코드가 발송됩니다.</p>
+            </div>
+          )}
           {issuedCouponCode && (
             <div className="bg-teal-50 dark:bg-teal-950/20 border border-teal-200 rounded-lg px-4 py-3 mb-4 text-left">
               <p className="text-xs text-teal-700 dark:text-teal-300 font-medium mb-1">🎁 할인 쿠폰이 발급되었습니다</p>

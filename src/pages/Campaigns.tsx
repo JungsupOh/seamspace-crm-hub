@@ -31,6 +31,8 @@ const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY,
 
 // ── Types ─────────────────────────────────────────
 import type { CouponSettings } from '@/lib/campaign-coupons';
+import type { TrialLicenseSettings, TrialPlanId } from '@/lib/campaign-trial-license';
+import { PLAN_USER_COUNT } from '@/lib/campaign-trial-license';
 
 export type SchoolMode = 'k12_search' | 'free_text' | 'mixed';
 
@@ -71,6 +73,7 @@ interface Campaign {
   actual_cost?: number;
   coupon_settings?: CouponSettings | null;
   form_settings?: FormSettings | null;
+  trial_license_settings?: TrialLicenseSettings | null;
   created_at: string;
 }
 
@@ -368,6 +371,14 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
     max_count:           null,
     alimtok_tpl_code:    '',
   });
+  const [trial, setTrial] = useState<TrialLicenseSettings>(() => initial?.trial_license_settings ?? {
+    enabled:          false,
+    plan:             'classroom',
+    user_count:       40,
+    duration_months:  1,
+    auto_issue:       false,
+    service_expire_at: '',
+  });
   const [formCfg, setFormCfg] = useState<Required<FormSettings>>(() => {
     const fs = initial?.form_settings;
     return {
@@ -438,6 +449,14 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
           .filter(q => q.label.length > 0),
       };
 
+      // trial license — 활성화된 경우만 보존, plan 변경 시 user_count 동기화
+      const trialPayload: TrialLicenseSettings | null = trial.enabled ? {
+        ...trial,
+        user_count: PLAN_USER_COUNT[trial.plan] ?? trial.user_count,
+        duration_months: Number(trial.duration_months) || 1,
+        service_expire_at: trial.service_expire_at?.trim() || undefined,
+      } : null;
+
       const body: Partial<Campaign> = {
         ...rest,
         status: form.status as Campaign['status'],
@@ -445,6 +464,7 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
         actual_cost: actual_cost ? Number(actual_cost) : undefined,
         coupon_settings: couponPayload,
         form_settings: cleanedFormSettings,
+        trial_license_settings: trialPayload,
       };
       if (isEdit) {
         // slug 입력 있으면 사용, 없으면 기존 slug 유지 (없을 시 자동 생성 — 구 events 마이그레이션 대응)
@@ -687,6 +707,72 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                 <p className="text-[10px] text-muted-foreground">자주 쓰는 옵션 외에 캠페인별 추가 질문이 필요할 때 사용. 라벨이 비면 노출 안 됨.</p>
               )}
             </div>
+          </div>
+
+          {/* 체험 이용권 설정 */}
+          <div className="border border-border rounded-md p-3 bg-muted/20 space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={trial.enabled}
+                onChange={e => setTrial(t => ({ ...t, enabled: e.target.checked }))}
+                className="accent-primary"
+              />
+              <span className="text-sm font-semibold">체험 이용권 — 캠페인 리드에게 mDiary 체험권 발급</span>
+            </label>
+            {trial.enabled && (
+              <div className="space-y-2 pl-5">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">플랜</Label>
+                    <Select
+                      value={trial.plan}
+                      onValueChange={v => {
+                        const p = v as TrialPlanId;
+                        setTrial(t => ({ ...t, plan: p, user_count: PLAN_USER_COUNT[p] }));
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="classroom" className="text-xs">학급플랜 (40명)</SelectItem>
+                        <SelectItem value="grade"     className="text-xs">학년플랜 (200명)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">이용 기간 (개월)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={trial.duration_months}
+                      onChange={e => setTrial(t => ({ ...t, duration_months: Number(e.target.value) || 1 }))}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px]">서비스 만기일 <span className="text-muted-foreground">(선택, 비우면 발급일+이용기간으로 자동)</span></Label>
+                  <Input
+                    type="date"
+                    value={trial.service_expire_at ?? ''}
+                    onChange={e => setTrial(t => ({ ...t, service_expire_at: e.target.value }))}
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer rounded border border-border bg-card p-2.5">
+                  <input
+                    type="checkbox"
+                    checked={trial.auto_issue}
+                    onChange={e => setTrial(t => ({ ...t, auto_issue: e.target.checked }))}
+                    className="accent-primary"
+                  />
+                  <span className="text-xs">
+                    <strong>리드 등록 시 자동 발급 + 알림톡 발송</strong>
+                    <span className="text-muted-foreground ml-1">— 체크 해제 시 어드민이 수동 발급</span>
+                  </span>
+                </label>
+              </div>
+            )}
           </div>
 
           {/* 쿠폰 발급 설정 */}
