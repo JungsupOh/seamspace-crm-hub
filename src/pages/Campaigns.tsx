@@ -602,24 +602,30 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                 <span className="text-xs font-medium">학교/기관명</span>
               </label>
               {formCfg.school.enabled && (
-                <div className="grid grid-cols-[1fr_auto] gap-2 pl-5">
-                  <Input
-                    value={formCfg.school.label ?? ''}
-                    onChange={e => setFormCfg(c => ({ ...c, school: { ...c.school, label: e.target.value } }))}
-                    placeholder="학교명 / 대학교명 / 기관명"
-                    className="h-7 text-xs"
-                  />
-                  <Select
-                    value={formCfg.school.mode}
-                    onValueChange={v => setFormCfg(c => ({ ...c, school: { ...c.school, mode: v as SchoolMode } }))}
-                  >
-                    <SelectTrigger className="h-7 text-xs w-[155px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="k12_search" className="text-xs">초중고 (NEIS 검색)</SelectItem>
-                      <SelectItem value="free_text"  className="text-xs">대학교/기관 (자유입력)</SelectItem>
-                      <SelectItem value="mixed"      className="text-xs">초중고+대학 (혼합)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-2 pl-5">
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">표시 라벨</Label>
+                    <Input
+                      value={formCfg.school.label ?? ''}
+                      onChange={e => setFormCfg(c => ({ ...c, school: { ...c.school, label: e.target.value } }))}
+                      placeholder="학교명 / 대학교명 / 기관명"
+                      className="h-7 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">검색 방식</Label>
+                    <Select
+                      value={formCfg.school.mode}
+                      onValueChange={v => setFormCfg(c => ({ ...c, school: { ...c.school, mode: v as SchoolMode } }))}
+                    >
+                      <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="k12_search" className="text-xs">초중고 (NEIS 검색)</SelectItem>
+                        <SelectItem value="free_text"  className="text-xs">대학교/기관 (자유입력)</SelectItem>
+                        <SelectItem value="mixed"      className="text-xs">초중고+대학 (혼합)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
             </div>
