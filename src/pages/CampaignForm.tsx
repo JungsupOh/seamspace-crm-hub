@@ -14,6 +14,7 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
 
 import { issueCampaignCoupon, type CouponSettings } from '@/lib/campaign-coupons';
+import { DEFAULT_FORM_SETTINGS, type FormSettings } from './Campaigns';
 
 interface Campaign {
   id: string;
@@ -26,6 +27,7 @@ interface Campaign {
   end_date?: string;
   status: 'active' | 'ended' | 'planned';
   coupon_settings?: CouponSettings | null;
+  form_settings?: FormSettings | null;
 }
 
 const SOURCE_OPTIONS = ['대면연수', '온라인연수', '전시회(행사)참가', '지인추천', '기타'];
@@ -55,6 +57,29 @@ export default function CampaignForm() {
   const [source, setSource] = useState('');
   const [sourceEtc, setSourceEtc] = useState('');
   const [marketingConsent, setMarketingConsent] = useState(false);
+  // 동적 필드 — usage_plan + 자유 질문 답변
+  const [usagePlan, setUsagePlan] = useState('');
+  const [customAnswers, setCustomAnswers] = useState<string[]>([]);
+
+  // form_settings 결정 — 캠페인이 명시적 설정 없으면 기본값
+  const formCfg: Required<FormSettings> = {
+    school:     campaign?.form_settings?.school     ?? DEFAULT_FORM_SETTINGS.school,
+    role:       campaign?.form_settings?.role       ?? DEFAULT_FORM_SETTINGS.role,
+    source:     campaign?.form_settings?.source     ?? DEFAULT_FORM_SETTINGS.source,
+    usage_plan: campaign?.form_settings?.usage_plan ?? DEFAULT_FORM_SETTINGS.usage_plan,
+    custom_questions: campaign?.form_settings?.custom_questions ?? [],
+  };
+
+  // 캠페인 로드 시 customAnswers 길이 맞춤
+  useEffect(() => {
+    if (formCfg.custom_questions.length > 0) {
+      setCustomAnswers(prev => {
+        const next = [...prev];
+        while (next.length < formCfg.custom_questions.length) next.push('');
+        return next.slice(0, formCfg.custom_questions.length);
+      });
+    }
+  }, [campaign?.id, formCfg.custom_questions.length]);
 
   // 1. 캠페인 로드
   useEffect(() => {
@@ -129,33 +154,51 @@ export default function CampaignForm() {
   // 4. 폼 제출
   const handleSubmit = async () => {
     if (!campaign) return;
-    if (!schoolInfo && !schoolQuery.trim()) { alert('학교명을 입력해주세요.'); return; }
-    if (!position.trim()) { alert('담당업무를 입력해주세요.'); return; }
+    // 항상 필수: 이름/연락처/이메일
     if (!name.trim()) { alert('성함을 입력해주세요.'); return; }
     if (!phone.trim()) { alert('연락처를 입력해주세요.'); return; }
-    if (!source) { alert('체험권 소개받으신 경로를 선택해주세요.'); return; }
-    if (source === '기타' && !sourceEtc.trim()) { alert('기타 경로를 직접 입력해주세요.'); return; }
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { alert('이메일을 정확히 입력해주세요.'); return; }
+    // 옵션 필드 — 켜져있을 때만 검증
+    if (formCfg.school.enabled && !schoolInfo && !schoolQuery.trim()) {
+      alert(`${formCfg.school.label || '학교명'}을(를) 입력해주세요.`); return;
+    }
+    if (formCfg.role.enabled && !position.trim()) {
+      alert(`${formCfg.role.label || '담당 업무'}을(를) 입력해주세요.`); return;
+    }
+    if (formCfg.source.enabled) {
+      if (!source) { alert('소개받으신 경로를 선택해주세요.'); return; }
+      if (source === '기타' && !sourceEtc.trim()) { alert('기타 경로를 직접 입력해주세요.'); return; }
+    }
 
     setSubmitting(true);
     try {
       const phoneNorm = phone.replace(/\D/g, '');
       const isExisting = await checkExistingCustomer(phoneNorm);
 
+      // custom_fields 정리
+      const customFields: Record<string, string> = {};
+      if (formCfg.usage_plan.enabled && usagePlan.trim()) customFields.usage_plan = usagePlan.trim();
+      formCfg.custom_questions.forEach((q, i) => {
+        const v = customAnswers[i]?.trim();
+        if (v) customFields[`custom_q${i + 1}`] = v;
+      });
+
       const payload = {
         campaign_id:           campaign.id,
-        school_name:           schoolInfo?.name || schoolQuery.trim(),
+        school_name:           formCfg.school.enabled ? (schoolInfo?.name || schoolQuery.trim()) : null,
         school_code:           null,
-        school_kind:           schoolInfo?.kind || null,
-        position:              position.trim(),
+        school_kind:           formCfg.school.enabled ? (schoolInfo?.kind || null) : null,
+        position:              formCfg.role.enabled ? position.trim() : null,
         name:                  name.trim(),
         phone:                 phone,
         phone_normalized:      phoneNorm,
-        email:                 email.trim() || null,
-        source:                source,
-        source_etc:            source === '기타' ? sourceEtc.trim() : null,
+        email:                 email.trim(),
+        source:                formCfg.source.enabled ? source : null,
+        source_etc:            formCfg.source.enabled && source === '기타' ? sourceEtc.trim() : null,
         marketing_consent:     marketingConsent,
         status:                '신규',
         is_existing_customer:  isExisting,
+        custom_fields:         Object.keys(customFields).length > 0 ? customFields : null,
       };
 
       const res = await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads`, {
@@ -291,88 +334,142 @@ export default function CampaignForm() {
 
         {/* 폼 */}
         <div className="px-6 py-5 space-y-4">
-          {/* 학교명 (NEIS) */}
-          <div ref={schoolRef} className="relative space-y-1.5">
-            <Label className="text-xs">학교명 <span className="text-destructive">*</span></Label>
-            <div className="relative">
-              <Input
-                value={schoolQuery}
-                onChange={e => handleSchoolSearch(e.target.value)}
-                onFocus={() => { if (schoolResults.length > 0) setShowSchoolDropdown(true); }}
-                placeholder="학교명을 입력하세요 (2자 이상)"
-                className="h-10 text-sm pr-9"
-              />
-              <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
-                {schoolSearching ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : <Search className="h-4 w-4 text-muted-foreground" />}
+          {/* 학교/기관명 (옵션) */}
+          {formCfg.school.enabled && (
+            <div ref={schoolRef} className="relative space-y-1.5">
+              <Label className="text-xs">{formCfg.school.label || '학교명'} <span className="text-destructive">*</span></Label>
+              <div className="relative">
+                <Input
+                  value={schoolQuery}
+                  onChange={e => formCfg.school.mode === 'free_text'
+                    ? (setSchoolQuery(e.target.value), setSchoolInfo(null))
+                    : handleSchoolSearch(e.target.value)}
+                  onFocus={() => {
+                    if (formCfg.school.mode !== 'free_text' && schoolResults.length > 0) setShowSchoolDropdown(true);
+                  }}
+                  placeholder={formCfg.school.mode === 'free_text'
+                    ? `${formCfg.school.label || '기관명'}을 입력하세요`
+                    : `${formCfg.school.label || '학교명'}을 입력하세요 (2자 이상)`}
+                  className="h-10 text-sm pr-9"
+                />
+                <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
+                  {formCfg.school.mode !== 'free_text' && (
+                    schoolSearching ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : <Search className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </div>
               </div>
+              {formCfg.school.mode !== 'free_text' && showSchoolDropdown && schoolResults.length > 0 && (
+                <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg max-h-56 overflow-y-auto">
+                  {schoolResults.map((s, i) => (
+                    <button key={i} type="button" onClick={() => selectSchool(s)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors">
+                      <div className="font-medium">{s.name}</div>
+                      <div className="text-xs text-muted-foreground">{s.kind} · {s.eduOffice}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {schoolInfo && (
+                <p className="text-xs text-teal-700 flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  {schoolInfo.name} ({schoolInfo.kind})
+                </p>
+              )}
+              {formCfg.school.mode === 'mixed' && schoolQuery && !schoolInfo && (
+                <p className="text-[10px] text-muted-foreground">
+                  검색 결과에 없으면 입력한 그대로 저장됩니다 (대학교/기관 등).
+                </p>
+              )}
             </div>
-            {showSchoolDropdown && schoolResults.length > 0 && (
-              <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg max-h-56 overflow-y-auto">
-                {schoolResults.map((s, i) => (
-                  <button key={i} type="button" onClick={() => selectSchool(s)}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors">
-                    <div className="font-medium">{s.name}</div>
-                    <div className="text-xs text-muted-foreground">{s.kind} · {s.eduOffice}</div>
-                  </button>
-                ))}
-              </div>
-            )}
-            {schoolInfo && (
-              <p className="text-xs text-teal-700 flex items-center gap-1">
-                <CheckCircle2 className="h-3 w-3" />
-                {schoolInfo.name} ({schoolInfo.kind})
-              </p>
-            )}
-          </div>
+          )}
 
-          {/* 담당업무 */}
-          <div className="space-y-1.5">
-            <Label className="text-xs">담당업무 <span className="text-destructive">*</span></Label>
-            <Input value={position} onChange={e => setPosition(e.target.value)}
-              placeholder="예: 담임, 생활부, 상담교사" className="h-10 text-sm" />
-          </div>
+          {/* 직책/전공 (옵션) */}
+          {formCfg.role.enabled && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">{formCfg.role.label || '담당 업무'} <span className="text-destructive">*</span></Label>
+              <Input value={position} onChange={e => setPosition(e.target.value)}
+                placeholder="예: 담임, 상담교사, 컴퓨터교육과" className="h-10 text-sm" />
+            </div>
+          )}
 
-          {/* 성함 */}
+          {/* 성함 (필수) */}
           <div className="space-y-1.5">
             <Label className="text-xs">성함 <span className="text-destructive">*</span></Label>
             <Input value={name} onChange={e => setName(e.target.value)}
               placeholder="홍길동" className="h-10 text-sm" />
           </div>
 
-          {/* 연락처 */}
+          {/* 연락처 (필수) */}
           <div className="space-y-1.5">
             <Label className="text-xs">
               연락처 <span className="text-destructive">*</span>
-              <span className="text-muted-foreground ml-1">(알림톡으로 쿠폰이 발송됩니다)</span>
+              <span className="text-muted-foreground ml-1">(알림톡 발송)</span>
             </Label>
             <Input value={phone} onChange={e => setPhone(formatPhone(e.target.value))}
               placeholder="010-0000-0000" type="tel" className="h-10 text-sm" />
           </div>
 
-          {/* 이메일 */}
+          {/* 이메일 (필수) */}
           <div className="space-y-1.5">
-            <Label className="text-xs">이메일</Label>
+            <Label className="text-xs">이메일 <span className="text-destructive">*</span></Label>
             <Input value={email} onChange={e => setEmail(e.target.value)}
               placeholder="email@example.com" type="email" className="h-10 text-sm" />
           </div>
 
-          {/* 소개받으신 경로 */}
-          <div className="space-y-1.5">
-            <Label className="text-xs">체험권 소개받으신 경로 <span className="text-destructive">*</span></Label>
-            <div className="space-y-2">
-              {SOURCE_OPTIONS.map(opt => (
-                <label key={opt} className="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="source" value={opt} checked={source === opt}
-                    onChange={() => setSource(opt)} className="accent-primary" />
-                  <span className="text-sm">{opt}</span>
-                </label>
-              ))}
+          {/* 활용 방안 (옵션, 서술형) */}
+          {formCfg.usage_plan.enabled && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">{formCfg.usage_plan.label || '활용 방안'}</Label>
+              <textarea
+                value={usagePlan}
+                onChange={e => setUsagePlan(e.target.value)}
+                placeholder="간단히 입력해주세요"
+                rows={3}
+                className="w-full text-sm rounded-md border border-input bg-background px-3 py-2"
+              />
             </div>
-            {source === '기타' && (
-              <Input value={sourceEtc} onChange={e => setSourceEtc(e.target.value)}
-                placeholder="경로를 직접 입력해주세요" className="h-9 text-sm mt-2" />
-            )}
-          </div>
+          )}
+
+          {/* 자유 질문 (옵션, 1-3개) */}
+          {formCfg.custom_questions.map((q, i) => (
+            <div key={i} className="space-y-1.5">
+              <Label className="text-xs">{q.label}</Label>
+              {q.type === 'textarea' ? (
+                <textarea
+                  value={customAnswers[i] ?? ''}
+                  onChange={e => setCustomAnswers(prev => prev.map((v, idx) => idx === i ? e.target.value : v))}
+                  rows={3}
+                  className="w-full text-sm rounded-md border border-input bg-background px-3 py-2"
+                />
+              ) : (
+                <Input
+                  value={customAnswers[i] ?? ''}
+                  onChange={e => setCustomAnswers(prev => prev.map((v, idx) => idx === i ? e.target.value : v))}
+                  className="h-10 text-sm"
+                />
+              )}
+            </div>
+          ))}
+
+          {/* 소개받으신 경로 (옵션) */}
+          {formCfg.source.enabled && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">소개받으신 경로 <span className="text-destructive">*</span></Label>
+              <div className="space-y-2">
+                {SOURCE_OPTIONS.map(opt => (
+                  <label key={opt} className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="source" value={opt} checked={source === opt}
+                      onChange={() => setSource(opt)} className="accent-primary" />
+                    <span className="text-sm">{opt}</span>
+                  </label>
+                ))}
+              </div>
+              {source === '기타' && (
+                <Input value={sourceEtc} onChange={e => setSourceEtc(e.target.value)}
+                  placeholder="경로를 직접 입력해주세요" className="h-9 text-sm mt-2" />
+              )}
+            </div>
+          )}
 
           {/* 마케팅 동의 */}
           <label className="flex items-start gap-2 cursor-pointer pt-2 border-t border-border">

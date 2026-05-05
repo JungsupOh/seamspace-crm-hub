@@ -13,7 +13,7 @@ import {
   Plus, ChevronDown, ChevronRight, ArrowRight, ExternalLink,
   Calendar, Users, CheckCircle2, XCircle, Clock, Trash2, Upload,
   Link2, Copy, QrCode, Image as ImageIcon, Loader2, Send, UserPlus,
-  Inbox, Ticket,
+  Inbox, Ticket, X,
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { apiCreateCoupon, apiSendCoupon } from '@/lib/coupons';
@@ -32,6 +32,30 @@ const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY,
 // ── Types ─────────────────────────────────────────
 import type { CouponSettings } from '@/lib/campaign-coupons';
 
+export type SchoolMode = 'k12_search' | 'free_text' | 'mixed';
+
+export interface CustomQuestion {
+  label: string;
+  type: 'text' | 'textarea';
+}
+
+export interface FormSettings {
+  school?:     { enabled: boolean; mode: SchoolMode; label?: string };
+  role?:       { enabled: boolean; label?: string };
+  source?:     { enabled: boolean };
+  usage_plan?: { enabled: boolean; label?: string };
+  custom_questions?: CustomQuestion[];
+}
+
+// 기본값 — form_settings가 NULL인 캠페인에 적용 (legacy 호환)
+export const DEFAULT_FORM_SETTINGS: Required<FormSettings> = {
+  school:     { enabled: true,  mode: 'k12_search', label: '학교명' },
+  role:       { enabled: true,  label: '담당 업무' },
+  source:     { enabled: true },
+  usage_plan: { enabled: false, label: '활용 방안' },
+  custom_questions: [],
+};
+
 interface Campaign {
   id: string;
   name: string;
@@ -46,6 +70,7 @@ interface Campaign {
   budget?: number;
   actual_cost?: number;
   coupon_settings?: CouponSettings | null;
+  form_settings?: FormSettings | null;
   created_at: string;
 }
 
@@ -105,6 +130,7 @@ interface CampaignLead {
   converted_contact_id?: string;
   sent_at?: string;
   created_at: string;
+  custom_fields?: Record<string, string> | null;
 }
 
 // ── API ───────────────────────────────────────────
@@ -342,6 +368,22 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
     max_count:           null,
     alimtok_tpl_code:    '',
   });
+  const [formCfg, setFormCfg] = useState<Required<FormSettings>>(() => {
+    const fs = initial?.form_settings;
+    return {
+      school:     fs?.school     ?? { ...DEFAULT_FORM_SETTINGS.school },
+      role:       fs?.role       ?? { ...DEFAULT_FORM_SETTINGS.role },
+      source:     fs?.source     ?? { ...DEFAULT_FORM_SETTINGS.source },
+      usage_plan: fs?.usage_plan ?? { ...DEFAULT_FORM_SETTINGS.usage_plan },
+      custom_questions: fs?.custom_questions ?? [],
+    };
+  });
+  const updateCustomQ = (i: number, patch: Partial<CustomQuestion>) =>
+    setFormCfg(c => ({ ...c, custom_questions: c.custom_questions.map((q, idx) => idx === i ? { ...q, ...patch } : q) }));
+  const addCustomQ = () =>
+    setFormCfg(c => c.custom_questions.length >= 3 ? c : { ...c, custom_questions: [...c.custom_questions, { label: '', type: 'textarea' }] });
+  const removeCustomQ = (i: number) =>
+    setFormCfg(c => ({ ...c, custom_questions: c.custom_questions.filter((_, idx) => idx !== i) }));
   const toggleProduct = (pid: string) => {
     setCoupon(c => {
       const arr = c.applicable_products ?? [];
@@ -385,12 +427,24 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
           alimtok_tpl_code: coupon.alimtok_tpl_code?.trim() || undefined,
         };
       }
+      // form_settings 정리 — 비활성 자유질문 제거, 라벨 trim
+      const cleanedFormSettings: FormSettings = {
+        school: { ...formCfg.school, label: formCfg.school.label?.trim() || '학교명' },
+        role:   { ...formCfg.role,   label: formCfg.role.label?.trim()   || '담당 업무' },
+        source: { ...formCfg.source },
+        usage_plan: { ...formCfg.usage_plan, label: formCfg.usage_plan.label?.trim() || '활용 방안' },
+        custom_questions: formCfg.custom_questions
+          .map(q => ({ label: q.label.trim(), type: q.type }))
+          .filter(q => q.label.length > 0),
+      };
+
       const body: Partial<Campaign> = {
         ...rest,
         status: form.status as Campaign['status'],
         budget: budget ? Number(budget) : undefined,
         actual_cost: actual_cost ? Number(actual_cost) : undefined,
         coupon_settings: couponPayload,
+        form_settings: cleanedFormSettings,
       };
       if (isEdit) {
         // slug 입력 있으면 사용, 없으면 기존 slug 유지 (없을 시 자동 생성 — 구 events 마이그레이션 대응)
@@ -506,6 +560,132 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
             <div className="space-y-1">
               <Label className="text-xs">집행 비용 (원)</Label>
               <Input type="number" value={form.actual_cost} onChange={e => f('actual_cost', e.target.value)} placeholder="0" className="h-8 text-sm" />
+            </div>
+          </div>
+
+          {/* 신청 폼 설정 */}
+          <div className="border border-border rounded-md p-3 bg-muted/20 space-y-3">
+            <p className="text-sm font-semibold">신청 폼 설정</p>
+            <p className="text-[10px] text-muted-foreground -mt-1">
+              필수: 성함 / 연락처 / 이메일 / 마케팅 동의 — 항상 노출. 아래 옵션으로 추가 항목 on/off.
+            </p>
+
+            {/* 학교 */}
+            <div className="rounded border border-border bg-card p-2.5 space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formCfg.school.enabled}
+                  onChange={e => setFormCfg(c => ({ ...c, school: { ...c.school, enabled: e.target.checked } }))}
+                  className="accent-primary"
+                />
+                <span className="text-xs font-medium">학교/기관명</span>
+              </label>
+              {formCfg.school.enabled && (
+                <div className="grid grid-cols-[1fr_auto] gap-2 pl-5">
+                  <Input
+                    value={formCfg.school.label ?? ''}
+                    onChange={e => setFormCfg(c => ({ ...c, school: { ...c.school, label: e.target.value } }))}
+                    placeholder="학교명 / 대학교명 / 기관명"
+                    className="h-7 text-xs"
+                  />
+                  <Select
+                    value={formCfg.school.mode}
+                    onValueChange={v => setFormCfg(c => ({ ...c, school: { ...c.school, mode: v as SchoolMode } }))}
+                  >
+                    <SelectTrigger className="h-7 text-xs w-[155px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="k12_search" className="text-xs">초중고 (NEIS 검색)</SelectItem>
+                      <SelectItem value="free_text"  className="text-xs">대학교/기관 (자유입력)</SelectItem>
+                      <SelectItem value="mixed"      className="text-xs">초중고+대학 (혼합)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+
+            {/* 직책/전공 */}
+            <div className="rounded border border-border bg-card p-2.5 space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formCfg.role.enabled}
+                  onChange={e => setFormCfg(c => ({ ...c, role: { ...c.role, enabled: e.target.checked } }))}
+                  className="accent-primary"
+                />
+                <span className="text-xs font-medium">직책 / 전공 / 학과</span>
+              </label>
+              {formCfg.role.enabled && (
+                <Input
+                  value={formCfg.role.label ?? ''}
+                  onChange={e => setFormCfg(c => ({ ...c, role: { ...c.role, label: e.target.value } }))}
+                  placeholder="담당 업무 / 전공·학과 / 직책"
+                  className="h-7 text-xs ml-5"
+                />
+              )}
+            </div>
+
+            {/* 소개 경로 */}
+            <label className="flex items-center gap-2 cursor-pointer rounded border border-border bg-card p-2.5">
+              <input
+                type="checkbox"
+                checked={formCfg.source.enabled}
+                onChange={e => setFormCfg(c => ({ ...c, source: { enabled: e.target.checked } }))}
+                className="accent-primary"
+              />
+              <span className="text-xs font-medium">소개 경로 (대면연수/온라인/전시회/지인추천/기타)</span>
+            </label>
+
+            {/* 활용 방안 */}
+            <div className="rounded border border-border bg-card p-2.5 space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formCfg.usage_plan.enabled}
+                  onChange={e => setFormCfg(c => ({ ...c, usage_plan: { ...c.usage_plan, enabled: e.target.checked } }))}
+                  className="accent-primary"
+                />
+                <span className="text-xs font-medium">활용 방안 / 도입 계획 (서술형)</span>
+              </label>
+              {formCfg.usage_plan.enabled && (
+                <Input
+                  value={formCfg.usage_plan.label ?? ''}
+                  onChange={e => setFormCfg(c => ({ ...c, usage_plan: { ...c.usage_plan, label: e.target.value } }))}
+                  placeholder="활용 방안 / 도입 계획 / 기대 효과"
+                  className="h-7 text-xs ml-5"
+                />
+              )}
+            </div>
+
+            {/* 자유 질문 */}
+            <div className="rounded border border-border bg-card p-2.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium">자유 질문 ({formCfg.custom_questions.length}/3)</span>
+                <button type="button" onClick={addCustomQ} disabled={formCfg.custom_questions.length >= 3}
+                  className="text-[10px] text-primary hover:underline disabled:text-muted-foreground disabled:no-underline">
+                  + 추가
+                </button>
+              </div>
+              {formCfg.custom_questions.map((q, i) => (
+                <div key={i} className="grid grid-cols-[1fr_auto_auto] gap-1.5">
+                  <Input value={q.label} onChange={e => updateCustomQ(i, { label: e.target.value })}
+                    placeholder={`질문 ${i + 1} (예: 도입 시기는?)`} className="h-7 text-xs" />
+                  <Select value={q.type} onValueChange={v => updateCustomQ(i, { type: v as 'text' | 'textarea' })}>
+                    <SelectTrigger className="h-7 text-xs w-[80px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="text" className="text-xs">단답</SelectItem>
+                      <SelectItem value="textarea" className="text-xs">서술</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <button type="button" onClick={() => removeCustomQ(i)}
+                    className="px-1.5 text-muted-foreground hover:text-destructive">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+              {formCfg.custom_questions.length === 0 && (
+                <p className="text-[10px] text-muted-foreground">자주 쓰는 옵션 외에 캠페인별 추가 질문이 필요할 때 사용. 라벨이 비면 노출 안 됨.</p>
+              )}
             </div>
           </div>
 
@@ -915,6 +1095,8 @@ interface ParticipantRow {
   coupon_code?: string;
   duration?: string;
   user_count?: string;
+  // 동적 폼 답변 (활용방안 + 자유 질문)
+  custom_fields?: Record<string, string> | null;
 }
 
 // ── 리드 탭 — 캠페인 참여자 통합 뷰 ───────────────────
@@ -1014,6 +1196,7 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
         coupon_code: lic?.coupon_code,
         duration: lic?.duration,
         user_count: lic?.user_count,
+        custom_fields: l.custom_fields,
       });
     });
     (licenses ?? []).filter(lic => !lic.lead_id).forEach(lic => {
@@ -1195,19 +1378,33 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
       ? participants
       : participants.filter(p => p.status === statusFilter);
     if (targets.length === 0) { toast.error('다운로드할 데이터가 없습니다'); return; }
-    const rows = targets.map(p => ({
-      '이름':     p.name,
-      '학교':     p.school_name ?? '',
-      '연락처':   p.phone,
-      '이메일':   p.email ?? '',
-      '담당업무':  p.position ?? '',
-      '경로':     p.source === '기타' ? (p.source_etc ?? '기타') : (p.source ?? ''),
-      '출처':     p.origin === 'form' ? '폼' : '수동',
-      '구분':     p.customerTier === 'purchased' ? '구매고객' : p.customerTier === 'retrial' ? '재신청' : '신규',
-      '쿠폰코드':  p.coupon_code ?? '',
-      '상태':     p.status,
-      '등록일':   p.created_at.slice(0, 10),
-    }));
+    // 동적 custom_fields 컬럼 — 이번 캠페인 리드 중 등장한 모든 키 통합
+    const formCfg = campaign.form_settings ?? null;
+    const usagePlanLabel = formCfg?.usage_plan?.label || '활용 방안';
+    const customQs = formCfg?.custom_questions ?? [];
+
+    const rows = targets.map(p => {
+      const cf = (p as { custom_fields?: Record<string, string> | null }).custom_fields ?? {};
+      const base: Record<string, string> = {
+        '이름':     p.name,
+        '학교':     p.school_name ?? '',
+        '연락처':   p.phone,
+        '이메일':   p.email ?? '',
+        '담당업무':  p.position ?? '',
+        '경로':     p.source === '기타' ? (p.source_etc ?? '기타') : (p.source ?? ''),
+        '출처':     p.origin === 'form' ? '폼' : '수동',
+        '구분':     p.customerTier === 'purchased' ? '구매고객' : p.customerTier === 'retrial' ? '재신청' : '신규',
+        '쿠폰코드':  p.coupon_code ?? '',
+        '상태':     p.status,
+        '등록일':   p.created_at.slice(0, 10),
+      };
+      if (cf.usage_plan) base[usagePlanLabel] = cf.usage_plan;
+      customQs.forEach((q, i) => {
+        const v = cf[`custom_q${i + 1}`];
+        if (v) base[q.label] = v;
+      });
+      return base;
+    });
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '리드');
