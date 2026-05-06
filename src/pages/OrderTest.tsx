@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { formatPhone } from '@/lib/utils';
 import { searchSchools, SchoolInfo } from '@/lib/neis';
 import { notifyWebQuote, notifyWebPayment, notifyWebLicenseIssued } from '@/lib/telegram';
