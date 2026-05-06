@@ -84,25 +84,27 @@ Deno.serve(async (req: Request) => {
     const couponCode = couponData.coupon_code!;
     console.log("[confirm-payment] 쿠폰 생성:", couponCode);
 
-    // ── Step 3: AlimTok 발송 ─────────────────────────
-    const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-coupon`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-      },
-      body: JSON.stringify({
+    // ── Step 3: AlimTok 발송 — iptime 직접 호출 (Edge → Edge inner call 이슈 회피) ─
+    try {
+      const sendBody = {
         first_name: customerName,
         phone: customerPhone.replace(/\D/g, ""),
         coupon_code: couponCode,
         user_limit: userLimit,
         duration: String(duration),
-        send_type: "buyer",
-      }),
-    });
-
-    const sendData = await sendRes.json().catch(() => ({}));
-    console.log("[confirm-payment] AlimTok 발송:", sendData);
+        tpl_code: "TS_6206",  // 구매이용권 (이전 send_type='buyer'에 매핑)
+      };
+      console.log("[confirm-payment] 알림톡 요청:", JSON.stringify(sendBody));
+      const sendRes = await fetch("http://tebahsoft.iptime.org:8310/main/alimtok_coupon/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sendBody),
+      });
+      const sendText = await sendRes.text();
+      console.log(`[confirm-payment] 알림톡 응답 ${sendRes.status}:`, sendText);
+    } catch (e) {
+      console.error("[confirm-payment] 알림톡 예외:", e);
+    }
 
     // ── Step 4: Supabase order_payments 저장 ─────────
     await fetch(`${SUPABASE_URL}/rest/v1/order_payments`, {
