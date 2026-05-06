@@ -45,6 +45,11 @@ export const S2B_MAP: Record<string, Record<number, string>> = {
 };
 
 export function getUnitPrice(plan: string, duration: number): number {
+  // 소수학급플랜: 1만원/월 단가, 4개월 이상부터 판매. 임의 N(>=4)에 대해 N*10,000원.
+  if (plan === '소수학급플랜') {
+    if (duration < 4) return 0;
+    return duration * 10000;
+  }
   return PRICING[duration]?.[plan] ?? 0;
 }
 

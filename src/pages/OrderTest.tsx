@@ -70,6 +70,11 @@ const EVENT_END = new Date('2026-04-01');
 const IS_EVENT = new Date() < EVENT_END;
 
 function getUnitPrice(months: number, plan: PlanKey): { price: number; isEvent: boolean } {
+  // 소수학급: 1만원/월 단가, 4개월 이상부터 판매. 5,7,8개월 등 임의 기간 가능.
+  if (plan === '소수학급') {
+    if (months < 4) return { price: 0, isEvent: false };
+    return { price: months * 10000, isEvent: false };
+  }
   if (IS_EVENT && EVT[months]?.[plan] != null) return { price: EVT[months][plan], isEvent: true };
   return { price: REG[months]?.[plan] ?? 0, isEvent: false };
 }
@@ -82,6 +87,25 @@ interface Suggestion {
 
 function getSuggestions(targetMonths: number, plan: PlanKey): Suggestion[] {
   if (targetMonths <= 0 || targetMonths > 60) return [];
+
+  // 소수학급: 1만원/월 단가, 4개월 이상. 어떤 N(>=4)이라도 N×10000원으로 직접 산출.
+  if (plan === '소수학급') {
+    if (targetMonths < 4) {
+      return [{
+        months: 4, total: 40000,
+        label: '4개월 (최소 판매 단위)',
+        breakdown: '소수학급 플랜은 4개월부터 판매 (1개월당 1만원)',
+        isEvent: false, recommended: true,
+      }];
+    }
+    return [{
+      months: targetMonths, total: targetMonths * 10000,
+      label: `${targetMonths}개월`,
+      breakdown: '소수학급 1개월당 1만원',
+      isEvent: false, recommended: true,
+    }];
+  }
+
   const periods = [12, 6, 4, 1];
   const dp: { cost: number; combo: number[] }[] = Array.from(
     { length: targetMonths + 1 }, () => ({ cost: Infinity, combo: [] })
@@ -493,8 +517,8 @@ export default function OrderTest() {
   }, [customMonths, info.planId]);
 
   const selectPlan = (planId: PlanKey) => {
-    setInfo(prev => ({ ...prev, planId, qty: 1 }));
-    setShowCustom(false); setCustomMonths('');
+    // 플랜만 변경, 학생수/이용권수량/직접입력 개월수는 유지
+    setInfo(prev => ({ ...prev, planId }));
   };
 
   const step1Valid = !!(info.orgName.trim() && info.contactName.trim() && info.phone.trim() && info.email.trim());
