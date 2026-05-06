@@ -545,17 +545,57 @@ export default function OrderTest() {
 
       const planLabel = selectedProduct.code === '01' ? activePlan.label : selectedProduct.name;
       const phoneNorm = info.phone.replace(/\D/g, '');
+      const restHeaders = {
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        apikey: SUPABASE_KEY,
+        'Content-Type': 'application/json',
+      };
 
+      // 1) deals 행 INSERT — /딜관리에 가시화. created deal_id를 deal_quotes에 연결.
+      let dealId: string = 'web';
+      try {
+        const dealRes = await fetch(`${SUPABASE_URL}/rest/v1/deals`, {
+          method: 'POST',
+          headers: { ...restHeaders, Prefer: 'return=representation' },
+          body: JSON.stringify({
+            deal_name:           `심스페이스-${selectedProduct.name} - ${info.orgName}`,
+            deal_stage:          '견적',
+            deal_type:           'New',
+            contact_name:        info.contactName,
+            contact_phone:       info.phone,
+            contact_email:       info.email.trim() || null,
+            org_name:            info.orgName,
+            quote_date:          today,
+            quote_qty:           info.qty,
+            quote_plan:          planLabel,
+            quote_number:        qNum,
+            license_duration:    selectedProduct.code === '01' ? info.months : null,
+            unit_price:          selectedProduct.code === '01' ? unitPrice : null,
+            supply_price:        selectedProduct.code === '01' ? supply : null,
+            tax_amount:          selectedProduct.code === '01' ? tax : null,
+            final_contract_value: selectedProduct.code === '01' ? total : null,
+            lead_source:         'Web',
+            order_date:          today,
+            created_date:        today,
+            notes:               `[웹주문] ${info.contactName} (${info.phone})${info.students ? ` 학생 ${info.students}명` : ''}`,
+          }),
+        });
+        if (dealRes.ok) {
+          const inserted = await dealRes.json();
+          if (Array.isArray(inserted) && inserted[0]?.id) dealId = inserted[0].id;
+        } else {
+          console.warn('[saveWebQuote] deals INSERT 실패 — deal_quotes만 저장됨', dealRes.status);
+        }
+      } catch (e) {
+        console.warn('[saveWebQuote] deals INSERT 예외', e);
+      }
+
+      // 2) deal_quotes INSERT — deals.id 연결
       const saveRes = await fetch(`${SUPABASE_URL}/rest/v1/deal_quotes`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${SUPABASE_KEY}`,
-          apikey: SUPABASE_KEY,
-          'Content-Type': 'application/json',
-          Prefer: 'return=minimal',
-        },
+        headers: { ...restHeaders, Prefer: 'return=minimal' },
         body: JSON.stringify({
-          deal_id: 'web',
+          deal_id: dealId,
           quote_number: qNum,
           plan: planLabel,
           qty: info.qty,
