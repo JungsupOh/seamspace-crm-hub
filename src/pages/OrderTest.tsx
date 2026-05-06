@@ -481,6 +481,17 @@ export default function OrderTest() {
   const customNum = parseInt(customMonths, 10);
   const suggestions = (!isNaN(customNum) && customNum > 0) ? getSuggestions(customNum, info.planId) : [];
 
+  // 추천 옵션이 계산되면 자동으로 선택 (사용자가 직접 다른 걸 선택하면 그것 유지)
+  useEffect(() => {
+    if (suggestions.length === 0) return;
+    const rec = suggestions.find(s => s.recommended) ?? suggestions[0];
+    if (rec && info.months !== rec.months) {
+      setInfo(p => ({ ...p, months: rec.months }));
+    }
+    // suggestions의 변경 trigger는 customMonths/planId — months 자체는 의도적으로 deps 제외
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customMonths, info.planId]);
+
   const selectPlan = (planId: PlanKey) => {
     setInfo(prev => ({ ...prev, planId, qty: 1 }));
     setShowCustom(false); setCustomMonths('');
@@ -1222,24 +1233,30 @@ export default function OrderTest() {
                             {suggestions.length > 0 && (
                               <div className="space-y-2">
                                 <p className="text-xs text-muted-foreground font-medium">최저가 구매 방법 추천</p>
-                                {suggestions.map((s, i) => (
-                                  <button key={i} type="button"
-                                    onClick={() => { setInfo(p => ({ ...p, months: s.months })); setShowCustom(false); setCustomMonths(''); }}
-                                    className={`w-full text-left rounded-xl border-2 p-3.5 transition-all
-                                      ${s.recommended ? 'border-teal-400 bg-teal-50/60 hover:border-teal-500' : 'border-border hover:border-primary/40'}`}>
-                                    <div className="flex items-start justify-between">
-                                      <div>
-                                        <div className="flex items-center gap-1.5">
-                                          <span className="font-semibold text-sm">{s.label}</span>
-                                          {s.recommended && <span className="text-[10px] bg-teal-500 text-white px-1.5 py-0.5 rounded-full">추천</span>}
-                                          {s.isEvent && <span className="text-[10px] bg-pink-500 text-white px-1.5 py-0.5 rounded-full">이벤트</span>}
+                                {suggestions.map((s, i) => {
+                                  const isSelected = info.months === s.months;
+                                  return (
+                                    <button key={i} type="button"
+                                      onClick={() => { setInfo(p => ({ ...p, months: s.months })); }}
+                                      className={`w-full text-left rounded-xl border-2 p-3.5 transition-all
+                                        ${isSelected
+                                          ? 'border-primary bg-primary/5 hover:border-primary'
+                                          : 'border-border hover:border-primary/40'}`}>
+                                      <div className="flex items-start justify-between">
+                                        <div>
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="font-semibold text-sm">{s.label}</span>
+                                            {isSelected && <span className="text-[10px] bg-primary text-primary-foreground px-1.5 py-0.5 rounded-full">선택됨</span>}
+                                            {s.recommended && <span className="text-[10px] bg-teal-500 text-white px-1.5 py-0.5 rounded-full">추천</span>}
+                                            {s.isEvent && <span className="text-[10px] bg-pink-500 text-white px-1.5 py-0.5 rounded-full">이벤트</span>}
+                                          </div>
+                                          <p className="text-xs text-muted-foreground mt-0.5">{s.breakdown}</p>
                                         </div>
-                                        <p className="text-xs text-muted-foreground mt-0.5">{s.breakdown}</p>
+                                        <span className={`font-bold text-sm shrink-0 ml-2 ${isSelected ? 'text-primary' : ''}`}>{fmt(s.total)}</span>
                                       </div>
-                                      <span className={`font-bold text-sm shrink-0 ml-2 ${s.recommended ? 'text-teal-700' : ''}`}>{fmt(s.total)}</span>
-                                    </div>
-                                  </button>
-                                ))}
+                                    </button>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
