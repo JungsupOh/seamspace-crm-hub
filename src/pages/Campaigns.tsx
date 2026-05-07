@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
+import { AmountInput } from '@/components/AmountInput';
 import {
   Plus, ChevronDown, ChevronRight, ArrowRight, ExternalLink,
   Calendar, Users, CheckCircle2, XCircle, Clock, Trash2, Upload,
@@ -575,11 +576,11 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label className="text-xs">예산 (원)</Label>
-              <Input type="number" value={form.budget} onChange={e => f('budget', e.target.value)} placeholder="0" className="h-8 text-sm" />
+              <AmountInput value={form.budget} onValueChange={(n) => f('budget', String(n || ''))} placeholder="0" className="h-8 text-sm" />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">집행 비용 (원)</Label>
-              <Input type="number" value={form.actual_cost} onChange={e => f('actual_cost', e.target.value)} placeholder="0" className="h-8 text-sm" />
+              <AmountInput value={form.actual_cost} onValueChange={(n) => f('actual_cost', String(n || ''))} placeholder="0" className="h-8 text-sm" />
             </div>
           </div>
 

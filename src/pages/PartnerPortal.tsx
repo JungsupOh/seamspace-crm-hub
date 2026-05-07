@@ -15,6 +15,7 @@ import type { PartnerDeal, PartnerDealBuyer } from '@/lib/partner-deals';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
 import { PARTNER_PLAN_LIST, DURATION_OPTIONS, getUnitPrice } from '@/lib/pricing';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AmountInput } from '@/components/AmountInput';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -409,7 +410,7 @@ export default function PartnerPortal() {
                       <td className="px-3 py-2"><input value={ef('buyer_phone')} onChange={e => eset('buyer_phone', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-28" placeholder="연락처" /></td>
                       <td className="px-3 py-2"><input value={ef('plan_name')} onChange={e => eset('plan_name', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-16" /></td>
                       <td className="px-3 py-2"><input type="number" value={efn('quantity') ?? ''} onChange={e => eset('quantity', parseInt(e.target.value) || 1)} className="h-7 text-xs border rounded px-1.5 w-12 text-center" /></td>
-                      <td className="px-3 py-2"><input type="number" value={efn('payment_amount') ?? ''} onChange={e => eset('payment_amount', parseInt(e.target.value) || 0)} className="h-7 text-xs border rounded px-1.5 w-24 text-right" /></td>
+                      <td className="px-3 py-2"><AmountInput value={efn('payment_amount')} onValueChange={(n) => eset('payment_amount', n)} className="h-7 text-xs w-24 text-right" /></td>
                       <td className="px-3 py-2 text-right text-xs text-muted-foreground tabular-nums">{calcCommission(efn('payment_amount') ?? 0, commissionRate).commission.toLocaleString()}</td>
                       <td className="px-3 py-2 text-right text-xs text-muted-foreground tabular-nums">{calcCommission(efn('payment_amount') ?? 0, commissionRate).settlement.toLocaleString()}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{d.license_issue_date || '-'}</td>

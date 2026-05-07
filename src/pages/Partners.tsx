@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
 import { saveDealUsers } from '@/lib/deal-users';
 import { saveDealQuote } from '@/lib/storage';
+import { AmountInput } from '@/components/AmountInput';
 import { Users } from 'lucide-react';
 import { sendInviteEmail } from '@/lib/email';
 import { PeriodFilter } from '@/components/PeriodFilter';
@@ -1542,11 +1543,10 @@ function PartnerDealsSection({
                     <button type="button" onClick={() => { setPaymentAmountManual(false); setDialogForm(p => ({ ...p, payment_amount: itemsSubtotal })); }} className="text-[9px] text-primary hover:underline">자동</button>
                   )}
                 </div>
-                <Input
-                  type="number"
-                  value={dfn('payment_amount') ?? ''}
-                  onChange={e => { setPaymentAmountManual(true); setDialogForm(p => ({ ...p, payment_amount: parseInt(e.target.value) || 0 })); }}
-                  className="h-8 text-sm font-semibold"
+                <AmountInput
+                  value={dfn('payment_amount')}
+                  onValueChange={(n) => { setPaymentAmountManual(true); setDialogForm(p => ({ ...p, payment_amount: n })); }}
+                  className="h-8 text-sm font-semibold text-right"
                 />
               </div>
               <div className="space-y-1 bg-amber-50 rounded p-2 border border-amber-200">
