@@ -1001,13 +1001,18 @@ function PartnerDealsSection({
       }),
   ].sort((a, b) => (b.contract_date ?? '').localeCompare(a.contract_date ?? ''));
 
-  // 카드 합계 (회계 기준):
-  // - 계약금액/수수료/정산금액: 계약일 기준 = 아래 표 합계와 일치
-  // - 매출: 입금일 기준 = 표에 없을 수도 있는 다른 달 계약건이 이번 달 입금된 케이스 포함
+  // 카드 합계 (모두 계약일 기준 — 표 합계와 일치):
+  // - 계약금액/수수료/정산금액: 계약일 기준 전체 합
+  // - 입금액: 계약일 기준 + deposit_date(입금일)가 채워진 행만 합산
   const totalContract   = sumByPeriod(unifiedRows, r => r.contract_date, r => r.payment_amount, dealPeriod, dealCustomFrom, dealCustomTo);
   const totalCommission = sumByPeriod(unifiedRows, r => r.contract_date, r => r.commission_amount, dealPeriod, dealCustomFrom, dealCustomTo);
   const totalSettlement = sumByPeriod(unifiedRows, r => r.contract_date, r => r.settlement_amount, dealPeriod, dealCustomFrom, dealCustomTo);
-  const totalPayment    = sumByPeriod(unifiedRows, r => r.deposit_date,  r => r.payment_amount,    dealPeriod, dealCustomFrom, dealCustomTo);
+  const totalDeposited  = sumByPeriod(
+    unifiedRows.filter(r => r.deposit_date && r.deposit_date.trim() !== ''),
+    r => r.contract_date,
+    r => r.payment_amount,
+    dealPeriod, dealCustomFrom, dealCustomTo,
+  );
 
   // 테이블 행 — 계약일 기준 기간 필터
   const filteredUnified = unifiedRows.filter(r => matchesPeriod(r.contract_date, dealPeriod, dealCustomFrom, dealCustomTo));
@@ -1293,7 +1298,7 @@ function PartnerDealsSection({
         </div>
       </div>
 
-      {/* 실적 요약 카드 — 계약금/수수료/정산은 표 합계(계약일), 매출은 입금일 기준 */}
+      {/* 실적 요약 카드 — 모두 계약일 기준. 입금액은 입금일이 채워진 행만 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="surface-card ring-container p-4">
           <p className="text-xs text-muted-foreground mb-1">계약금액 <span className="text-[10px] text-muted-foreground/60">· 계약일 기준</span></p>
@@ -1308,8 +1313,8 @@ function PartnerDealsSection({
           <p className="text-2xl font-bold tabular-nums text-teal-700">{totalSettlement.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">원</span></p>
         </div>
         <div className="surface-card ring-container p-4">
-          <p className="text-xs text-muted-foreground mb-1">매출 (입금액) <span className="text-[10px] text-muted-foreground/60">· 입금일 기준</span></p>
-          <p className="text-2xl font-bold tabular-nums">{totalPayment.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">원</span></p>
+          <p className="text-xs text-muted-foreground mb-1">입금액 <span className="text-[10px] text-muted-foreground/60">· 입금일 있는 건만</span></p>
+          <p className="text-2xl font-bold tabular-nums">{totalDeposited.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">원</span></p>
         </div>
       </div>
 
