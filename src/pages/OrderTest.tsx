@@ -413,6 +413,7 @@ export default function OrderTest() {
   const [showCustom, setShowCustom] = useState(false);
   const [customMonths, setCustomMonths] = useState('');
   const [savedQuoteNum, setSavedQuoteNum] = useState<string | null>(null);
+  const [savedDealId, setSavedDealId] = useState<string | null>(null);
   const [savingQuote, setSavingQuote] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
 
@@ -582,7 +583,10 @@ export default function OrderTest() {
         });
         if (dealRes.ok) {
           const inserted = await dealRes.json();
-          if (Array.isArray(inserted) && inserted[0]?.id) dealId = inserted[0].id;
+          if (Array.isArray(inserted) && inserted[0]?.id) {
+            dealId = inserted[0].id;
+            setSavedDealId(dealId);
+          }
         } else {
           console.warn('[saveWebQuote] deals INSERT 실패 — deal_quotes만 저장됨', dealRes.status);
         }
@@ -675,6 +679,24 @@ export default function OrderTest() {
           reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
           reader.readAsDataURL(blob);
         });
+
+        // PDF를 딜관리에도 첨부 (deal_files 업로드 + 메타 저장)
+        if (savedDealId && blob) {
+          try {
+            const { uploadDealFile, saveDealFileRecord } = await import('@/lib/storage');
+            const file = new File([blob], fileName, { type: 'application/pdf' });
+            const uploaded = await uploadDealFile(savedDealId, file);
+            await saveDealFileRecord({
+              deal_id:   savedDealId,
+              slot_key:  `quote_${qNum}`,
+              label:     `견적서 ${qNum}`,
+              file_name: uploaded.name,
+              file_url:  uploaded.url,
+            });
+          } catch (e) {
+            console.warn('[sendQuoteEmail] deal_files 업로드 실패 (이메일은 정상)', e);
+          }
+        }
       }
       await sendQuoteEmailLib({
         to:           info.email.trim(),

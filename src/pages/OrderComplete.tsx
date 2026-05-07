@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { CheckCircle2, MessageSquare, FileText, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { notifyWebPayment } from '@/lib/telegram';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -47,6 +48,14 @@ export default function OrderComplete() {
         if (ok && data.coupon_code) {
           setCouponCode(data.coupon_code);
           setConfirmed(true);
+          // 텔레그램 알림 — 결제 완료
+          notifyWebPayment({
+            quoteNumber: session.quoteNumber ?? orderId ?? '',
+            orgName:     session.orgName ?? '',
+            buyerName:   session.customerName ?? '',
+            amount:      Number(amount),
+            method:      'card',
+          });
           // 영수증 이메일은 Toss가 자동 발송 — 중복 방지를 위해 우리 발송 X
         } else {
           setError(data.error ?? '결제 확인 중 오류가 발생했습니다.');

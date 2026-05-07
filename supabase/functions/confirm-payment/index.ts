@@ -106,14 +106,24 @@ Deno.serve(async (req: Request) => {
       console.error("[confirm-payment] 알림톡 예외:", e);
     }
 
-    // ── Step 4-pre: deals 업데이트 — license_send_date + payment_date 자동 기록 ──
-    // 견적서 생성 시 saveWebQuote가 만든 deals 행을 quote_number로 매칭 (없으면 skip)
+    // ── Step 4-pre: deals 업데이트 + deal_licenses INSERT ──
+    // 견적서 생성 시 saveWebQuote가 만든 deals 행을 quote_number로 매칭
     const todayDate = new Date().toISOString().slice(0, 10);
     const matchQuote = quoteNumber ?? orderId;
+    let dealId: string | null = null;
     try {
-      await fetch(
-        `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(matchQuote)}`,
-        {
+      const dealRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(matchQuote)}&select=id&limit=1`,
+        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+      );
+      if (dealRes.ok) {
+        const rows = await dealRes.json() as { id: string }[];
+        dealId = rows[0]?.id ?? null;
+      }
+
+      if (dealId) {
+        // 1) deals PATCH
+        await fetch(`${SUPABASE_URL}/rest/v1/deals?id=eq.${dealId}`, {
           method: "PATCH",
           headers: {
             Authorization: `Bearer ${SUPABASE_KEY}`,
@@ -126,9 +136,37 @@ Deno.serve(async (req: Request) => {
             payment_date:      todayDate,
             deal_stage:        "이용권 발송완료",
           }),
-        },
-      );
-    } catch (e) { console.warn("[confirm-payment] deals 업데이트 실패 (무시):", e); }
+        });
+
+        // 2) deal_licenses INSERT — /이용권관리에 노출 (중복 코드 skip)
+        const checkRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/deal_licenses?coupon_code=eq.${encodeURIComponent(couponCode)}&select=id&limit=1`,
+          { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+        );
+        const dupRows = checkRes.ok ? (await checkRes.json() as { id: string }[]) : [];
+        if (dupRows.length === 0) {
+          await fetch(`${SUPABASE_URL}/rest/v1/deal_licenses`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${SUPABASE_KEY}`,
+              apikey: SUPABASE_KEY,
+              "Content-Type": "application/json",
+              Prefer: "return=minimal",
+            },
+            body: JSON.stringify({
+              deal_id:        dealId,
+              coupon_code:    couponCode,
+              contact_name:   customerName,
+              contact_phone:  customerPhone,
+              org_name:       orgName ?? null,
+              duration:       String(duration),
+              user_count:     userLimit,
+              status:         "대기",
+            }),
+          });
+        }
+      }
+    } catch (e) { console.warn("[confirm-payment] deal/deal_licenses 업데이트 실패 (무시):", e); }
 
     // ── Step 4: Supabase order_payments 저장 ─────────
     await fetch(`${SUPABASE_URL}/rest/v1/order_payments`, {
