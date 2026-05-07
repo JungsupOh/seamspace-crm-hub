@@ -15,6 +15,11 @@ import { LicenseQuickView, type LicenseQuickViewData } from '@/components/Licens
 import { Button } from '@/components/ui/button';
 import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
 import { getRecentSendLogs, buildSentMap, isAlreadySent, canSendUH2821, lastUH2821SentAt, nextUH2821ResendAt, todayUHStage, type AlimtalkRecipient } from '@/lib/alimtalk';
+import { RevenueTrendChart } from '@/components/dashboard/RevenueTrendChart';
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const REST_HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY };
 
 const fmt = (n: number) =>
   n >= 100_000_000 ? `${(n / 100_000_000).toFixed(1)}억`
@@ -97,6 +102,20 @@ export default function Dashboard() {
     queryKey: ['converted_phones_set'],
     queryFn:  getConvertedPhonesSet,
     staleTime: 60 * 1000,
+  });
+
+  // 작년 월별 매출 (부가세 신고 기준 SEED)
+  const currentYear = new Date().getFullYear();
+  const { data: priorYearRows } = useQuery({
+    queryKey: ['prior_year_revenue', currentYear - 1],
+    queryFn: async () => {
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/prior_year_revenue?year=eq.${currentYear - 1}&select=month,amount`,
+        { headers: REST_HEADERS },
+      );
+      return r.ok ? (await r.json() as { month: number; amount: number }[]) : [];
+    },
+    staleTime: 5 * 60 * 1000,
   });
 
   // 발송 다이얼로그 state
@@ -223,9 +242,9 @@ export default function Dashboard() {
     return d.getMonth() === thisMonth && d.getFullYear() === thisYear && l.deal_id === 'mdiary';
   }).length;
 
-  // ── 딜 지표 ─────────────────────────────────────────
+  // ── 딜 지표 — 매출은 현금주의(입금일 기준) ─────────
   const thisMonthDeals = (deals ?? []).filter(d => {
-    const date = d.fields.Contract_Date || d.fields.Payment_Date;
+    const date = d.fields.Payment_Date;
     if (!date) return false;
     const dt = new Date(date);
     return dt.getMonth() === thisMonth && dt.getFullYear() === thisYear;
@@ -292,9 +311,17 @@ export default function Dashboard() {
           <p className="text-3xl font-bold tabular-nums">
             {thisMonthRevenue > 0 ? fmt(thisMonthRevenue) : num(thisMonthDeals.length) + '건'}
           </p>
-          <p className="text-xs text-muted-foreground mt-1">계약 {num(thisMonthDeals.length)}건</p>
+          <p className="text-xs text-muted-foreground mt-1">입금 {num(thisMonthDeals.length)}건 · 입금일 기준</p>
         </div>
       </div>
+
+      {/* 매출 추이 — 작년 / 올해 클러스터 막대 */}
+      <RevenueTrendChart
+        deals={deals ?? []}
+        priorYearRows={priorYearRows ?? []}
+        currentYear={currentYear}
+        currentMonth={thisMonth}
+      />
 
       {/* 영업 액션 필요 — 그룹별 만기 알림 */}
       <div className="surface-card ring-container overflow-hidden">
