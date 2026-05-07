@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDeals, useCreateDeal, useUpdateDeal, useDeleteDeal, useContacts } from '@/hooks/use-airtable';
 import { useResizableColumns } from '@/hooks/useResizableColumns';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
+import { AmountInput } from '@/components/AmountInput';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -2100,7 +2101,7 @@ function DealForm({
                         className="text-[9px] text-primary hover:underline">전체 적용</button>
                     )}
                   </div>
-                  <Input type="number" value={u.student_count ?? ''} onChange={e => updateDealUser(idx, 'student_count', parseInt(e.target.value) || 0)}
+                  <AmountInput value={u.student_count} onValueChange={(n) => updateDealUser(idx, 'student_count', n)}
                     className="h-7 text-xs" />
                 </div>
                 <div>

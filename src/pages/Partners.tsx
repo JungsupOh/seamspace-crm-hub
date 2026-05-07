@@ -1580,7 +1580,7 @@ function PartnerDealsSection({
                       <div><span className="text-[10px] text-muted-foreground">이메일</span><Input value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" /></div>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
-                      <div><span className="text-[10px] text-muted-foreground">학생 수</span><Input type="number" value={b.student_count} onChange={e => updateBuyer(idx, 'student_count', parseInt(e.target.value) || 0)} className="h-7 text-xs" /></div>
+                      <div><span className="text-[10px] text-muted-foreground">학생 수</span><AmountInput value={b.student_count} onValueChange={(n) => updateBuyer(idx, 'student_count', n)} className="h-7 text-xs" /></div>
                       <div><span className="text-[10px] text-muted-foreground">개월 수</span><Input type="number" value={b.month_count} onChange={e => updateBuyer(idx, 'month_count', parseInt(e.target.value) || '')} placeholder="12" className="h-7 text-xs" /></div>
                       <div>
                         <span className="text-[10px] text-muted-foreground">플랜</span>
