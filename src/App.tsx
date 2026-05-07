@@ -16,7 +16,6 @@ import PartnerPortal from "./pages/PartnerPortal";
 import Upload from "./pages/Upload";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
-import Order from "./pages/Order";
 import OrderPay from "./pages/OrderPay";
 import OrderTest from "./pages/OrderTest";
 import OrderComplete from "./pages/OrderComplete";
@@ -147,8 +146,8 @@ function AppRoutes() {
       <Route path="/event/lucky-seven/pay/fail" element={<LuckySevenPayFail />} />
       <Route path="/event/lucky-seven/pay/:quoteNumber" element={<LuckySevenPay />} />
       <Route path="/event/lucky-seven/status" element={<LuckySevenStatus />} />
-      {/* /order는 견적서 번호 lookup 폼, /order/pay/:quoteNumber는 이메일 검증 + Toss 결제 */}
-      <Route path="/order" element={<Order />} />
+      {/* /order — 견적 생성/조회/결제 통합 페이지 (구 /order-test) */}
+      <Route path="/order" element={<OrderTest />} />
       <Route path="/order/pay/:quoteNumber" element={<OrderPay />} />
       <Route path="/order/complete" element={<OrderComplete />} />
       <Route path="/order/fail" element={<OrderFail />} />
@@ -162,10 +161,11 @@ function AppRoutes() {
       <Route path="/shop/lookup" element={<ShopOrderLookup />} />
       {/* 럭키세븐 — Shop 카드 → 상세 이미지 → 신청 폼 진입 */}
       <Route path="/shop/lucky-seven" element={<ShopLuckySeven />} />
-      {/* /order-test는 내부 결제 테스트용 — 실제 Toss 결제 흐름 */}
+      {/* 레거시 호환 — 과거 /order-test로 이메일 발송된 건 그대로 동작 */}
       <Route path="/order-test" element={<OrderTest />} />
       <Route path="/order-test/complete" element={<OrderComplete />} />
       <Route path="/order-test/fail" element={<OrderFail />} />
+      <Route path="/order-test/pay/:quoteNumber" element={<OrderPay />} />
 
       {/* Change password - requires auth but not full layout */}
       <Route

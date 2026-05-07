@@ -308,8 +308,8 @@ function TossPaySection({
         customerName,
         customerEmail: customerEmail || undefined,
         customerMobilePhone: customerPhone.replace(/\D/g, ''),
-        successUrl: `${window.location.origin}/order-test/complete`,
-        failUrl:    `${window.location.origin}/order-test/fail`,
+        successUrl: `${window.location.origin}/order/complete`,
+        failUrl:    `${window.location.origin}/order/fail`,
       });
     } catch (e: unknown) {
       const code = (e as { code?: string })?.code;
@@ -689,7 +689,7 @@ export default function OrderTest() {
       return;
 
       // (legacy 인라인 HTML 폴백 — 향후 제거 예정)
-      const payUrl = `${window.location.origin}/order-test`;
+      const payUrl = `${window.location.origin}/order`;
       const htmlBody = `
         <div style="font-family: 'Malgun Gothic', sans-serif; max-width: 600px; margin: 0 auto; color: #1a1a1a;">
           <div style="background: #0f766e; color: white; padding: 24px 32px; border-radius: 12px 12px 0 0;">

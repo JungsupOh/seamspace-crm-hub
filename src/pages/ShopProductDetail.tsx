@@ -168,7 +168,7 @@ export default function ShopProductDetail() {
           {product.id === 'minddiary' && (
             <div className="mt-3 rounded-lg bg-muted/50 border border-border px-3 py-2.5 text-xs text-muted-foreground">
               <p>📌 위 가격은 <strong>1학급(40명) 1개월</strong> 기준입니다.</p>
-              <p className="mt-1">여러 학급 또는 장기 이용권이 필요하신 경우 <a href="/order-test" className="text-primary hover:underline font-medium">견적 요청 페이지</a>에서 맞춤 견적을 받아보세요.</p>
+              <p className="mt-1">여러 학급 또는 장기 이용권이 필요하신 경우 <a href="/order" className="text-primary hover:underline font-medium">견적 요청 페이지</a>에서 맞춤 견적을 받아보세요.</p>
             </div>
           )}
         </div>
