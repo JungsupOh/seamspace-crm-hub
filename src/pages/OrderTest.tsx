@@ -641,12 +641,54 @@ export default function OrderTest() {
     return null;
   };
 
-  // ── 견적서 이메일 발송 ─────────────────────────
+  // ── 견적서 이메일 발송 (lib/email.ts sendQuoteEmail 통일 사용) ─────
   const sendQuoteEmail = async (qNum: string) => {
     if (!info.email.trim()) return;
     setSendingEmail(true);
     try {
       const planLabel = activePlan.label;
+      const today = new Date().toISOString().slice(0, 10);
+      // 1) 견적서 PDF 생성
+      const { generateQuotePdfBlob } = await import('@/lib/generateQuotePdf');
+      const planNameForS2b = `${activePlan.id === '소수학급' ? '소수학급' : activePlan.id}플랜`;
+      const { blob, fileName } = await generateQuotePdfBlob({
+        quoteNumber: qNum,
+        quoteDate:   today,
+        orgName:     info.orgName,
+        contactName: info.contactName,
+        plan:        planNameForS2b,
+        duration:    info.months,
+        unitPrice,
+        licenseQty:  info.qty,
+        finalValue:  total,
+        supplyPrice: supply,
+        taxAmount:   tax,
+        paymentUrl:  `${window.location.origin}/order/pay/${encodeURIComponent(qNum)}`,
+      }).catch(() => ({ blob: null as Blob | null, fileName: `${qNum}.pdf` }));
+
+      // 2) sendQuoteEmail 호출 (lib/email.ts) — /deals와 동일 양식 + PDF 첨부
+      const { sendQuoteEmail: sendQuoteEmailLib } = await import('@/lib/email');
+      let pdfBase64: string | undefined;
+      if (blob) {
+        pdfBase64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+          reader.readAsDataURL(blob);
+        });
+      }
+      await sendQuoteEmailLib({
+        to:           info.email.trim(),
+        orgName:      info.orgName,
+        contactName:  info.contactName,
+        quoteNumber:  qNum,
+        paymentUrl:   `${window.location.origin}/order/pay/${encodeURIComponent(qNum)}`,
+        attachments:  pdfBase64 ? [{ base64: pdfBase64, fileName }] : undefined,
+        attachmentBase64:   pdfBase64,
+        attachmentFileName: fileName,
+      });
+      return;
+
+      // (legacy 인라인 HTML 폴백 — 향후 제거 예정)
       const payUrl = `${window.location.origin}/order-test`;
       const htmlBody = `
         <div style="font-family: 'Malgun Gothic', sans-serif; max-width: 600px; margin: 0 auto; color: #1a1a1a;">

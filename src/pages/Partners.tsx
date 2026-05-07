@@ -1123,7 +1123,7 @@ function PartnerDealsSection({
       const dealBuyers = dealBuyersMap[deal.id] ?? [];
       const fields: Partial<import('@/types/airtable').DealFields> = {
         Deal_Name: `${deal.school_name ?? '파트너'} - ${partnerName}`,
-        Deal_Stage: '견적',
+        Deal_Stage: '계약체결/구매',  // 파트너가 이미 계약 완료한 건이므로 견적 단계 건너뜀
         Deal_Type: 'New',
         Lead_Source: partnerName,
       };

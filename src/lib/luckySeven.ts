@@ -644,6 +644,20 @@ export async function issueLuckySevenLicenses(group: LSGroupRow, members: LSLead
     headers: { ...HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify({ status: '발급완료' }),
   });
+
+  // 자동 생성된 deal에도 license_send_date 기록 (group_code = quote_number)
+  const today = new Date().toISOString().slice(0, 10);
+  await fetch(
+    `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(group.group_code)}`,
+    {
+      method: 'PATCH',
+      headers: { ...HEADERS, Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        license_send_date: today,
+        deal_stage:        '이용권 발송완료',
+      }),
+    },
+  ).catch(() => {});
 }
 
 // ─────────────────────────────────────────────────

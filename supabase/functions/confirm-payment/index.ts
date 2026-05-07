@@ -106,6 +106,30 @@ Deno.serve(async (req: Request) => {
       console.error("[confirm-payment] 알림톡 예외:", e);
     }
 
+    // ── Step 4-pre: deals 업데이트 — license_send_date + payment_date 자동 기록 ──
+    // 견적서 생성 시 saveWebQuote가 만든 deals 행을 quote_number로 매칭 (없으면 skip)
+    const todayDate = new Date().toISOString().slice(0, 10);
+    const matchQuote = quoteNumber ?? orderId;
+    try {
+      await fetch(
+        `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(matchQuote)}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            apikey: SUPABASE_KEY,
+            "Content-Type": "application/json",
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify({
+            license_send_date: todayDate,
+            payment_date:      todayDate,
+            deal_stage:        "이용권 발송완료",
+          }),
+        },
+      );
+    } catch (e) { console.warn("[confirm-payment] deals 업데이트 실패 (무시):", e); }
+
     // ── Step 4: Supabase order_payments 저장 ─────────
     await fetch(`${SUPABASE_URL}/rest/v1/order_payments`, {
       method: "POST",
