@@ -2976,9 +2976,17 @@ export default function Deals() {
       .filter(p => ['Contract', 'Active_User', 'Closed_Won'].includes(p.stage))
       .reduce((s, p) => s + p.total, 0),
     won: pipeline.find(p => p.stage === 'Closed_Won')?.total ?? 0,
-    // 계약일은 있으나 입금일 없는 미입금 (건수 + 합계)
-    pendingCount: periodDeals
-      .filter(d => d.fields.Contract_Date && !d.fields.Payment_Date).length,
+    // 견적금액: 목록 전체 합계
+    quote: periodDeals.reduce((s, d) => s + (d.fields.Final_Contract_Value ?? 0), 0),
+    // 계약금액: Contract_Date 셋팅된 합계
+    contracted: periodDeals
+      .filter(d => d.fields.Contract_Date)
+      .reduce((s, d) => s + (d.fields.Final_Contract_Value ?? 0), 0),
+    // 입금액: Payment_Date 셋팅된 합계
+    paid: periodDeals
+      .filter(d => d.fields.Payment_Date)
+      .reduce((s, d) => s + (d.fields.Final_Contract_Value ?? 0), 0),
+    // 미입금액: 계약일 있으나 입금일 없는 합계
     pending: periodDeals
       .filter(d => d.fields.Contract_Date && !d.fields.Payment_Date)
       .reduce((s, d) => s + (d.fields.Final_Contract_Value ?? 0), 0),
@@ -3660,23 +3668,34 @@ export default function Deals() {
               </button>
             </div>
           ))}
-          {/* 미입금 — 계약일 있으나 입금일 없는 합계 */}
-          <div className="flex items-center gap-1 flex-shrink-0">
-            <span className="text-amber-300 text-xs mx-1">|</span>
-            <div className="flex flex-col items-center rounded-lg px-3 py-2 min-w-[72px] border border-amber-200 bg-amber-50"
-              title="계약일은 있으나 입금일이 비어있는 딜의 합계">
-              <span className={`text-lg font-bold tabular-nums ${pipelineTotals.pendingCount === 0 ? 'text-amber-300' : 'text-amber-700'}`}>
-                {pipelineTotals.pendingCount.toLocaleString()}
-              </span>
-              <span className="text-[10px] mt-0.5 whitespace-nowrap text-amber-700 font-medium">미입금</span>
-              {pipelineTotals.pending > 0 && (
-                <span className="text-[10px] font-medium mt-0.5 tabular-nums text-amber-700/80">
-                  {pipelineTotals.pending >= 100_000_000
-                    ? `${(pipelineTotals.pending / 100_000_000).toFixed(1)}억`
-                    : `${Math.round(pipelineTotals.pending / 10_000).toLocaleString()}만`}
-                </span>
-              )}
-            </div>
+          {/* 금액 요약 — 견적/계약/입금/미입금 */}
+          <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+            <span className="text-muted-foreground/30 text-xs mx-1">‖</span>
+            {([
+              { label: '견적금액', value: pipelineTotals.quote,      tone: 'slate'  },
+              { label: '계약금액', value: pipelineTotals.contracted, tone: 'blue'   },
+              { label: '입금액',   value: pipelineTotals.paid,       tone: 'teal'   },
+              { label: '미입금액', value: pipelineTotals.pending,    tone: 'amber'  },
+            ] as { label: string; value: number; tone: 'slate' | 'blue' | 'teal' | 'amber' }[]).map(({ label, value, tone }) => {
+              const palette = {
+                slate: 'border-slate-200 bg-slate-50  text-slate-700',
+                blue:  'border-blue-200  bg-blue-50   text-blue-700',
+                teal:  'border-teal-200  bg-teal-50   text-teal-700',
+                amber: 'border-amber-200 bg-amber-50  text-amber-700',
+              }[tone];
+              return (
+                <div key={label}
+                  className={`flex flex-col items-center rounded-lg px-3 py-2 min-w-[88px] border ${palette}`}>
+                  <span className="text-sm font-bold tabular-nums">
+                    {value >= 100_000_000
+                      ? `${(value / 100_000_000).toFixed(1)}억`
+                      : `${Math.round(value / 10_000).toLocaleString()}만`}
+                  </span>
+                  <span className="text-[10px] mt-0.5 whitespace-nowrap font-medium opacity-80">{label}</span>
+                  <span className="text-[9px] mt-0.5 tabular-nums opacity-60">{fmt(value)}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
