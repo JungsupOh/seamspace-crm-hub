@@ -2976,6 +2976,10 @@ export default function Deals() {
       .filter(p => ['Contract', 'Active_User', 'Closed_Won'].includes(p.stage))
       .reduce((s, p) => s + p.total, 0),
     won: pipeline.find(p => p.stage === 'Closed_Won')?.total ?? 0,
+    // 계약일은 있으나 입금일 없는 미입금 합계
+    pending: periodDeals
+      .filter(d => d.fields.Contract_Date && !d.fields.Payment_Date)
+      .reduce((s, d) => s + (d.fields.Final_Contract_Value ?? 0), 0),
   };
 
   // 파일 업로드 (상세보기)
@@ -3536,6 +3540,9 @@ export default function Deals() {
           <h1 className="text-2xl font-semibold">딜 관리</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {periodLabel} · {pipelineTotals.deal}건 · 계약합계 {fmt(pipelineTotals.contract)}
+            {pipelineTotals.pending > 0 && (
+              <span className="ml-1 text-amber-600">· 미입금 {fmt(pipelineTotals.pending)}</span>
+            )}
           </p>
         </div>
         <div className="flex gap-2">
