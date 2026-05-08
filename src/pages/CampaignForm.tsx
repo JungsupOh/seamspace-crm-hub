@@ -15,7 +15,7 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
 
 import { issueCampaignCoupon, type CouponSettings } from '@/lib/campaign-coupons';
-import { issueTrialLicense, type TrialLicenseSettings } from '@/lib/campaign-trial-license';
+import { issueTrialLicense, type TrialLicenseSettings, type IssueOutcome } from '@/lib/campaign-trial-license';
 import { upsertLeadContact } from '@/lib/luckySeven';
 import { DEFAULT_FORM_SETTINGS, type FormSettings } from './Campaigns';
 
@@ -45,6 +45,9 @@ export default function CampaignForm() {
   const [submitting, setSubmitting] = useState(false);
   const [issuedCouponCode, setIssuedCouponCode] = useState<string | null>(null);
   const [issuedTrialCode, setIssuedTrialCode] = useState<string | null>(null);
+  const [trialOutcome, setTrialOutcome] = useState<IssueOutcome | null>(null);
+  const [priorCampaignName, setPriorCampaignName] = useState<string | null>(null);
+  const [priorIssuedAt, setPriorIssuedAt] = useState<string | null>(null);
 
   // 폼 필드
   const [schoolQuery, setSchoolQuery] = useState('');
@@ -294,6 +297,9 @@ export default function CampaignForm() {
           });
           if (result?.code) {
             setIssuedTrialCode(result.code);
+            setTrialOutcome(result.outcome);
+            setPriorCampaignName(result.priorCampaignName ?? null);
+            setPriorIssuedAt(result.priorIssuedAt ?? null);
           }
         } catch (e) {
           console.warn('[CampaignForm] 체험 이용권 발급 실패', e);
@@ -363,11 +369,52 @@ export default function CampaignForm() {
             )}
             <br />{t('잠시만 기다려주세요!', '少々お待ちください。')}
           </p>
-          {issuedTrialCode && (
+          {issuedTrialCode && trialOutcome === 'new' && (
             <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 rounded-lg px-4 py-3 mb-3 text-left">
               <p className="text-xs text-blue-700 dark:text-blue-300 font-medium mb-1">🎫 {t('체험 이용권이 발급되었습니다', 'トライアルコードを発行しました')}</p>
               <p className="font-mono font-bold text-base text-blue-900 dark:text-blue-100">{issuedTrialCode}</p>
               <p className="text-[10px] text-muted-foreground mt-1">{isJP ? '同じコードがメールでも送信されます。' : '알림톡으로 동일한 코드가 발송됩니다.'}</p>
+            </div>
+          )}
+          {issuedTrialCode && trialOutcome === 'resent' && (
+            <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 rounded-lg px-4 py-3 mb-3 text-left">
+              <p className="text-xs text-amber-700 dark:text-amber-300 font-medium mb-1">
+                🔁 {t('이전에 발급된 체험권을 재발송했습니다', '以前発行されたトライアルコードを再送いたしました')}
+              </p>
+              <p className="font-mono font-bold text-base text-amber-900 dark:text-amber-100">{issuedTrialCode}</p>
+              <p className="text-[11px] text-amber-700 mt-1">
+                {priorCampaignName
+                  ? t(`이전 캠페인: ${priorCampaignName}`, `以前のキャンペーン: ${priorCampaignName}`)
+                  : null}
+                {priorIssuedAt && <> · {priorIssuedAt.slice(0, 10)}</>}
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                {t(
+                  '이미 발급받으신 체험권이 있어 재발송됩니다. 동일 번호로 추가 체험권 발급은 불가능합니다.',
+                  '既に発行済みのトライアルコードを再送いたします。同一番号で追加発行はできません。',
+                )}
+              </p>
+            </div>
+          )}
+          {issuedTrialCode && (trialOutcome === 'blocked_used' || trialOutcome === 'blocked_expired') && (
+            <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-200 rounded-lg px-4 py-3 mb-3 text-left">
+              <p className="text-xs text-rose-700 dark:text-rose-300 font-medium mb-1">
+                ⚠ {trialOutcome === 'blocked_used'
+                  ? t('이미 체험권을 사용 중이십니다', '既にトライアルをご利用中です')
+                  : t('이미 체험권 만기가 지났습니다', '以前のトライアルは既に期間満了しています')}
+              </p>
+              <p className="text-[11px] text-rose-700">
+                {priorCampaignName
+                  ? t(`이전 발급: ${priorCampaignName}`, `以前の発行: ${priorCampaignName}`)
+                  : null}
+                {priorIssuedAt && <> · {priorIssuedAt.slice(0, 10)}</>}
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-2">
+                {t(
+                  '체험권은 1인 1회 발급을 원칙으로 합니다. 추가 이용을 원하시면 정식 구매 또는 영업팀에 문의해 주세요.',
+                  'トライアルはお一人様 1 回限りとなります。継続利用をご希望の場合は、正式購入または営業担当までお問い合わせください。',
+                )}
+              </p>
             </div>
           )}
           {issuedCouponCode && (

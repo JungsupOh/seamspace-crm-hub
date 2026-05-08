@@ -1,9 +1,10 @@
-// 캠페인 체험 이용권 — 자동/수동 발급
-// auto_issue=true 인 캠페인에서 리드 등록 시 자동 발급:
-// 1) mDiary 쿠폰 생성 (apiCreateCoupon)
+// 캠페인 체험 이용권 — 자동/수동 발급 (중복 방지 포함)
+// auto_issue=true 인 캠페인에서 리드 등록 시:
+// 0) phone_normalized로 기존 체험권 조회 → 미사용이면 재발송, 사용중/만료면 차단
+// 1) (신규일 때만) mDiary 쿠폰 생성 (apiCreateCoupon)
 // 2) 발송: delivery_channel='alimtalk'(기본) → 카카오 알림톡 / 'email' → 일본어 이메일 (해외 캠페인)
-// 3) campaign_licenses INSERT
-// 4) lead.status='체험발송' UPDATE
+// 3) campaign_licenses INSERT (재발송 시는 skip)
+// 4) lead.status='체험발송' / '체험중복' UPDATE
 // 실패해도 lead 등록 자체는 성공 처리 (각 단계 try/catch)
 
 import { apiCreateCoupon, apiSendCoupon } from '@/lib/coupons';
@@ -41,12 +42,17 @@ interface IssueParams {
   lead: { id: string; name: string; phone: string; phone_normalized: string; email?: string | null; school_name?: string | null };
 }
 
+export type IssueOutcome = 'new' | 'resent' | 'blocked_used' | 'blocked_expired';
+
 interface IssueResult {
   code: string;
+  outcome: IssueOutcome;
   alimtokSent: boolean;
   emailSent: boolean;
   licenseSaved: boolean;
   channel: TrialDeliveryChannel;
+  priorIssuedAt?: string;       // 기존 체험권 발급일 (재발송/차단 시)
+  priorCampaignName?: string;   // 기존 체험권이 발급된 캠페인명 (재발송/차단 시)
 }
 
 // 발급일 기준 만기일 (YYYY-MM-DD)
@@ -54,6 +60,44 @@ function expiresAtFromDuration(months: number): string {
   const d = new Date();
   d.setMonth(d.getMonth() + months);
   return d.toISOString().slice(0, 10);
+}
+
+// 같은 phone_normalized로 이미 발급된 체험권 조회 (모든 캠페인 통합)
+async function findPriorTrial(phoneNormalized: string, currentLeadId: string): Promise<{
+  coupon_code: string;
+  status: string;
+  created_at: string;
+  campaign_name: string;
+} | null> {
+  if (!phoneNormalized) return null;
+  // 1) 같은 phone의 다른 lead들 조회
+  const leadsRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/campaign_leads?phone_normalized=eq.${encodeURIComponent(phoneNormalized)}&select=id&id=neq.${currentLeadId}`,
+    { headers: HEADERS },
+  );
+  if (!leadsRes.ok) return null;
+  const otherLeads = await leadsRes.json() as { id: string }[];
+  if (otherLeads.length === 0) return null;
+  const inFilter = `(${otherLeads.map(l => l.id).join(',')})`;
+  // 2) 해당 lead들의 campaign_licenses 조회 — 가장 최근 1건
+  const licRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/campaign_licenses?lead_id=in.${inFilter}&select=coupon_code,status,created_at,campaign_id&order=created_at.desc&limit=1`,
+    { headers: HEADERS },
+  );
+  if (!licRes.ok) return null;
+  const lics = await licRes.json() as { coupon_code: string; status: string; created_at: string; campaign_id: string }[];
+  if (lics.length === 0) return null;
+  const lic = lics[0];
+  // 3) 캠페인명 조회
+  let campaignName = '';
+  try {
+    const cRes = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${lic.campaign_id}&select=name`, { headers: HEADERS });
+    if (cRes.ok) {
+      const c = await cRes.json() as { name: string }[];
+      campaignName = c[0]?.name ?? '';
+    }
+  } catch { /* ignore */ }
+  return { coupon_code: lic.coupon_code, status: lic.status, created_at: lic.created_at, campaign_name: campaignName };
 }
 
 export async function issueTrialLicense(params: IssueParams): Promise<IssueResult | null> {
@@ -64,9 +108,93 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
   const channel: TrialDeliveryChannel = settings.delivery_channel ?? 'alimtalk';
   const userCount = settings.user_count ?? PLAN_USER_COUNT[plan] ?? 40;
   const description = `${params.campaign.name} ${params.lead.school_name ?? ''} ${params.lead.name} 체험이용권`.trim();
-
   const expireAt = settings.service_expire_at || expiresAtFromDuration(duration_months);
 
+  // ── Step 0: 기존 체험권 보유 여부 확인 (phone_normalized 기준) ──
+  let prior: Awaited<ReturnType<typeof findPriorTrial>> = null;
+  try {
+    prior = await findPriorTrial(params.lead.phone_normalized, params.lead.id);
+  } catch (e) { console.warn('[trial-license] 기존 체험권 조회 실패 — 신규 발급으로 진행', e); }
+
+  // 사용중/만료 → 차단
+  if (prior && (prior.status === '사용중' || prior.status === '만료')) {
+    const outcome: IssueOutcome = prior.status === '만료' ? 'blocked_expired' : 'blocked_used';
+    console.log(`[trial-license] 기존 체험권 ${prior.status} → 발급 차단 (lead=${params.lead.id})`);
+    // lead status 갱신
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${params.lead.id}`, {
+        method: 'PATCH',
+        headers: { ...HEADERS, Prefer: 'return=minimal' },
+        body: JSON.stringify({ status: '체험중복', sent_at: new Date().toISOString() }),
+      });
+    } catch { /* ignore */ }
+    return {
+      code: prior.coupon_code,
+      outcome,
+      alimtokSent: false,
+      emailSent: false,
+      licenseSaved: false,
+      channel,
+      priorIssuedAt: prior.created_at,
+      priorCampaignName: prior.campaign_name,
+    };
+  }
+
+  // 미사용 (대기) → 기존 코드 재발송
+  if (prior && prior.status === '대기') {
+    console.log(`[trial-license] 기존 체험권 미사용 → 재발송 (코드=${prior.coupon_code})`);
+    let alimtokSent = false;
+    let emailSent = false;
+    if (channel === 'email') {
+      if (params.lead.email) {
+        try {
+          await sendTrialLicenseEmailJP({
+            to:           params.lead.email,
+            contactName:  params.lead.name,
+            orgName:      params.lead.school_name ?? undefined,
+            campaignName: params.campaign.name,
+            couponCode:   prior.coupon_code,
+            durationDays: duration_months * 30,
+            userLimit:    userCount,
+            serviceExpireAt: expireAt,
+          });
+          emailSent = true;
+        } catch (e) { console.warn('[trial-license] 재발송(이메일) 실패', e); }
+      }
+    } else {
+      try {
+        await apiSendCoupon({
+          first_name: params.lead.name,
+          phone:      params.lead.phone,
+          coupon_code: prior.coupon_code,
+          user_limit: String(userCount),
+          duration:   String(duration_months),
+          send_type:  'trial',
+        });
+        alimtokSent = true;
+      } catch (e) { console.warn('[trial-license] 재발송(알림톡) 실패', e); }
+    }
+    // lead status — '체험재발송'으로 표기
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${params.lead.id}`, {
+        method: 'PATCH',
+        headers: { ...HEADERS, Prefer: 'return=minimal' },
+        body: JSON.stringify({ status: '체험재발송', sent_at: new Date().toISOString() }),
+      });
+    } catch { /* ignore */ }
+    return {
+      code: prior.coupon_code,
+      outcome: 'resent',
+      alimtokSent,
+      emailSent,
+      licenseSaved: false,  // 신규 INSERT는 안 함
+      channel,
+      priorIssuedAt: prior.created_at,
+      priorCampaignName: prior.campaign_name,
+    };
+  }
+
+  // ── 신규 발급 path ──
   // 1) 쿠폰 생성 — 실패 시 null
   let code = '';
   try {
@@ -115,7 +243,7 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
     }
   }
 
-  // 2) campaign_licenses INSERT
+  // 3) campaign_licenses INSERT
   let licenseSaved = false;
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
@@ -139,7 +267,7 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
     console.warn('[trial-license] campaign_licenses 저장 실패', e);
   }
 
-  // 3) lead status='체험발송'
+  // 4) lead status='체험발송'
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${params.lead.id}`, {
       method: 'PATCH',
@@ -150,5 +278,5 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
     console.warn('[trial-license] lead status 갱신 실패', e);
   }
 
-  return { code, alimtokSent, emailSent, licenseSaved, channel };
+  return { code, outcome: 'new', alimtokSent, emailSent, licenseSaved, channel };
 }
