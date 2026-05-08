@@ -42,7 +42,10 @@ export interface CustomQuestion {
   type: 'text' | 'textarea';
 }
 
+export type CampaignLocale = 'ko' | 'ja';
+
 export interface FormSettings {
+  locale?:     CampaignLocale;     // 'ko' (기본) | 'ja' (해외 캠페인)
   school?:     { enabled: boolean; mode: SchoolMode; label?: string };
   role?:       { enabled: boolean; label?: string };
   source?:     { enabled: boolean };
@@ -52,6 +55,7 @@ export interface FormSettings {
 
 // 기본값 — form_settings가 NULL인 캠페인에 적용 (legacy 호환)
 export const DEFAULT_FORM_SETTINGS: Required<FormSettings> = {
+  locale:     'ko',
   school:     { enabled: true,  mode: 'k12_search', label: '학교명' },
   role:       { enabled: true,  label: '담당 업무' },
   source:     { enabled: true },
@@ -379,10 +383,12 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
     duration_months:  1,
     auto_issue:       false,
     service_expire_at: '',
+    delivery_channel: 'alimtalk',
   });
   const [formCfg, setFormCfg] = useState<Required<FormSettings>>(() => {
     const fs = initial?.form_settings;
     return {
+      locale:     fs?.locale     ?? DEFAULT_FORM_SETTINGS.locale,
       school:     fs?.school     ?? { ...DEFAULT_FORM_SETTINGS.school },
       role:       fs?.role       ?? { ...DEFAULT_FORM_SETTINGS.role },
       source:     fs?.source     ?? { ...DEFAULT_FORM_SETTINGS.source },
@@ -390,6 +396,21 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
       custom_questions: fs?.custom_questions ?? [],
     };
   });
+  // locale 변경 시 자동 분기:
+  // - ja면 학교 모드는 free_text 강제, trial 채널은 email 강제
+  // - ko로 돌아오면 사용자 선택을 다시 살림 (단, 강제 분기 직전 값은 보존하지 않음 — 단순화)
+  const setLocale = (loc: CampaignLocale) => {
+    setFormCfg(c => ({
+      ...c,
+      locale: loc,
+      school: { ...c.school, mode: loc === 'ja' ? 'free_text' : c.school.mode },
+    }));
+    if (loc === 'ja') {
+      setTrial(t => ({ ...t, delivery_channel: 'email' }));
+    } else {
+      setTrial(t => ({ ...t, delivery_channel: t.delivery_channel ?? 'alimtalk' }));
+    }
+  };
   const updateCustomQ = (i: number, patch: Partial<CustomQuestion>) =>
     setFormCfg(c => ({ ...c, custom_questions: c.custom_questions.map((q, idx) => idx === i ? { ...q, ...patch } : q) }));
   const addCustomQ = () =>
@@ -441,10 +462,16 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
       }
       // form_settings 정리 — 비활성 자유질문 제거, 라벨 trim
       const cleanedFormSettings: FormSettings = {
-        school: { ...formCfg.school, label: formCfg.school.label?.trim() || '학교명' },
-        role:   { ...formCfg.role,   label: formCfg.role.label?.trim()   || '담당 업무' },
+        locale: formCfg.locale ?? 'ko',
+        // ja면 학교명 모드는 free_text 강제 (NEIS 일본 미지원)
+        school: {
+          ...formCfg.school,
+          mode:  formCfg.locale === 'ja' ? 'free_text' : formCfg.school.mode,
+          label: formCfg.school.label?.trim() || (formCfg.locale === 'ja' ? '学校名・組織名' : '학교명'),
+        },
+        role:   { ...formCfg.role,   label: formCfg.role.label?.trim()   || (formCfg.locale === 'ja' ? 'ご担当・役職' : '담당 업무') },
         source: { ...formCfg.source },
-        usage_plan: { ...formCfg.usage_plan, label: formCfg.usage_plan.label?.trim() || '활용 방안' },
+        usage_plan: { ...formCfg.usage_plan, label: formCfg.usage_plan.label?.trim() || (formCfg.locale === 'ja' ? '利用目的・関心領域' : '활용 방안') },
         custom_questions: formCfg.custom_questions
           .map(q => ({ label: q.label.trim(), type: q.type }))
           .filter(q => q.label.length > 0),
@@ -456,6 +483,8 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
         user_count: PLAN_USER_COUNT[trial.plan] ?? trial.user_count,
         duration_months: Number(trial.duration_months) || 1,
         service_expire_at: trial.service_expire_at?.trim() || undefined,
+        // ja면 발송 채널은 email 강제
+        delivery_channel: formCfg.locale === 'ja' ? 'email' : (trial.delivery_channel ?? 'alimtalk'),
       } : null;
 
       const body: Partial<Campaign> = {
@@ -492,8 +521,8 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
         </DialogHeader>
         <div className="space-y-3 py-2">
           {/* 기본 정보 */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1 col-span-2">
               <Label className="text-xs">캠페인명 *</Label>
               <Input value={form.name} onChange={e => f('name', e.target.value)} placeholder="2026 봄학기 체험" className="h-8 text-sm" />
             </div>
@@ -508,6 +537,23 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          {/* 언어 — ko(한국) / ja(해외) */}
+          <div className="space-y-1">
+            <Label className="text-xs">언어</Label>
+            <Select value={formCfg.locale ?? 'ko'} onValueChange={v => setLocale(v as CampaignLocale)}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ko">한국어 (ko) — 카카오 알림톡 발송</SelectItem>
+                <SelectItem value="ja">日本語 (ja) — 이메일 발송 (해외)</SelectItem>
+              </SelectContent>
+            </Select>
+            {formCfg.locale === 'ja' && (
+              <p className="text-[10px] text-amber-700">
+                일본어 캠페인은 학교명=자유입력, 트라이얼 발송 채널=이메일로 자동 고정됩니다.
+              </p>
+            )}
           </div>
 
           <div className="space-y-1">
@@ -618,6 +664,7 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                     <Select
                       value={formCfg.school.mode}
                       onValueChange={v => setFormCfg(c => ({ ...c, school: { ...c.school, mode: v as SchoolMode } }))}
+                      disabled={formCfg.locale === 'ja'}
                     >
                       <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -626,6 +673,9 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                         <SelectItem value="mixed"      className="text-xs">초중고+대학 (혼합)</SelectItem>
                       </SelectContent>
                     </Select>
+                    {formCfg.locale === 'ja' && (
+                      <p className="text-[10px] text-amber-700 mt-0.5">日本語 캠페인은 자유입력 고정 (NEIS는 한국 전용)</p>
+                    )}
                   </div>
                 </div>
               )}
@@ -774,10 +824,46 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                     className="accent-primary"
                   />
                   <span className="text-xs">
-                    <strong>리드 등록 시 자동 발급 + 알림톡 발송</strong>
+                    <strong>리드 등록 시 자동 발급</strong>
                     <span className="text-muted-foreground ml-1">— 체크 해제 시 어드민이 수동 발급</span>
                   </span>
                 </label>
+                {/* 발송 채널 — 한국=알림톡, 해외=이메일 */}
+                <div className="space-y-1.5">
+                  <Label className="text-[10px]">발송 채널</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className={`flex items-start gap-2 cursor-pointer rounded border p-2 ${(trial.delivery_channel ?? 'alimtalk') === 'alimtalk' ? 'border-primary bg-primary/5' : 'border-border bg-card'} ${formCfg.locale === 'ja' ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                      <input
+                        type="radio"
+                        name="delivery_channel"
+                        checked={(trial.delivery_channel ?? 'alimtalk') === 'alimtalk'}
+                        disabled={formCfg.locale === 'ja'}
+                        onChange={() => setTrial(t => ({ ...t, delivery_channel: 'alimtalk' }))}
+                        className="mt-0.5 accent-primary"
+                      />
+                      <span className="text-xs">
+                        <strong>카카오 알림톡</strong>
+                        <span className="block text-[10px] text-muted-foreground mt-0.5">한국 번호 한정</span>
+                      </span>
+                    </label>
+                    <label className={`flex items-start gap-2 cursor-pointer rounded border p-2 ${trial.delivery_channel === 'email' ? 'border-primary bg-primary/5' : 'border-border bg-card'}`}>
+                      <input
+                        type="radio"
+                        name="delivery_channel"
+                        checked={trial.delivery_channel === 'email'}
+                        onChange={() => setTrial(t => ({ ...t, delivery_channel: 'email' }))}
+                        className="mt-0.5 accent-primary"
+                      />
+                      <span className="text-xs">
+                        <strong>이메일</strong>
+                        <span className="block text-[10px] text-muted-foreground mt-0.5">해외 캠페인용 (replyTo: contact@)</span>
+                      </span>
+                    </label>
+                  </div>
+                  {formCfg.locale === 'ja' && (
+                    <p className="text-[10px] text-amber-700">언어=日本語 캠페인은 이메일로 자동 고정됩니다.</p>
+                  )}
+                </div>
               </div>
             )}
           </div>

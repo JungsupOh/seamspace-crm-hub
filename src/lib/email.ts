@@ -305,3 +305,111 @@ export async function sendPaymentReceiptEmail(params: {
     { reply_to: 'sales@tebahsoft.com' },
   );
 }
+
+// ── 일본어 레이아웃 (해외 캠페인 전용) ────────────────
+function layoutJP(content: string): string {
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seamspace</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN','Segoe UI',sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+        <tr>
+          <td style="background:#0f172a;padding:24px 40px;text-align:center;">
+            <img
+              src="https://awosikecivzhwisqzlds.supabase.co/storage/v1/object/public/assets/logo.png"
+              alt="Seamspace"
+              width="200"
+              style="display:inline-block;height:auto;max-width:200px;"
+            />
+          </td>
+        </tr>
+        <tr><td style="background:#6366f1;height:4px;font-size:0;line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:36px 40px 32px;">${content}</td></tr>
+        <tr>
+          <td style="padding:20px 40px;border-top:1px solid #e4e4e7;background:#fafafa;">
+            <p style="margin:0;font-size:11px;color:#a1a1aa;line-height:1.6;">
+              このメールは Seamspace CRM システムから自動送信されています。<br/>
+              お問い合わせ: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+// ── 일본어 트라이얼 안내 메일 (해외 캠페인) ───────────
+// EDIX Japan 등 해외 전시회/캠페인 리드에게 발송하는 30일 무료 체험 코드 안내.
+// replyTo는 contact@tebahsoft.com (해외 문의 채널), cc는 기본 sales@tebahsoft.com (가시성).
+export async function sendTrialLicenseEmailJP(params: {
+  to: string;
+  contactName: string;
+  orgName?: string;
+  campaignName: string;
+  couponCode: string;
+  durationDays: number;
+  userLimit: number;
+  serviceExpireAt?: string;  // YYYY-MM-DD
+}): Promise<void> {
+  const expireLine = params.serviceExpireAt
+    ? `${params.serviceExpireAt} まで有効`
+    : `発行日から ${params.durationDays} 日間有効`;
+
+  const html = layoutJP(`
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">${params.contactName} 様、ご来訪ありがとうございました 🎌</h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
+      <strong>Seamspace（mDiary）</strong>にご関心をお寄せいただき、誠にありがとうございます。<br/>
+      ${params.campaignName} のご登録ありがとうございました。下記のトライアルコードを発行いたしました。
+    </p>
+
+    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">トライアルコード</p>
+    ${codeBox(params.couponCode)}
+    <p style="margin:0 0 20px;font-size:12px;color:#a1a1aa;text-align:center;">
+      ${expireLine} ・ 最大 ${params.userLimit} ユーザーまでご利用可能
+    </p>
+
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:8px;padding:16px;margin:8px 0 24px;">
+      <tr><td style="padding:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">▼ ご利用方法</td></tr>
+      <tr><td style="padding:2px 0;font-size:13px;color:#334155;line-height:1.7;">1. <a href="https://m.seamspace.co.kr" style="color:#6366f1;">https://m.seamspace.co.kr</a> にアクセス</td></tr>
+      <tr><td style="padding:2px 0;font-size:13px;color:#334155;line-height:1.7;">2. 言語設定で「日本語」を選択</td></tr>
+      <tr><td style="padding:2px 0;font-size:13px;color:#334155;line-height:1.7;">3. 学校/組織アカウント登録時に上記コードを入力</td></tr>
+      <tr><td style="padding:2px 0;font-size:13px;color:#334155;line-height:1.7;">4. すぐに mDiary をご利用いただけます</td></tr>
+    </table>
+
+    <div style="background:#fef3c7;border-left:3px solid #f59e0b;padding:12px 16px;border-radius:6px;margin:0 0 24px;">
+      <p style="margin:0 0 6px;font-size:13px;color:#78350f;font-weight:600;">📅 デモミーティングをご希望の場合</p>
+      <p style="margin:0;font-size:13px;color:#78350f;line-height:1.7;">
+        オンラインで mDiary の活用方法をご案内いたします。<br/>
+        <strong>このメールにそのままご返信ください</strong> — 担当者よりご連絡差し上げます。
+      </p>
+    </div>
+
+    <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">ご不明な点がございましたら、お気軽にお問い合わせください。</p>
+    <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
+      お問い合わせ先: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+    </p>
+
+    <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
+      何卒よろしくお願い申し上げます。<br/>
+      テバソフト株式会社
+    </p>
+  `);
+
+  await sendEmail(
+    params.to,
+    `【Seamspace】${params.campaignName} トライアルコードのご案内${params.orgName ? ` - ${params.orgName}` : ''}`,
+    html,
+    {
+      reply_to: 'contact@tebahsoft.com',
+      // cc는 default(sales@tebahsoft.com) 그대로 — 본사 가시성
+    },
+  );
+}

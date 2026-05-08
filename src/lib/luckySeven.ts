@@ -199,8 +199,19 @@ export async function fetchLuckySevenCampaign(slug: string) {
 // 신규면 contact_type='리드' 생성, 기존이면 빈 필드만 보강 (contact_type은 절대 덮어쓰지 않음)
 // ─────────────────────────────────────────────────
 
-export async function upsertLeadContact(member: { name: string; phone: string; email: string; orgName: string }): Promise<string> {
-  const phoneNorm = normalizePhone(member.phone);
+import { normalizePhone as normalizePhoneI18n, type PhoneCountry } from './phone';
+
+export interface UpsertLeadContactOptions {
+  country?: PhoneCountry;     // 'kr' (기본) | 'jp' — 전화 정규화 국가
+  leadSource?: string;        // 신규 contact insert 시 기록 (예: 'EDIX Japan 2026')
+}
+
+export async function upsertLeadContact(
+  member: { name: string; phone: string; email: string; orgName: string },
+  options: UpsertLeadContactOptions = {},
+): Promise<string> {
+  const country = options.country ?? 'kr';
+  const phoneNorm = normalizePhoneI18n(member.phone, country);
 
   const findRes = await fetch(
     `${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${encodeURIComponent(phoneNorm)}&select=id,name,email,org_name,contact_type`,
@@ -235,7 +246,7 @@ export async function upsertLeadContact(member: { name: string; phone: string; e
       email: member.email,
       org_name: member.orgName,
       contact_type: '리드',
-      lead_source: '럭키세븐 5월',
+      lead_source: options.leadSource ?? '럭키세븐 5월',
     }),
   });
   if (!insertRes.ok) throw new Error('contacts insert 실패');

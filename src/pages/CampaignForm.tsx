@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Loader2, Search, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
 import { notifyCampaignLead } from '@/lib/telegram';
+import { normalizePhone } from '@/lib/phone';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -15,6 +16,7 @@ const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY,
 
 import { issueCampaignCoupon, type CouponSettings } from '@/lib/campaign-coupons';
 import { issueTrialLicense, type TrialLicenseSettings } from '@/lib/campaign-trial-license';
+import { upsertLeadContact } from '@/lib/luckySeven';
 import { DEFAULT_FORM_SETTINGS, type FormSettings } from './Campaigns';
 
 interface Campaign {
@@ -66,12 +68,16 @@ export default function CampaignForm() {
 
   // form_settings 결정 — 캠페인이 명시적 설정 없으면 기본값
   const formCfg: Required<FormSettings> = {
+    locale:     campaign?.form_settings?.locale     ?? DEFAULT_FORM_SETTINGS.locale,
     school:     campaign?.form_settings?.school     ?? DEFAULT_FORM_SETTINGS.school,
     role:       campaign?.form_settings?.role       ?? DEFAULT_FORM_SETTINGS.role,
     source:     campaign?.form_settings?.source     ?? DEFAULT_FORM_SETTINGS.source,
     usage_plan: campaign?.form_settings?.usage_plan ?? DEFAULT_FORM_SETTINGS.usage_plan,
     custom_questions: campaign?.form_settings?.custom_questions ?? [],
   };
+  const isJP = formCfg.locale === 'ja';
+  // 일본어/한국어 문자열 헬퍼 (i18n 라이브러리 도입 없이 인라인)
+  const t = (ko: string, ja: string) => (isJP ? ja : ko);
 
   // 캠페인 로드 시 customAnswers 길이 맞춤
   useEffect(() => {
@@ -158,24 +164,32 @@ export default function CampaignForm() {
   const handleSubmit = async () => {
     if (!campaign) return;
     // 항상 필수: 이름/연락처/이메일
-    if (!name.trim()) { alert('성함을 입력해주세요.'); return; }
-    if (!phone.trim()) { alert('연락처를 입력해주세요.'); return; }
-    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { alert('이메일을 정확히 입력해주세요.'); return; }
+    if (!name.trim()) { alert(t('성함을 입력해주세요.', 'お名前を入力してください。')); return; }
+    if (!phone.trim()) { alert(t('연락처를 입력해주세요.', '電話番号を入力してください。')); return; }
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      alert(t('이메일을 정확히 입력해주세요.', 'メールアドレスを正しく入力してください。')); return;
+    }
     // 옵션 필드 — 켜져있을 때만 검증
     if (formCfg.school.enabled && !schoolInfo && !schoolQuery.trim()) {
-      alert(`${formCfg.school.label || '학교명'}을(를) 입력해주세요.`); return;
+      alert(t(
+        `${formCfg.school.label || '학교명'}을(를) 입력해주세요.`,
+        `${formCfg.school.label || '学校名・組織名'} を入力してください。`,
+      )); return;
     }
     if (formCfg.role.enabled && !position.trim()) {
-      alert(`${formCfg.role.label || '담당 업무'}을(를) 입력해주세요.`); return;
+      alert(t(
+        `${formCfg.role.label || '담당 업무'}을(를) 입력해주세요.`,
+        `${formCfg.role.label || 'ご担当・役職'} を入力してください。`,
+      )); return;
     }
-    if (formCfg.source.enabled) {
+    if (formCfg.source.enabled && !isJP) {
       if (!source) { alert('소개받으신 경로를 선택해주세요.'); return; }
       if (source === '기타' && !sourceEtc.trim()) { alert('기타 경로를 직접 입력해주세요.'); return; }
     }
 
     setSubmitting(true);
     try {
-      const phoneNorm = phone.replace(/\D/g, '');
+      const phoneNorm = normalizePhone(phone, isJP ? 'jp' : 'kr');
       const isExisting = await checkExistingCustomer(phoneNorm);
 
       // custom_fields 정리
@@ -213,6 +227,24 @@ export default function CampaignForm() {
       if (!res.ok) throw new Error('제출 실패');
       const insertedRows = await res.json().catch(() => []);
       const insertedLead: { id?: string } = Array.isArray(insertedRows) ? insertedRows[0] ?? {} : {};
+
+      // contacts upsert — 캠페인 리드도 contacts에 자동 등록 (메모리 정책)
+      try {
+        await upsertLeadContact(
+          {
+            name: payload.name,
+            phone: payload.phone,
+            email: payload.email ?? '',
+            orgName: payload.school_name ?? '',
+          },
+          {
+            country: isJP ? 'jp' : 'kr',
+            leadSource: campaign.name,  // 캠페인명을 lead_source로
+          },
+        );
+      } catch (e) {
+        console.warn('[CampaignForm] contacts upsert 실패', e);
+      }
 
       // 텔레그램 알림
       notifyCampaignLead({
@@ -256,6 +288,7 @@ export default function CampaignForm() {
               name: payload.name,
               phone: payload.phone,
               phone_normalized: phoneNorm,
+              email: payload.email,
               school_name: payload.school_name,
             },
           });
@@ -269,7 +302,7 @@ export default function CampaignForm() {
 
       setSubmitted(true);
     } catch {
-      alert('제출 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      alert(t('제출 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.', '送信中にエラーが発生しました。しばらくしてから再度お試しください。'));
     } finally {
       setSubmitting(false);
     }
@@ -289,8 +322,8 @@ export default function CampaignForm() {
       <div className="min-h-screen flex items-center justify-center bg-muted/20 p-4">
         <div className="max-w-md w-full bg-card rounded-xl p-8 text-center shadow-lg ring-1 ring-border">
           <AlertTriangle className="h-12 w-12 text-amber-500 mx-auto mb-3" />
-          <h1 className="text-xl font-semibold mb-2">캠페인을 찾을 수 없습니다</h1>
-          <p className="text-sm text-muted-foreground">주소가 올바른지 확인해주세요.</p>
+          <h1 className="text-xl font-semibold mb-2">{t('캠페인을 찾을 수 없습니다', 'キャンペーンが見つかりません')}</h1>
+          <p className="text-sm text-muted-foreground">{t('주소가 올바른지 확인해주세요.', 'URL をご確認ください。')}</p>
         </div>
       </div>
     );
@@ -301,12 +334,14 @@ export default function CampaignForm() {
       <div className="min-h-screen flex items-center justify-center bg-muted/20 p-4">
         <div className="max-w-md w-full bg-card rounded-xl p-8 text-center shadow-lg ring-1 ring-border">
           {campaign.image_url && <img src={campaign.image_url} alt="" className="max-w-[200px] mx-auto mb-4 rounded" />}
-          <h1 className="text-xl font-semibold mb-2">⏰ 종료된 캠페인입니다</h1>
+          <h1 className="text-xl font-semibold mb-2">⏰ {t('종료된 캠페인입니다', '終了したキャンペーンです')}</h1>
           <p className="text-sm text-muted-foreground mb-1">
-            이 캠페인은 {campaign.end_date || '이미'} 종료되었습니다.
+            {isJP
+              ? `このキャンペーンは ${campaign.end_date || '既に'} 終了しました。`
+              : `이 캠페인은 ${campaign.end_date || '이미'} 종료되었습니다.`}
           </p>
           <p className="text-xs text-muted-foreground mt-4">
-            다른 캠페인에 관심이 있으시면 문의 바랍니다.
+            {t('다른 캠페인에 관심이 있으시면 문의 바랍니다.', '他のキャンペーンにご関心がございましたら、お問い合わせください。')}
           </p>
         </div>
       </div>
@@ -314,31 +349,36 @@ export default function CampaignForm() {
   }
 
   if (submitted) {
+    const contactEmail = isJP ? 'contact@tebahsoft.com' : 'sales@tebahsoft.com';
+    const sentVia = isJP ? 'メール' : '알림톡';
     return (
       <div className="min-h-screen flex items-center justify-center bg-muted/20 p-4">
         <div className="max-w-md w-full bg-card rounded-xl p-8 text-center shadow-lg ring-1 ring-border">
           <CheckCircle2 className="h-16 w-16 text-teal-500 mx-auto mb-4" />
-          <h1 className="text-xl font-semibold mb-2">신청이 완료되었습니다</h1>
+          <h1 className="text-xl font-semibold mb-2">{t('신청이 완료되었습니다', 'ご登録ありがとうございました')}</h1>
           <p className="text-sm text-muted-foreground mb-4">
-            입력하신 연락처로 이용권이 발송될 예정입니다.
-            <br />잠시만 기다려주세요!
+            {t(
+              '입력하신 연락처로 이용권이 발송될 예정입니다.',
+              'ご入力いただいたメールアドレスにトライアルコードをお送りいたします。',
+            )}
+            <br />{t('잠시만 기다려주세요!', '少々お待ちください。')}
           </p>
           {issuedTrialCode && (
             <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 rounded-lg px-4 py-3 mb-3 text-left">
-              <p className="text-xs text-blue-700 dark:text-blue-300 font-medium mb-1">🎫 체험 이용권이 발급되었습니다</p>
+              <p className="text-xs text-blue-700 dark:text-blue-300 font-medium mb-1">🎫 {t('체험 이용권이 발급되었습니다', 'トライアルコードを発行しました')}</p>
               <p className="font-mono font-bold text-base text-blue-900 dark:text-blue-100">{issuedTrialCode}</p>
-              <p className="text-[10px] text-muted-foreground mt-1">알림톡으로 동일한 코드가 발송됩니다.</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{isJP ? '同じコードがメールでも送信されます。' : '알림톡으로 동일한 코드가 발송됩니다.'}</p>
             </div>
           )}
           {issuedCouponCode && (
             <div className="bg-teal-50 dark:bg-teal-950/20 border border-teal-200 rounded-lg px-4 py-3 mb-4 text-left">
-              <p className="text-xs text-teal-700 dark:text-teal-300 font-medium mb-1">🎁 할인 쿠폰이 발급되었습니다</p>
+              <p className="text-xs text-teal-700 dark:text-teal-300 font-medium mb-1">🎁 {t('할인 쿠폰이 발급되었습니다', 'クーポンを発行しました')}</p>
               <p className="font-mono font-bold text-base text-teal-900 dark:text-teal-100">{issuedCouponCode}</p>
-              <p className="text-[10px] text-muted-foreground mt-1">알림톡으로도 동일한 코드가 발송됩니다.</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{isJP ? `同じコードが${sentVia}でも送信されます。` : '알림톡으로도 동일한 코드가 발송됩니다.'}</p>
             </div>
           )}
           <p className="text-xs text-muted-foreground">
-            문의: sales@tebahsoft.com
+            {t('문의', 'お問い合わせ')}: {contactEmail}
           </p>
         </div>
       </div>
@@ -365,31 +405,34 @@ export default function CampaignForm() {
 
         {/* 폼 */}
         <div className="px-6 py-5 space-y-4">
-          {/* 학교/기관명 (옵션) */}
+          {/* 학교/기관명 (옵션) — 일본어 캠페인에서는 항상 free_text */}
           {formCfg.school.enabled && (
             <div ref={schoolRef} className="relative space-y-1.5">
-              <Label className="text-xs">{formCfg.school.label || '학교명'} <span className="text-destructive">*</span></Label>
+              <Label className="text-xs">{formCfg.school.label || t('학교명', '学校名・組織名')} <span className="text-destructive">*</span></Label>
               <div className="relative">
                 <Input
                   value={schoolQuery}
-                  onChange={e => formCfg.school.mode === 'free_text'
+                  onChange={e => (isJP || formCfg.school.mode === 'free_text')
                     ? (setSchoolQuery(e.target.value), setSchoolInfo(null))
                     : handleSchoolSearch(e.target.value)}
                   onFocus={() => {
-                    if (formCfg.school.mode !== 'free_text' && schoolResults.length > 0) setShowSchoolDropdown(true);
+                    if (!isJP && formCfg.school.mode !== 'free_text' && schoolResults.length > 0) setShowSchoolDropdown(true);
                   }}
-                  placeholder={formCfg.school.mode === 'free_text'
-                    ? `${formCfg.school.label || '기관명'}을 입력하세요`
+                  placeholder={(isJP || formCfg.school.mode === 'free_text')
+                    ? t(
+                        `${formCfg.school.label || '기관명'}을 입력하세요`,
+                        `${formCfg.school.label || '学校名・組織名'}を入力してください`,
+                      )
                     : `${formCfg.school.label || '학교명'}을 입력하세요 (2자 이상)`}
                   className="h-10 text-sm pr-9"
                 />
                 <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
-                  {formCfg.school.mode !== 'free_text' && (
+                  {!isJP && formCfg.school.mode !== 'free_text' && (
                     schoolSearching ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : <Search className="h-4 w-4 text-muted-foreground" />
                   )}
                 </div>
               </div>
-              {formCfg.school.mode !== 'free_text' && showSchoolDropdown && schoolResults.length > 0 && (
+              {!isJP && formCfg.school.mode !== 'free_text' && showSchoolDropdown && schoolResults.length > 0 && (
                 <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg max-h-56 overflow-y-auto">
                   {schoolResults.map((s, i) => (
                     <button key={i} type="button" onClick={() => selectSchool(s)}
@@ -406,7 +449,7 @@ export default function CampaignForm() {
                   {schoolInfo.name} ({schoolInfo.kind})
                 </p>
               )}
-              {formCfg.school.mode === 'mixed' && schoolQuery && !schoolInfo && (
+              {!isJP && formCfg.school.mode === 'mixed' && schoolQuery && !schoolInfo && (
                 <p className="text-[10px] text-muted-foreground">
                   검색 결과에 없으면 입력한 그대로 저장됩니다 (대학교/기관 등).
                 </p>
@@ -417,32 +460,33 @@ export default function CampaignForm() {
           {/* 직책/전공 (옵션) */}
           {formCfg.role.enabled && (
             <div className="space-y-1.5">
-              <Label className="text-xs">{formCfg.role.label || '담당 업무'} <span className="text-destructive">*</span></Label>
+              <Label className="text-xs">{formCfg.role.label || t('담당 업무', 'ご担当・役職')} <span className="text-destructive">*</span></Label>
               <Input value={position} onChange={e => setPosition(e.target.value)}
-                placeholder="예: 담임, 상담교사, 컴퓨터교육과" className="h-10 text-sm" />
+                placeholder={t('예: 담임, 상담교사, 컴퓨터교육과', '例: 担任、教務主任、ICT 担当')} className="h-10 text-sm" />
             </div>
           )}
 
           {/* 성함 (필수) */}
           <div className="space-y-1.5">
-            <Label className="text-xs">성함 <span className="text-destructive">*</span></Label>
+            <Label className="text-xs">{t('성함', 'お名前')} <span className="text-destructive">*</span></Label>
             <Input value={name} onChange={e => setName(e.target.value)}
-              placeholder="홍길동" className="h-10 text-sm" />
+              placeholder={t('홍길동', '山田 太郎')} className="h-10 text-sm" />
           </div>
 
           {/* 연락처 (필수) */}
           <div className="space-y-1.5">
             <Label className="text-xs">
-              연락처 <span className="text-destructive">*</span>
-              <span className="text-muted-foreground ml-1">(알림톡 발송)</span>
+              {t('연락처', '電話番号')} <span className="text-destructive">*</span>
+              <span className="text-muted-foreground ml-1">{t('(알림톡 발송)', '(ご連絡用)')}</span>
             </Label>
-            <Input value={phone} onChange={e => setPhone(formatPhone(e.target.value))}
-              placeholder="010-0000-0000" type="tel" className="h-10 text-sm" />
+            <Input value={phone}
+              onChange={e => setPhone(isJP ? e.target.value : formatPhone(e.target.value))}
+              placeholder={t('010-0000-0000', '090-1234-5678')} type="tel" className="h-10 text-sm" />
           </div>
 
           {/* 이메일 (필수) */}
           <div className="space-y-1.5">
-            <Label className="text-xs">이메일 <span className="text-destructive">*</span></Label>
+            <Label className="text-xs">{t('이메일', 'メールアドレス')} <span className="text-destructive">*</span></Label>
             <Input value={email} onChange={e => setEmail(e.target.value)}
               placeholder="email@example.com" type="email" className="h-10 text-sm" />
           </div>
@@ -450,11 +494,11 @@ export default function CampaignForm() {
           {/* 활용 방안 (옵션, 서술형) */}
           {formCfg.usage_plan.enabled && (
             <div className="space-y-1.5">
-              <Label className="text-xs">{formCfg.usage_plan.label || '활용 방안'}</Label>
+              <Label className="text-xs">{formCfg.usage_plan.label || t('활용 방안', '利用目的・関心領域')}</Label>
               <textarea
                 value={usagePlan}
                 onChange={e => setUsagePlan(e.target.value)}
-                placeholder="간단히 입력해주세요"
+                placeholder={t('간단히 입력해주세요', '簡単にご記入ください')}
                 rows={3}
                 className="w-full text-sm rounded-md border border-input bg-background px-3 py-2"
               />
@@ -482,8 +526,8 @@ export default function CampaignForm() {
             </div>
           ))}
 
-          {/* 소개받으신 경로 (옵션) */}
-          {formCfg.source.enabled && (
+          {/* 소개받으신 경로 (옵션) — 일본어 캠페인은 비활성 권장 (form_settings.source.enabled=false) */}
+          {formCfg.source.enabled && !isJP && (
             <div className="space-y-1.5">
               <Label className="text-xs">소개받으신 경로 <span className="text-destructive">*</span></Label>
               <div className="space-y-2">
@@ -508,17 +552,25 @@ export default function CampaignForm() {
               onChange={e => setMarketingConsent(e.target.checked)}
               className="mt-0.5 accent-primary" />
             <span className="text-xs text-muted-foreground">
-              마케팅 정보 수신에 동의합니다. 신제품·이벤트·할인 안내 메시지를 받아보실 수 있습니다. (선택)
+              {t(
+                '마케팅 정보 수신에 동의합니다. 신제품·이벤트·할인 안내 메시지를 받아보실 수 있습니다. (선택)',
+                'マーケティング情報の受信に同意します。新製品・イベント・割引のご案内メッセージをお送りすることがございます。(任意)',
+              )}
             </span>
           </label>
 
           {/* 제출 */}
           <Button className="w-full h-11" disabled={submitting} onClick={handleSubmit}>
-            {submitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />제출 중...</> : '신청하기'}
+            {submitting
+              ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t('제출 중...', '送信中...')}</>
+              : t('신청하기', '送信')}
           </Button>
 
           <p className="text-[10px] text-muted-foreground text-center pt-1">
-            입력하신 정보는 체험권 발송과 안내 목적으로만 사용됩니다.
+            {t(
+              '입력하신 정보는 체험권 발송과 안내 목적으로만 사용됩니다.',
+              'ご入力いただいた情報は、トライアルコードの発行とご案内の目的にのみ使用いたします。',
+            )}
           </p>
         </div>
       </div>
