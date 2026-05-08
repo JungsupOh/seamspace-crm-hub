@@ -4,6 +4,7 @@
 // 2) lucky_seven_payment_groups 업데이트 (status, paid_at, toss_payment_key, toss_order_id)
 
 import { CORS, confirmTossPayment, buildReceiptFields, jsonResponse } from "../_shared/toss.ts";
+import { notifyLuckySevenPaymentTG } from "../_shared/telegram.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -69,6 +70,41 @@ Deno.serve(async (req: Request) => {
     );
     if (!upRes.ok) {
       console.warn("[confirm-lucky-seven-pay] payment_groups 업데이트 실패");
+    }
+
+    // 4) 텔레그램 알림 (서버사이드)
+    try {
+      // 그룹 + 캠페인 + 진행률 조회 (best-effort)
+      const grpRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/lucky_seven_groups?id=eq.${pg.group_id}&select=group_code,campaign_id`,
+        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+      );
+      const grp = grpRes.ok ? (await grpRes.json())[0] : null;
+      let campaignName: string | undefined;
+      if (grp?.campaign_id) {
+        const cRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/campaigns?id=eq.${grp.campaign_id}&select=name`,
+          { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+        );
+        campaignName = cRes.ok ? (await cRes.json())[0]?.name : undefined;
+      }
+      const allPgRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?group_id=eq.${pg.group_id}&select=status`,
+        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+      );
+      const allPgs = allPgRes.ok ? await allPgRes.json() as { status: string }[] : [];
+      const paidCount = allPgs.filter(p => p.status === "결제완료").length;
+      await notifyLuckySevenPaymentTG({
+        groupCode: grp?.group_code,
+        campaignName,
+        payerName: pg.payer_name,
+        payerOrgName: pg.buyer_org_name ?? null,
+        amount,
+        paidCount,
+        totalCount: allPgs.length,
+      });
+    } catch (e) {
+      console.warn("[confirm-lucky-seven-pay] 텔레그램 알림 실패:", e);
     }
 
     return jsonResponse({

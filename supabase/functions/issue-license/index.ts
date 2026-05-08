@@ -1,8 +1,15 @@
 // Supabase Edge Function: issue-license
-// 수동 결제(계좌이체 등) 후 이용권 생성+발송
-// 1. mDiary 이용권 생성 (create-coupon, licenseQty개)
-// 2. AlimTok 발송 (첫 번째 이용권)
-// 3. order_payments 저장 (중복 방지)
+// 결제 후 이용권 발송 (재발송 우선).
+// 정책:
+// - quoteNumber가 있으면 반드시 결제 완료가 확인된 경우(order_payments 또는 deal_licenses 존재)에만 발송
+// - 결제 미확인 + quoteNumber 있음 → 거부 (무료 이용권 발급 차단)
+// - 'allowNewIssue' 플래그가 true면 결제 검증 없이 신규 발급 가능 (admin/manual bank transfer 전용)
+// 흐름:
+// 1. quoteNumber로 결제 검증 (order_payments OR deal_licenses)
+// 2. 기존 코드 있으면 재사용 + 알림톡 재발송
+// 3. allowNewIssue=true이고 신규일 때만 create-coupon 호출
+
+import { notifyWebLicenseTG } from "../_shared/telegram.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin":  "https://seamspace-crm-hub.vercel.app",
@@ -13,13 +20,27 @@ const CORS = {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// 플랜 → 인원수. 풀 라벨 ("학급 플랜" 등) 정규화 대응.
 const PLAN_CAPACITY: Record<string, number> = {
+  "소수학급": 10,
   "학급":     40,
   "학년":    200,
   "학교(소)": 500,
   "학교(중)": 1000,
   "학교(대)": 99999,
 };
+
+function resolvePlanCapacity(plan?: string): { capacity: number; key: string } {
+  const raw = (plan ?? "").trim();
+  if (!raw) return { capacity: 40, key: "학급" };
+  const normalized = raw.replace(/\s*플랜\s*$/, "").trim();
+  if (PLAN_CAPACITY[normalized] != null) return { capacity: PLAN_CAPACITY[normalized], key: normalized };
+  for (const key of Object.keys(PLAN_CAPACITY)) {
+    if (normalized.includes(key)) return { capacity: PLAN_CAPACITY[key], key };
+  }
+  console.warn(`[issue-license] 알 수 없는 플랜 라벨, 학급(40) fallback:`, plan);
+  return { capacity: 40, key: "학급" };
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -36,6 +57,7 @@ Deno.serve(async (req: Request) => {
       duration = 12,
       amount = 0,
       licenseQty,
+      allowNewIssue = false,
     } = await req.json() as {
       quoteNumber?: string;
       customerName: string;
@@ -47,10 +69,12 @@ Deno.serve(async (req: Request) => {
       duration?: number;
       amount?: number;
       licenseQty?: number;
+      allowNewIssue?: boolean;  // admin/계좌이체 수동발급 전용 (사용자 폼에서는 false)
     };
 
     const count = Math.max(1, licenseQty ?? qty);
-    const userLimit = String(PLAN_CAPACITY[plan ?? "학급"] ?? 40);
+    const planResolved = resolvePlanCapacity(plan);
+    const userLimit = String(planResolved.capacity);
     const description = [orgName, plan, `${duration}개월`].filter(Boolean).join(" - ");
 
     // ── 중복 발급 방지: 이미 발급된 경우 기존 코드 반환 ──
@@ -91,6 +115,15 @@ Deno.serve(async (req: Request) => {
                   }),
                 }).catch(e => console.warn("[issue-license] 알림톡 재발송 실패:", e));
 
+                // 텔레그램 알림 — 재발송
+                await notifyWebLicenseTG({
+                  quoteNumber,
+                  orgName,
+                  buyerName: customerName,
+                  couponCodes: codes,
+                  reused: true,
+                  channel: "alimtalk",
+                });
                 return new Response(
                   JSON.stringify({ ok: true, coupon_codes: codes, already_issued: true }),
                   { headers: { "Content-Type": "application/json", ...CORS } }
@@ -157,11 +190,35 @@ Deno.serve(async (req: Request) => {
           }),
         }).catch(e => console.warn("[issue-license] 알림톡 재발송 실패:", e));
 
+        // 텔레그램 알림 — 재발송
+        await notifyWebLicenseTG({
+          quoteNumber,
+          orgName,
+          buyerName: customerName,
+          couponCodes: codes,
+          reused: true,
+          channel: "alimtalk",
+        });
+
         return new Response(
           JSON.stringify({ ok: true, coupon_codes: codes, already_issued: true }),
           { headers: { "Content-Type": "application/json", ...CORS } }
         );
       }
+    }
+
+    // ── 신규 발급 차단 게이트 ────────────────────────
+    // quoteNumber 있는데 위 path 1/2 모두 빈 결과 = 결제 미확인
+    // → allowNewIssue=true가 명시된 경우(어드민 수동발급)에만 신규 생성 허용
+    if (quoteNumber && !allowNewIssue) {
+      console.warn(`[issue-license] 결제 미확인으로 신규 발급 거부: quoteNumber=${quoteNumber}`);
+      return new Response(
+        JSON.stringify({
+          error: "결제 정보를 찾을 수 없습니다. 결제가 완료된 후 다시 시도해 주세요. (이미 결제하신 경우 고객센터 042-864-5566로 문의)",
+          code: "PAYMENT_NOT_FOUND",
+        }),
+        { status: 403, headers: { "Content-Type": "application/json", ...CORS } }
+      );
     }
 
     // ── 이용권 생성 ───────────────────────────────────
@@ -277,6 +334,16 @@ Deno.serve(async (req: Request) => {
         approved_at:    new Date().toISOString(),
       }),
     }).catch(e => console.warn("[issue-license] order_payments 저장 실패:", e));
+
+    // 텔레그램 알림 — 신규 발급
+    await notifyWebLicenseTG({
+      quoteNumber: quoteNumber ?? "(no quote)",
+      orgName,
+      buyerName: customerName,
+      couponCodes: coupons,
+      reused: false,
+      channel: "alimtalk",
+    });
 
     return new Response(
       JSON.stringify({ ok: true, coupon_codes: coupons }),

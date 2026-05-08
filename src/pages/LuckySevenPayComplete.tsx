@@ -5,7 +5,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchPaymentGroupByQuoteNumber, refreshGroupStatus } from '@/lib/luckySeven';
-import { notifyLuckySevenPayment } from '@/lib/telegram';
+// 텔레그램 알림은 confirm-lucky-seven-pay 서버사이드에서 발송 (브라우저 의존 X)
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -41,37 +41,11 @@ export default function LuckySevenPayComplete() {
 
         // 영수증 이메일은 Toss가 자동 발송 — 중복 방지를 위해 우리 발송 X
 
-        // 2) 그룹 상태 갱신 + 텔레그램 알림 + 캠페인 정보 조회
+        // 2) 그룹 상태 갱신 + group_code UI 표시 (텔레그램은 서버사이드에서 발송)
         const detail = await fetchPaymentGroupByQuoteNumber(orderId);
         if (detail) {
-          const { group, paymentGroup } = detail;
+          const { group } = detail;
           await refreshGroupStatus(group.id);
-
-          // 캠페인명 + 대표자 정보 조회
-          const [campaignRes, leaderRes, pgsRes] = await Promise.all([
-            fetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${group.campaign_id}&select=name`, { headers: HEADERS }),
-            group.leader_lead_id
-              ? fetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${group.leader_lead_id}&select=name,school_name`, { headers: HEADERS })
-              : Promise.resolve(null),
-            fetch(`${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?group_id=eq.${group.id}&select=status`, { headers: HEADERS }),
-          ]);
-          const campaign = campaignRes.ok ? (await campaignRes.json())[0] : null;
-          const leader = leaderRes && leaderRes.ok ? (await leaderRes.json())[0] : null;
-          const pgs = pgsRes.ok ? (await pgsRes.json()) as { status: string }[] : [];
-          const paidCount = pgs.filter((p) => p.status === '결제완료').length;
-
-          notifyLuckySevenPayment({
-            groupCode: group.group_code,
-            campaignName: campaign?.name ?? '럭키세븐',
-            leaderName: leader?.name ?? '(대표자)',
-            leaderSchoolName: leader?.school_name ?? '',
-            payerName: paymentGroup.payer_name,
-            payerOrgName: paymentGroup.buyer_org_name,
-            amount: paymentGroup.amount,
-            paidCount,
-            totalCount: pgs.length,
-          });
-
           setGroupCode(group.group_code);
         }
 

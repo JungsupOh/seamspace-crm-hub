@@ -5,18 +5,36 @@
 // 4. order_payments 저장
 
 import { CORS, confirmTossPayment, buildReceiptFields, jsonResponse } from "../_shared/toss.ts";
+import { notifyWebPaymentTG } from "../_shared/telegram.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TOSS_SECRET  = Deno.env.get("TOSS_SECRET_KEY")!;
 
+// 플랜 → 인원수. 키 변형 대응 (예: "학급 플랜", "학급플랜", "학급", "학년 플랜" 등)
 const PLAN_CAPACITY: Record<string, number> = {
-  "학급":    40,
-  "학년":   200,
+  "소수학급": 10,
+  "학급":     40,
+  "학년":    200,
   "학교(소)": 500,
   "학교(중)": 1000,
   "학교(대)": 99999,
 };
+
+// "학급 플랜" / "학급플랜" / "학급" → "학급" 등 정규화
+function resolvePlanCapacity(plan?: string): { capacity: number; key: string } {
+  const raw = (plan ?? "").trim();
+  if (!raw) return { capacity: 40, key: "학급" };
+  // " 플랜" / "플랜" 접미사 제거 후 trim
+  const normalized = raw.replace(/\s*플랜\s*$/, "").trim();
+  if (PLAN_CAPACITY[normalized] != null) return { capacity: PLAN_CAPACITY[normalized], key: normalized };
+  // 부분 매칭 (예: "소수학급 플랜 (10명)" 등 변형)
+  for (const key of Object.keys(PLAN_CAPACITY)) {
+    if (normalized.includes(key)) return { capacity: PLAN_CAPACITY[key], key };
+  }
+  console.warn(`[confirm-payment] 알 수 없는 플랜 라벨, 학급(40) fallback:`, plan);
+  return { capacity: 40, key: "학급" };
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -58,7 +76,9 @@ Deno.serve(async (req: Request) => {
     console.log("[confirm-payment] Toss 승인 성공:", tossData.paymentKey);
 
     // ── Step 2: mDiary 이용권 생성 ────────────────────
-    const userLimit = String(PLAN_CAPACITY[plan ?? "학급"] ?? 40);
+    const planResolved = resolvePlanCapacity(plan);
+    const userLimit = String(planResolved.capacity);
+    console.log(`[confirm-payment] 플랜 매칭: '${plan}' → '${planResolved.key}' (${userLimit}명)`);
     const description = [orgName, plan, `${duration}개월`].filter(Boolean).join(" - ");
 
     const couponRes = await fetch(`${SUPABASE_URL}/functions/v1/create-coupon`, {
@@ -236,6 +256,16 @@ Deno.serve(async (req: Request) => {
         }
       } catch (e) { console.error("[confirm-payment] deal/deal_licenses 업데이트 예외:", e); }
     }
+
+    // ── Step 6: 텔레그램 알림 (서버사이드, 신뢰성↑) ─────
+    await notifyWebPaymentTG({
+      quoteNumber: quoteNumber ?? orderId,
+      orgName,
+      buyerName: customerName,
+      amount,
+      method: tossData.method ?? "card",
+      couponCode,
+    });
 
     return jsonResponse({
       ok: true,

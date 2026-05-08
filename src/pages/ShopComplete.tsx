@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Loader2, AlertTriangle, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { clearCart, markCouponUsed } from '@/lib/shop';
-import { notifyShopOrder } from '@/lib/telegram';
+// 텔레그램 알림은 confirm-shop-payment 서버사이드에서 발송 (브라우저 의존 X)
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -69,20 +69,7 @@ export default function ShopComplete() {
 
         // 영수증 이메일은 Toss가 자동 발송 — 중복 방지를 위해 우리 발송 X
 
-        // 텔레그램 알림 (어드민용)
-        const itemSummary = orderData.items.map((i: { productName: string; qty: number }) =>
-          `${i.productName} × ${i.qty}`,
-        ).join(', ');
-        notifyShopOrder({
-          orderId: tossOrderId,
-          customerName: orderData.customer.name,
-          customerPhone: orderData.customer.phone,
-          items: itemSummary,
-          totalAmount: Number(amount),
-          address: orderData.shipping
-            ? `${orderData.shipping.address} ${orderData.shipping.addressDetail || ''}`.trim()
-            : '디지털 상품 (배송 없음)',
-        });
+        // 텔레그램 알림은 confirm-shop-payment 서버사이드에서 발송 (중복 방지)
 
         // 할인쿠폰 사용 처리 (localStorage 기반이라 클라이언트 유지)
         if (orderData.couponCode) {

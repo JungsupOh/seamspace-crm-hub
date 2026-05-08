@@ -10,6 +10,7 @@
 // 4) 영수증 응답 (receiptUrl, orderName, …) — ShopComplete가 영수증 이메일 발송
 
 import { CORS, confirmTossPayment, buildReceiptFields, jsonResponse } from "../_shared/toss.ts";
+import { notifyShopOrderTG } from "../_shared/telegram.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -281,7 +282,21 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // ── Step 5: 영수증 응답 ────────────────────────────
+    // ── Step 5: 텔레그램 알림 (서버사이드) ─────────────
+    const itemSummary = items.map(i => `${i.productName} × ${i.qty}`).join(", ");
+    const addressLine = shipping?.address
+      ? `${shipping.address}${shipping.addressDetail ? " " + shipping.addressDetail : ""}`
+      : "디지털 상품 (배송 없음)";
+    await notifyShopOrderTG({
+      orderId,
+      customerName: customer.name,
+      customerPhone: customer.phone,
+      items: itemSummary,
+      totalAmount: amount,
+      address: addressLine,
+    });
+
+    // ── Step 6: 영수증 응답 ────────────────────────────
     return jsonResponse({
       ok: true,
       issuedCoupons,
