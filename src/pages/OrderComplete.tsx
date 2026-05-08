@@ -16,6 +16,7 @@ export default function OrderComplete() {
   const [confirmed, setConfirmed] = useState(false);
   const [couponCode, setCouponCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [linkWarning, setLinkWarning] = useState<string | null>(null);
 
   useEffect(() => {
     if (!paymentKey || !orderId || !amount) return;
@@ -48,6 +49,14 @@ export default function OrderComplete() {
         if (ok && data.coupon_code) {
           setCouponCode(data.coupon_code);
           setConfirmed(true);
+          // CRM 연동 진단 — license_saved=false면 경고 표시 (재발송 시 코드 중복 발급 위험)
+          if (data.license_saved === false) {
+            const reasons: string[] = [];
+            if (!data.deal_id) reasons.push('견적서 매칭 실패');
+            if (data.order_payment_saved === false) reasons.push('order_payments 저장 실패');
+            setLinkWarning(`CRM 연동 미완료(${reasons.join(', ') || 'unknown'}) — 고객센터에 견적번호와 함께 문의해 주세요.`);
+            console.warn('[OrderComplete] CRM 연동 진단:', data);
+          }
           // 텔레그램 알림 — 결제 완료
           notifyWebPayment({
             quoteNumber: session.quoteNumber ?? orderId ?? '',
@@ -158,6 +167,15 @@ export default function OrderComplete() {
                   </div>
                 )}
               </div>
+
+              {/* CRM 연동 경고 — license_saved=false인 경우만 노출 */}
+              {linkWarning && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-left text-sm text-amber-800">
+                  <p className="font-medium mb-1">⚠ 발급 정보가 CRM에 등록되지 않았습니다</p>
+                  <p className="text-xs">{linkWarning}</p>
+                  <p className="text-xs mt-1">이용권은 정상 발송되었습니다. 재발송 요청 시 새 코드가 발급될 수 있으니, 위 코드를 보관해 주세요.</p>
+                </div>
+              )}
 
               {/* 안내 */}
               <div className="grid grid-cols-1 gap-3 text-left">

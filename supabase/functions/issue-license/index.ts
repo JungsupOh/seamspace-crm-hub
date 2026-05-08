@@ -55,6 +55,7 @@ Deno.serve(async (req: Request) => {
 
     // ── 중복 발급 방지: 이미 발급된 경우 기존 코드 반환 ──
     // 우선순위: 1) deal_licenses (canonical) 2) order_payments (legacy fallback)
+    let dealLookupId: string | null = null;
     if (quoteNumber) {
       // 1) deal_licenses via deals.quote_number
       const dealRes = await fetch(
@@ -64,8 +65,9 @@ Deno.serve(async (req: Request) => {
       if (dealRes.ok) {
         const deals: { id: string }[] = await dealRes.json();
         if (deals.length > 0) {
+          dealLookupId = deals[0].id;
           const licRes = await fetch(
-            `${SUPABASE_URL}/rest/v1/deal_licenses?deal_id=eq.${deals[0].id}&select=coupon_code&order=created_at.asc`,
+            `${SUPABASE_URL}/rest/v1/deal_licenses?deal_id=eq.${dealLookupId}&select=coupon_code&order=created_at.asc`,
             { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
           );
           if (licRes.ok) {
@@ -99,17 +101,49 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // 2) order_payments (legacy)
+      // 2) order_payments (legacy + confirm-payment fallback)
       const existRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/order_payments?quote_number=eq.${encodeURIComponent(quoteNumber)}&limit=1`,
+        `${SUPABASE_URL}/rest/v1/order_payments?quote_number=eq.${encodeURIComponent(quoteNumber)}&select=coupon_code&order=created_at.desc&limit=1`,
         { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
       );
       const existing: Array<{ coupon_code?: string }> = existRes.ok ? await existRes.json() : [];
       if (existing.length > 0 && existing[0].coupon_code) {
         console.log("[issue-license] order_payments 기존 코드 재사용:", existing[0].coupon_code);
-        const codes = existing[0].coupon_code.split(",").map(s => s.trim());
+        const codes = existing[0].coupon_code.split(",").map(s => s.trim()).filter(Boolean);
 
-        // 알림톡 재발송 + deal_licenses에도 backfill
+        // deal_licenses backfill — 다음 재발송 시 path 1로 빠르게 매칭되도록
+        if (dealLookupId) {
+          for (const code of codes) {
+            const dupCheck = await fetch(
+              `${SUPABASE_URL}/rest/v1/deal_licenses?coupon_code=eq.${encodeURIComponent(code)}&select=id&limit=1`,
+              { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+            );
+            const dups = dupCheck.ok ? (await dupCheck.json() as { id: string }[]) : [];
+            if (dups.length === 0) {
+              await fetch(`${SUPABASE_URL}/rest/v1/deal_licenses`, {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${SUPABASE_KEY}`,
+                  apikey: SUPABASE_KEY,
+                  "Content-Type": "application/json",
+                  Prefer: "return=minimal",
+                },
+                body: JSON.stringify({
+                  deal_id:        dealLookupId,
+                  coupon_code:    code,
+                  contact_name:   customerName,
+                  contact_phone:  customerPhone,
+                  org_name:       orgName ?? null,
+                  duration:       String(duration),
+                  user_count:     userLimit,
+                  status:         "대기",
+                }),
+              }).catch(e => console.warn("[issue-license] deal_licenses backfill 실패:", e));
+            }
+          }
+        }
+
+        // 알림톡 재발송
         await fetch("http://tebahsoft.iptime.org:8310/main/alimtok_coupon/", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

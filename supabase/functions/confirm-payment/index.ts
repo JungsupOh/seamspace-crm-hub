@@ -106,24 +106,78 @@ Deno.serve(async (req: Request) => {
       console.error("[confirm-payment] 알림톡 예외:", e);
     }
 
-    // ── Step 4-pre: deals 업데이트 + deal_licenses INSERT ──
-    // 견적서 생성 시 saveWebQuote가 만든 deals 행을 quote_number로 매칭
-    const todayDate = new Date().toISOString().slice(0, 10);
-    const matchQuote = quoteNumber ?? orderId;
-    let dealId: string | null = null;
-    try {
-      const dealRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(matchQuote)}&select=id&limit=1`,
-        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
-      );
-      if (dealRes.ok) {
-        const rows = await dealRes.json() as { id: string }[];
-        dealId = rows[0]?.id ?? null;
+    // ── Step 4: order_payments 먼저 저장 ─────────
+    // (deals 매칭 실패해도 issue-license 재발송이 fallback할 수 있도록 우선 저장)
+    let orderPaymentSaved = false;
+    {
+      const opRes = await fetch(`${SUPABASE_URL}/rest/v1/order_payments`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          apikey: SUPABASE_KEY,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({
+          payment_key:    paymentKey,
+          order_id:       orderId,
+          amount,
+          customer_name:  customerName,
+          customer_phone: customerPhone.replace(/\D/g, ""),
+          customer_email: customerEmail ?? null,
+          org_name:       orgName ?? null,
+          plan:           plan ?? null,
+          qty,
+          duration,
+          quote_number:   quoteNumber ?? null,
+          coupon_code:    couponCode,
+          toss_method:    tossData.method ?? null,
+          approved_at:    tossData.approvedAt ?? null,
+        }),
+      }).catch(e => { console.error("[confirm-payment] order_payments 예외:", e); return null; });
+      if (opRes?.ok) {
+        orderPaymentSaved = true;
+        console.log("[confirm-payment] order_payments 저장 성공");
+      } else if (opRes) {
+        const txt = await opRes.text().catch(() => "(read failed)");
+        console.error(`[confirm-payment] order_payments 저장 실패 ${opRes.status}:`, txt);
       }
+    }
 
-      if (dealId) {
+    // ── Step 5: deals 매칭 + deal_licenses INSERT ──
+    // 견적서 생성 시 saveWebQuote가 만든 deals 행을 quote_number로 매칭
+    // orderId 패턴 'WEB-{quote_number}-{nanoid}' 에서 fallback 추출
+    const todayDate = new Date().toISOString().slice(0, 10);
+    const orderIdMatch = orderId?.match(/^WEB-(.+)-[a-zA-Z0-9_-]+$/);
+    const orderIdQuote = orderIdMatch?.[1];
+    const candidates = [quoteNumber, orderIdQuote, orderId].filter(Boolean) as string[];
+    let dealId: string | null = null;
+    let licenseSaved = false;
+
+    for (const cand of candidates) {
+      try {
+        const dealRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(cand)}&select=id&limit=1`,
+          { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+        );
+        if (dealRes.ok) {
+          const rows = await dealRes.json() as { id: string }[];
+          if (rows[0]?.id) { dealId = rows[0].id; console.log(`[confirm-payment] deals 매칭(${cand}):`, dealId); break; }
+        } else {
+          const txt = await dealRes.text().catch(() => "(read failed)");
+          console.error(`[confirm-payment] deals 조회 실패 ${dealRes.status}:`, txt);
+        }
+      } catch (e) { console.error("[confirm-payment] deals 조회 예외:", e); }
+    }
+
+    if (!dealId) {
+      console.warn(`[confirm-payment] deals 매칭 실패 — 시도값:`, candidates);
+    }
+
+    if (dealId) {
+      try {
         // 1) deals PATCH
-        await fetch(`${SUPABASE_URL}/rest/v1/deals?id=eq.${dealId}`, {
+        const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/deals?id=eq.${dealId}`, {
           method: "PATCH",
           headers: {
             Authorization: `Bearer ${SUPABASE_KEY}`,
@@ -137,6 +191,10 @@ Deno.serve(async (req: Request) => {
             deal_stage:        "이용권 발송완료",
           }),
         });
+        if (!patchRes.ok) {
+          const txt = await patchRes.text().catch(() => "(read failed)");
+          console.error(`[confirm-payment] deals PATCH 실패 ${patchRes.status}:`, txt);
+        }
 
         // 2) deal_licenses INSERT — /이용권관리에 노출 (중복 코드 skip)
         const checkRes = await fetch(
@@ -145,7 +203,7 @@ Deno.serve(async (req: Request) => {
         );
         const dupRows = checkRes.ok ? (await checkRes.json() as { id: string }[]) : [];
         if (dupRows.length === 0) {
-          await fetch(`${SUPABASE_URL}/rest/v1/deal_licenses`, {
+          const insRes = await fetch(`${SUPABASE_URL}/rest/v1/deal_licenses`, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${SUPABASE_KEY}`,
@@ -164,42 +222,30 @@ Deno.serve(async (req: Request) => {
               status:         "대기",
             }),
           });
+          if (insRes.ok) {
+            licenseSaved = true;
+            console.log("[confirm-payment] deal_licenses 저장 성공");
+          } else {
+            const txt = await insRes.text().catch(() => "(read failed)");
+            console.error(`[confirm-payment] deal_licenses 저장 실패 ${insRes.status}:`, txt);
+          }
+        } else {
+          // 이미 동일 coupon_code의 row 존재 → 저장된 것으로 간주
+          licenseSaved = true;
+          console.log("[confirm-payment] deal_licenses 이미 존재(중복 skip)");
         }
-      }
-    } catch (e) { console.warn("[confirm-payment] deal/deal_licenses 업데이트 실패 (무시):", e); }
-
-    // ── Step 4: Supabase order_payments 저장 ─────────
-    await fetch(`${SUPABASE_URL}/rest/v1/order_payments`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        apikey: SUPABASE_KEY,
-        "Content-Type": "application/json",
-        Prefer: "return=minimal",
-      },
-      body: JSON.stringify({
-        payment_key:    paymentKey,
-        order_id:       orderId,
-        amount,
-        customer_name:  customerName,
-        customer_phone: customerPhone.replace(/\D/g, ""),
-        customer_email: customerEmail ?? null,
-        org_name:       orgName ?? null,
-        plan:           plan ?? null,
-        qty,
-        duration,
-        quote_number:   quoteNumber ?? null,
-        coupon_code:    couponCode,
-        toss_method:    tossData.method ?? null,
-        approved_at:    tossData.approvedAt ?? null,
-      }),
-    }).catch(e => console.warn("[confirm-payment] order_payments 저장 실패 (무시):", e));
+      } catch (e) { console.error("[confirm-payment] deal/deal_licenses 업데이트 예외:", e); }
+    }
 
     return jsonResponse({
       ok: true,
-      coupon_code:   couponCode,
-      customerEmail: customerEmail ?? null,
-      customerName:  customerName ?? null,
+      coupon_code:        couponCode,
+      customerEmail:      customerEmail ?? null,
+      customerName:       customerName ?? null,
+      // 진단용 — 프론트가 실패 시 경고 표시 가능
+      deal_id:            dealId,
+      license_saved:      licenseSaved,
+      order_payment_saved: orderPaymentSaved,
       ...buildReceiptFields(tossData, amount),
     });
 
