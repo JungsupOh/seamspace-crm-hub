@@ -232,7 +232,10 @@ export default function CampaignForm() {
       const insertedLead: { id?: string } = Array.isArray(insertedRows) ? insertedRows[0] ?? {} : {};
 
       // contacts upsert — 캠페인 리드도 contacts에 자동 등록 (메모리 정책)
+      // 기존 고객 매칭 시 활동이력에 캠페인 신청 내역 1줄 prepend
       try {
+        const today = new Date().toISOString().slice(0, 10);
+        const activityNote = `[${today}] 캠페인 신청 — ${campaign.name}`;
         await upsertLeadContact(
           {
             name: payload.name,
@@ -243,6 +246,7 @@ export default function CampaignForm() {
           {
             country: isJP ? 'jp' : 'kr',
             leadSource: campaign.name,  // 캠페인명을 lead_source로
+            activityNote,
           },
         );
       } catch (e) {

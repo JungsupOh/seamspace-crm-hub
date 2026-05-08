@@ -204,17 +204,24 @@ import { normalizePhone as normalizePhoneI18n, type PhoneCountry } from './phone
 export interface UpsertLeadContactOptions {
   country?: PhoneCountry;     // 'kr' (기본) | 'jp' — 전화 정규화 국가
   leadSource?: string;        // 신규 contact insert 시 기록 (예: 'EDIX Japan 2026')
+  activityNote?: string;      // 기존 고객 매칭 시 contacts.notes 앞에 1줄 추가 (예: '[2026-05-09] 캠페인 신청 — EDIX Japan 2026')
+}
+
+export interface UpsertLeadContactResult {
+  contactId: string;
+  isExisting: boolean;          // true면 phone으로 매칭된 기존 contact
+  activityAppended: boolean;    // 기존 contact의 notes에 activityNote가 prepend 됐는지
 }
 
 export async function upsertLeadContact(
   member: { name: string; phone: string; email: string; orgName: string },
   options: UpsertLeadContactOptions = {},
-): Promise<string> {
+): Promise<UpsertLeadContactResult> {
   const country = options.country ?? 'kr';
   const phoneNorm = normalizePhoneI18n(member.phone, country);
 
   const findRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${encodeURIComponent(phoneNorm)}&select=id,name,email,org_name,contact_type`,
+    `${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${encodeURIComponent(phoneNorm)}&select=id,name,email,org_name,contact_type,notes`,
     { headers: HEADERS },
   );
   const found = findRes.ok ? await findRes.json() : [];
@@ -225,6 +232,15 @@ export async function upsertLeadContact(
     if (!existing.name && member.name) patch.name = member.name;
     if (!existing.email && member.email) patch.email = member.email;
     if (!existing.org_name && member.orgName) patch.org_name = member.orgName;
+    let activityAppended = false;
+    if (options.activityNote && options.activityNote.trim()) {
+      const prevNotes = (existing.notes ?? '').toString();
+      // 같은 라인 중복 방지 (오늘 같은 캠페인 재신청 등)
+      if (!prevNotes.includes(options.activityNote.trim())) {
+        patch.notes = [options.activityNote.trim(), prevNotes].filter(Boolean).join('\n');
+        activityAppended = true;
+      }
+    }
     if (Object.keys(patch).length > 0) {
       await fetch(`${SUPABASE_URL}/rest/v1/contacts?id=eq.${encodeURIComponent(existing.id)}`, {
         method: 'PATCH',
@@ -232,7 +248,7 @@ export async function upsertLeadContact(
         body: JSON.stringify(patch),
       });
     }
-    return existing.id as string;
+    return { contactId: existing.id as string, isExisting: true, activityAppended };
   }
 
   // 신규 insert
@@ -247,11 +263,16 @@ export async function upsertLeadContact(
       org_name: member.orgName,
       contact_type: '리드',
       lead_source: options.leadSource ?? '럭키세븐 5월',
+      // 신규 contact도 첫 활동이력으로 기록 (있을 때만)
+      ...(options.activityNote && options.activityNote.trim()
+        ? { notes: options.activityNote.trim() }
+        : {}),
     }),
   });
   if (!insertRes.ok) throw new Error('contacts insert 실패');
   const created = await insertRes.json();
-  return (Array.isArray(created) ? created[0]?.id : created.id) as string;
+  const newId = (Array.isArray(created) ? created[0]?.id : created.id) as string;
+  return { contactId: newId, isExisting: false, activityAppended: !!options.activityNote };
 }
 
 // ─────────────────────────────────────────────────
@@ -313,12 +334,13 @@ export async function submitLuckySevenGroup(input: {
     const isLeader = i === 0;
 
     // contacts upsert
-    const contactId = await upsertLeadContact({
+    const contactRes = await upsertLeadContact({
       name: m.name,
       phone: m.phone,
       email: m.email,
       orgName: m.schoolName,
     });
+    const contactId = contactRes.contactId;
 
     const leadInsRes = await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads`, {
       method: 'POST',
