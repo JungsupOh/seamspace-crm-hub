@@ -328,14 +328,19 @@ function parseExcel(file: File): Promise<ParsedRow[]> {
   });
 }
 
-// deal_licenses에서 phone 목록 가져와 전환 여부 판별
-async function getConvertedPhones(): Promise<Set<string>> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/deal_licenses?select=contact_phone`, { headers: HEADERS });
-  if (!r.ok) return new Set();
-  const data: { contact_phone: string }[] = await r.json();
-  const phones = new Set<string>();
-  data.forEach(d => { if (d.contact_phone) phones.add(d.contact_phone.replace(/\D/g, '')); });
-  return phones;
+// deal_licenses에서 phone + 발급일 목록 가져옴.
+// 같은 phone에 여러 deal이 있을 수 있어 가장 빠른(이른) created_at만 보관 (캠페인 트라이얼 후 생긴 deal만 전환으로 카운트).
+async function getConvertedPhones(): Promise<Map<string, string>> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/deal_licenses?select=contact_phone,created_at&order=created_at.asc`, { headers: HEADERS });
+  if (!r.ok) return new Map();
+  const data: { contact_phone: string; created_at: string }[] = await r.json();
+  const phoneToFirstDealAt = new Map<string, string>();
+  data.forEach(d => {
+    if (!d.contact_phone) return;
+    const norm = d.contact_phone.replace(/\D/g, '');
+    if (!phoneToFirstDealAt.has(norm)) phoneToFirstDealAt.set(norm, d.created_at);
+  });
+  return phoneToFirstDealAt;
 }
 
 // ── Status badge ──────────────────────────────────
@@ -1121,7 +1126,7 @@ function AddLicenseRow({ campaignId, onDone }: AddLicenseRowProps) {
 // ── CampaignDetail ────────────────────────────────
 interface CampaignDetailProps {
   campaign: Campaign;
-  convertedPhones: Set<string>;
+  convertedPhones: Map<string, string>;     // phone(normalized) → 가장 이른 deal_license.created_at
 }
 
 function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
@@ -1169,7 +1174,12 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   const licTotal    = syncedLicenses?.length ?? 0;
   const licActive   = syncedLicenses?.filter(l => l.status === '사용중').length ?? 0;
   const licExpired  = syncedLicenses?.filter(l => l.status === '만료').length ?? 0;
-  const licConverted = syncedLicenses?.filter(l => convertedPhones.has(normalize(l.contact_phone))).length ?? 0;
+  // 딜 전환: 트라이얼 발급일보다 deal_license.created_at이 더 늦은(=트라이얼 후 생긴 deal) 경우만 인정.
+  // 사전 deal이 있어 phone만 매칭되는 케이스(같은 사람의 과거 구매 이력)는 캠페인 전환으로 카운트하지 않음.
+  const licConverted = syncedLicenses?.filter(l => {
+    const dealAt = convertedPhones.get(normalize(l.contact_phone));
+    return !!dealAt && dealAt > l.created_at;
+  }).length ?? 0;
   const convRate    = licTotal > 0 ? Math.round((licConverted / licTotal) * 100) : 0;
 
   // 쿠폰 펀널 — 캠페인이 쿠폰 발급형일 때만
@@ -1949,7 +1959,7 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
 }
 
 // ── 체험권 탭 (기존 목록) ──────────────────────────
-function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign; convertedPhones: Set<string> }) {
+function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign; convertedPhones: Map<string, string> }) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1992,7 +2002,12 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
   // 동기화는 CampaignDetail 레벨에서 실행 (캠페인 펼칠 때 즉시)
 
   const normalize = (p?: string) => (p ?? '').replace(/\D/g, '');
-  const isConverted = (phone?: string) => phone ? convertedPhones.has(normalize(phone)) : false;
+  // 트라이얼 발급일 이후의 deal만 전환으로 인정 (license.created_at < deal.created_at)
+  const isConverted = (phone: string | undefined, licCreatedAt: string) => {
+    if (!phone) return false;
+    const dealAt = convertedPhones.get(normalize(phone));
+    return !!dealAt && dealAt > licCreatedAt;
+  };
 
   const delMut = useMutation({
     mutationFn: deleteCampaignLicense,
@@ -2104,7 +2119,7 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
           <span className="text-xs">위 "수신자 추가" 버튼으로 기존 발송 내역을 등록하거나,<br />이용권 관리 → 이용권 발송 → 체험 발송에서 이 캠페인으로 발송하세요.</span>
         </div>
       ) : licenses?.map(lic => {
-        const converted = isConverted(lic.contact_phone);
+        const converted = isConverted(lic.contact_phone, lic.created_at);
         const today = new Date().toISOString().split('T')[0];
         const expired = lic.service_expire_at && lic.service_expire_at < today;
         const statusMeta = LIC_STATUS[lic.status];
@@ -2203,7 +2218,7 @@ function CampaignLicensesTab({ campaign, convertedPhones }: { campaign: Campaign
 // ── CampaignCard ──────────────────────────────────
 interface CampaignCardProps {
   campaign: Campaign;
-  convertedPhones: Set<string>;
+  convertedPhones: Map<string, string>;     // phone(normalized) → 가장 이른 deal_license.created_at
   onEdit: (c: Campaign) => void;
   onDelete: (id: string) => void;
   canEdit: boolean;
@@ -2373,7 +2388,7 @@ export default function Campaigns() {
     queryFn: getCampaigns,
   });
 
-  const { data: convertedPhones = new Set<string>() } = useQuery({
+  const { data: convertedPhones = new Map<string, string>() } = useQuery({
     queryKey: ['converted_phones'],
     queryFn: getConvertedPhones,
     staleTime: 1000 * 60 * 5,

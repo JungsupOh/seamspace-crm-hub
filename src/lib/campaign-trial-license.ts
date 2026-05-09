@@ -62,19 +62,30 @@ function expiresAtFromDuration(months: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-// 같은 phone_normalized로 이미 발급된 체험권 조회 (모든 캠페인 통합)
-async function findPriorTrial(phoneNormalized: string, currentLeadId: string): Promise<{
+// 같은 phone_normalized 또는 동일 email로 이미 발급된 체험권 조회 (모든 캠페인 통합)
+// 해외 캠페인은 phone이 없거나 부정확할 수 있어 email도 키로 사용해 1인 1회 정책 보장.
+async function findPriorTrial(
+  phoneNormalized: string,
+  email: string | null | undefined,
+  currentLeadId: string,
+): Promise<{
   coupon_code: string;
   status: string;
   created_at: string;
   campaign_name: string;
 } | null> {
-  if (!phoneNormalized) return null;
-  // 1) 같은 phone의 다른 lead들 조회
-  const leadsRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/campaign_leads?phone_normalized=eq.${encodeURIComponent(phoneNormalized)}&select=id&id=neq.${currentLeadId}`,
-    { headers: HEADERS },
-  );
+  const phoneOk = !!phoneNormalized;
+  const emailOk = !!(email && email.trim());
+  if (!phoneOk && !emailOk) return null;
+  // 1) 같은 phone 또는 같은 email의 다른 lead들 조회 — PostgREST or() 필터
+  const conditions: string[] = [];
+  if (phoneOk) conditions.push(`phone_normalized.eq.${phoneNormalized}`);
+  if (emailOk) conditions.push(`email.ilike.${email!.trim()}`);
+  const orFilter = conditions.length === 1 ? conditions[0] : `or=(${conditions.join(',')})`;
+  const leadsUrl = conditions.length === 1
+    ? `${SUPABASE_URL}/rest/v1/campaign_leads?${conditions[0]}&select=id&id=neq.${currentLeadId}`
+    : `${SUPABASE_URL}/rest/v1/campaign_leads?${orFilter}&select=id&id=neq.${currentLeadId}`;
+  const leadsRes = await fetch(leadsUrl, { headers: HEADERS });
   if (!leadsRes.ok) return null;
   const otherLeads = await leadsRes.json() as { id: string }[];
   if (otherLeads.length === 0) return null;
@@ -110,10 +121,10 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
   const description = `${params.campaign.name} ${params.lead.school_name ?? ''} ${params.lead.name} 체험이용권`.trim();
   const expireAt = settings.service_expire_at || expiresAtFromDuration(duration_months);
 
-  // ── Step 0: 기존 체험권 보유 여부 확인 (phone_normalized 기준) ──
+  // ── Step 0: 기존 체험권 보유 여부 확인 (phone OR email 기준) ──
   let prior: Awaited<ReturnType<typeof findPriorTrial>> = null;
   try {
-    prior = await findPriorTrial(params.lead.phone_normalized, params.lead.id);
+    prior = await findPriorTrial(params.lead.phone_normalized, params.lead.email, params.lead.id);
   } catch (e) { console.warn('[trial-license] 기존 체험권 조회 실패 — 신규 발급으로 진행', e); }
 
   // 사용중/만료 → 차단
