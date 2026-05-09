@@ -154,7 +154,11 @@ async function createCampaign(c: Omit<Campaign, 'id' | 'created_at'>): Promise<C
     headers: { ...HEADERS, Prefer: 'return=representation' },
     body: JSON.stringify(c),
   });
-  if (!r.ok) throw new Error('캠페인 생성 실패');
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    console.error('[createCampaign] 실패', r.status, txt, c);
+    throw new Error(`캠페인 생성 실패 (${r.status}): ${txt || 'unknown'}`);
+  }
   const data = await r.json();
   return data[0];
 }
@@ -165,7 +169,11 @@ async function updateCampaign(id: string, c: Partial<Campaign>): Promise<void> {
     headers: HEADERS,
     body: JSON.stringify(c),
   });
-  if (!r.ok) throw new Error('캠페인 수정 실패');
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    console.error('[updateCampaign] 실패', r.status, txt, c);
+    throw new Error(`캠페인 수정 실패 (${r.status}): ${txt || 'unknown'}`);
+  }
 }
 
 async function deleteCampaign(id: string): Promise<void> {
