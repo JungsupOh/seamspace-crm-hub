@@ -1676,25 +1676,44 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     }
   };
 
-  // 동일한 쿠폰코드로 알림톡 재발송
+  // 동일한 쿠폰코드로 재발송 — 캠페인의 trial_license_settings.delivery_channel 따라 알림톡 또는 이메일
   const [resendingId, setResendingId] = useState<string | null>(null);
   const handleResend = async (p: ParticipantRow) => {
-    if (!p.coupon_code || !p.phone) {
-      toast.error('쿠폰코드 또는 연락처가 없어 재발송할 수 없습니다');
+    if (!p.coupon_code) {
+      toast.error('쿠폰코드가 없어 재발송할 수 없습니다');
       return;
     }
+    const channel = campaign.trial_license_settings?.delivery_channel
+      ?? (campaign.form_settings?.locale === 'ja' ? 'email' : 'alimtalk');
     setResendingId(p.id);
     try {
-      await apiSendCoupon({
-        first_name: p.name,
-        phone: p.phone,
-        coupon_code: p.coupon_code,
-        user_limit: p.user_count || '40',
-        duration: p.duration || '1',
-        send_type: 'trial',
-      });
-      toast.success(`${p.name}님에게 재발송 완료 (코드 ${p.coupon_code})`);
+      if (channel === 'email') {
+        if (!p.email) { toast.error('이메일 채널인데 이메일 주소가 없습니다'); return; }
+        const { sendTrialLicenseEmailJP } = await import('@/lib/email');
+        await sendTrialLicenseEmailJP({
+          to: p.email,
+          contactName: p.name,
+          orgName: p.school_name ?? undefined,
+          campaignName: campaign.name,
+          couponCode: p.coupon_code,
+          durationDays: Number(p.duration ?? '1') * 30,
+          userLimit: Number(p.user_count ?? '40'),
+        });
+        toast.success(`${p.name}님에게 이메일 재발송 완료 (코드 ${p.coupon_code})`);
+      } else {
+        if (!p.phone) { toast.error('연락처가 없습니다'); return; }
+        await apiSendCoupon({
+          first_name: p.name,
+          phone: p.phone,
+          coupon_code: p.coupon_code,
+          user_limit: p.user_count || '40',
+          duration: p.duration || '1',
+          send_type: 'trial',
+        });
+        toast.success(`${p.name}님에게 알림톡 재발송 완료 (코드 ${p.coupon_code})`);
+      }
     } catch (e) {
+      console.error('[handleResend] 재발송 실패', e);
       toast.error(`재발송 실패: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setResendingId(null);
