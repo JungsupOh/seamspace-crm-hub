@@ -495,8 +495,16 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
         delivery_channel: formCfg.locale === 'ja' ? 'email' : (trial.delivery_channel ?? 'alimtalk'),
       } : null;
 
+      // start_date / end_date 빈 문자열은 NULL로 변환 (date 컬럼 NOT VALID 거부 방지)
+      const cleanRest = { ...rest } as Record<string, unknown>;
+      if (cleanRest.start_date === '') cleanRest.start_date = null;
+      if (cleanRest.end_date === '')   cleanRest.end_date = null;
+      if (cleanRest.title === '')      cleanRest.title = null;
+      if (cleanRest.description === '') cleanRest.description = null;
+      if (cleanRest.image_url === '')  cleanRest.image_url = null;
+
       const body: Partial<Campaign> = {
-        ...rest,
+        ...(cleanRest as Partial<Campaign>),
         status: form.status as Campaign['status'],
         budget: budget ? Number(budget) : undefined,
         actual_cost: actual_cost ? Number(actual_cost) : undefined,
@@ -504,6 +512,7 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
         form_settings: cleanedFormSettings,
         trial_license_settings: trialPayload,
       };
+      console.log('[Campaign save] payload:', JSON.stringify(body, null, 2));
       if (isEdit) {
         // slug 입력 있으면 사용, 없으면 기존 slug 유지 (없을 시 자동 생성 — 구 events 마이그레이션 대응)
         body.slug = userSlug || initial!.slug || generateSlug();
