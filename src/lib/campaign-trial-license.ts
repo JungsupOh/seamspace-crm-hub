@@ -207,9 +207,10 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
   // 2) 발송 — 채널별 분기. 발송 실패해도 license INSERT는 진행 (수동 재발송 가능)
   let alimtokSent = false;
   let emailSent = false;
+  console.log(`[trial-license] 발급 시작: channel=${channel}, code=${code}, lead.email=${params.lead.email || '(없음)'}`);
   if (channel === 'email') {
     if (!params.lead.email) {
-      console.warn('[trial-license] email 채널이지만 lead.email 없음 — 발송 스킵, 어드민에서 수동 발송 필요');
+      console.error('[trial-license] email 채널이지만 lead.email 없음 — 발송 스킵, 어드민에서 수동 발송 필요');
     } else {
       try {
         await sendTrialLicenseEmailJP({
@@ -223,8 +224,9 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
           serviceExpireAt: expireAt,
         });
         emailSent = true;
+        console.log(`[trial-license] 일본어 이메일 발송 성공 → ${params.lead.email}`);
       } catch (e) {
-        console.warn('[trial-license] 일본어 이메일 발송 실패', e);
+        console.error('[trial-license] 일본어 이메일 발송 실패', e);
       }
     }
   } else {
@@ -239,7 +241,7 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
       });
       alimtokSent = true;
     } catch (e) {
-      console.warn('[trial-license] 알림톡 발송 실패', e);
+      console.error('[trial-license] 알림톡 발송 실패', e);
     }
   }
 
