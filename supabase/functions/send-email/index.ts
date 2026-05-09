@@ -32,7 +32,7 @@ serve(async (req) => {
   }
 
   try {
-    const { to, subject, html, reply_to, cc, attachments } = await req.json();
+    const { to, subject, html, text, reply_to, cc, attachments } = await req.json();
 
     if (!to || !subject || !html) {
       return new Response(JSON.stringify({ error: '필수 파라미터 누락' }), {
@@ -47,6 +47,7 @@ serve(async (req) => {
       subject,
       html,
     };
+    if (text) body.text = text;  // plain text 대체본 — 스팸 점수 큰 폭 감소
     if (reply_to) body.reply_to = reply_to;
     // cc 정책: 호출자가 명시한 cc가 있으면 사용, 없으면 RESEND_DEFAULT_CC 환경변수 fallback (호출자가 빈 문자열/null로 명시 차단 가능)
     if (cc !== null && cc !== '') {

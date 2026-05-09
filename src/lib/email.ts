@@ -14,6 +14,7 @@ async function sendEmail(
   subject: string,
   html: string,
   options?: {
+    text?: string;             // plain text 대체본 (스팸 회피)
     reply_to?: string;
     cc?: string | string[] | null;
     attachments?: Array<{ filename: string; content: string }>;
@@ -21,6 +22,7 @@ async function sendEmail(
 ): Promise<void> {
   const cc = options?.cc === undefined ? DEFAULT_CC : options.cc;
   const body: Record<string, unknown> = { to, subject, html };
+  if (options?.text) body.text = options.text;
   if (options?.reply_to) body.reply_to = options.reply_to;
   if (options?.attachments) body.attachments = options.attachments;
   if (cc) body.cc = cc;
@@ -364,9 +366,9 @@ export async function sendTrialLicenseEmailJP(params: {
     : `発行日から ${params.durationDays} 日間有効`;
 
   const html = layoutJP(`
-    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">${params.contactName} 様、ご来訪ありがとうございました 🎌</h2>
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">${params.contactName} 様、ありがとうございました</h2>
     <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
-      <strong>Seamspace（mDiary）</strong>にご関心をお寄せいただき、誠にありがとうございます。<br/>
+      Seamspace (mDiary) にご関心をお寄せいただき、誠にありがとうございます。<br/>
       ${params.campaignName} のご登録ありがとうございました。下記のトライアルコードを発行いたしました。
     </p>
 
@@ -376,21 +378,16 @@ export async function sendTrialLicenseEmailJP(params: {
       ${expireLine} ・ 最大 ${params.userLimit} ユーザーまでご利用可能
     </p>
 
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:8px;padding:16px;margin:8px 0 24px;">
-      <tr><td style="padding:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">▼ ご利用方法</td></tr>
-      <tr><td style="padding:2px 0;font-size:13px;color:#334155;line-height:1.7;">1. <a href="https://m.seamspace.co.kr" style="color:#6366f1;">https://m.seamspace.co.kr</a> にアクセス</td></tr>
-      <tr><td style="padding:2px 0;font-size:13px;color:#334155;line-height:1.7;">2. 言語設定で「日本語」を選択</td></tr>
-      <tr><td style="padding:2px 0;font-size:13px;color:#334155;line-height:1.7;">3. 学校/組織アカウント登録時に上記コードを入力</td></tr>
-      <tr><td style="padding:2px 0;font-size:13px;color:#334155;line-height:1.7;">4. すぐに mDiary をご利用いただけます</td></tr>
-    </table>
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">ご利用方法</p>
+    <p style="margin:0 0 4px;font-size:13px;color:#334155;line-height:1.7;">1. <a href="https://m.seamspace.co.kr" style="color:#6366f1;">https://m.seamspace.co.kr</a> にアクセス</p>
+    <p style="margin:0 0 4px;font-size:13px;color:#334155;line-height:1.7;">2. 言語設定で「日本語」を選択</p>
+    <p style="margin:0 0 4px;font-size:13px;color:#334155;line-height:1.7;">3. 学校/組織アカウント登録時に上記コードを入力</p>
+    <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">4. すぐに mDiary をご利用いただけます</p>
 
-    <div style="background:#fef3c7;border-left:3px solid #f59e0b;padding:12px 16px;border-radius:6px;margin:0 0 24px;">
-      <p style="margin:0 0 6px;font-size:13px;color:#78350f;font-weight:600;">📅 デモミーティングをご希望の場合</p>
-      <p style="margin:0;font-size:13px;color:#78350f;line-height:1.7;">
-        オンラインで mDiary の活用方法をご案内いたします。<br/>
-        <strong>このメールにそのままご返信ください</strong> — 担当者よりご連絡差し上げます。
-      </p>
-    </div>
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">デモミーティングをご希望の場合</p>
+    <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
+      オンラインで mDiary の活用方法をご案内いたします。<strong>このメールにそのままご返信ください</strong> — 担当者よりご連絡差し上げます。
+    </p>
 
     <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">ご不明な点がございましたら、お気軽にお問い合わせください。</p>
     <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
@@ -403,11 +400,35 @@ export async function sendTrialLicenseEmailJP(params: {
     </p>
   `);
 
+  // plain text 대체본 — Gmail/Outlook 스팸 점수 크게 감소
+  const text = [
+    `${params.contactName} 様、ありがとうございました。`,
+    ``,
+    `Seamspace (mDiary) にご関心をお寄せいただき、誠にありがとうございます。`,
+    `${params.campaignName} のご登録ありがとうございました。`,
+    ``,
+    `トライアルコード: ${params.couponCode}`,
+    `${expireLine} ・ 最大 ${params.userLimit} ユーザーまでご利用可能`,
+    ``,
+    `ご利用方法:`,
+    `1. https://m.seamspace.co.kr にアクセス`,
+    `2. 言語設定で「日本語」を選択`,
+    `3. 学校/組織アカウント登録時に上記コードを入力`,
+    `4. すぐに mDiary をご利用いただけます`,
+    ``,
+    `デモミーティングをご希望の場合は、このメールにそのままご返信ください。`,
+    ``,
+    `お問い合わせ: contact@tebahsoft.com`,
+    `テバソフト株式会社`,
+  ].join('\n');
+
   await sendEmail(
     params.to,
-    `【Seamspace】${params.campaignName} トライアルコードのご案内${params.orgName ? ` - ${params.orgName}` : ''}`,
+    // 풀폭 괄호/이모지 제거 — Gmail 스팸 필터 회피
+    `Seamspace ${params.campaignName} トライアルコードのご案内${params.orgName ? ` - ${params.orgName}` : ''}`,
     html,
     {
+      text,
       reply_to: 'contact@tebahsoft.com',
       // cc는 default(sales@tebahsoft.com) 그대로 — 본사 가시성
     },
