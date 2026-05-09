@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, Fragment } from 'react';
 import { formatPhone } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -1758,8 +1758,22 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
             <tbody className="divide-y divide-border">
               {filtered.map(p => {
                 const statusColor = LEAD_STATUS_META[p.status as LeadStatus]?.color ?? 'bg-slate-100 text-slate-600';
+                // custom_fields 표시용 — 활용방안 + custom_q1~3 (라벨은 form_settings 기반)
+                const cfEntries: { label: string; value: string }[] = [];
+                const cf = p.custom_fields ?? null;
+                if (cf) {
+                  const fs = campaign.form_settings;
+                  if (cf.usage_plan) {
+                    cfEntries.push({ label: fs?.usage_plan?.label || '활용 방안', value: cf.usage_plan });
+                  }
+                  (fs?.custom_questions ?? []).forEach((q, i) => {
+                    const v = cf[`custom_q${i + 1}`];
+                    if (v && q.label) cfEntries.push({ label: q.label, value: v });
+                  });
+                }
                 return (
-                  <tr key={p.id} className="hover:bg-muted/20">
+                  <Fragment key={p.id}>
+                  <tr className="hover:bg-muted/20">
                     <td className="p-2 text-center">
                       <input type="checkbox"
                         checked={selectedIds.has(p.id)}
@@ -1811,6 +1825,11 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
                               : <><Send className="h-3 w-3" />재발송</>}
                           </button>
                         )}
+                        {p.email && (
+                          <span className="text-[10px] text-muted-foreground" title={p.email}>
+                            ✉
+                          </span>
+                        )}
                         <button onClick={() => setDeleteTarget(p)}
                           title="리드 삭제"
                           className="text-muted-foreground hover:text-destructive">
@@ -1819,6 +1838,29 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
                       </div>
                     </td>
                   </tr>
+                  {/* 추가 입력 정보 — custom_fields가 있으면 sub-row로 노출 */}
+                  {(cfEntries.length > 0 || p.email) && (
+                    <tr className="bg-muted/10 border-b border-border/50">
+                      <td className="p-2"></td>
+                      <td colSpan={10} className="px-2 py-1.5">
+                        <div className="space-y-1 text-[11px]">
+                          {p.email && (
+                            <div className="flex gap-2">
+                              <span className="text-muted-foreground shrink-0 w-20">이메일</span>
+                              <span className="font-mono break-all">{p.email}</span>
+                            </div>
+                          )}
+                          {cfEntries.map((e, i) => (
+                            <div key={i} className="flex gap-2">
+                              <span className="text-muted-foreground shrink-0 w-20">{e.label}</span>
+                              <span className="whitespace-pre-wrap break-words">{e.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>

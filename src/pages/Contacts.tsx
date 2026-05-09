@@ -494,12 +494,30 @@ export default function Contacts() {
   const [licenses, setLicenses]             = useState<LicenseRecord[]>([]);
   const [mDiaryCoupons, setMDiaryCoupons]   = useState<MDiaryCoupon[]>([]);
   const [contactDeals, setContactDeals]     = useState<import('@/types/airtable').DealFields[]>([]);
+  // 캠페인 신청 이력 (이 contact의 phone_normalized로 매칭)
+  interface ContactCampaignLead {
+    id: string;
+    campaign_id: string;
+    campaign_name: string;
+    name: string;
+    school_name?: string | null;
+    position?: string | null;
+    email?: string | null;
+    source?: string | null;
+    source_etc?: string | null;
+    custom_fields?: Record<string, string> | null;
+    created_at: string;
+    status: string;
+    coupon_code?: string | null;  // 이 lead로 발급된 체험권
+    form_settings?: { usage_plan?: { label?: string }; custom_questions?: { label: string }[] } | null;
+  }
+  const [campaignLeadsHistory, setCampaignLeadsHistory] = useState<ContactCampaignLead[]>([]);
 
   useEffect(() => {
-    if (!selected) { setLicenses([]); setContactDeals([]); return; }
+    if (!selected) { setLicenses([]); setContactDeals([]); setCampaignLeadsHistory([]); return; }
     const name  = selected.fields.Name ?? '';
     const phone = selected.fields.Phone ?? '';
-    const myPhoneNorm = phone.replace(/\D/g, '');
+    const myPhoneNorm = (selected.fields.phone_normalized ?? phone).replace(/\D/g, '');
 
     // 이용권: 전화번호가 있으면 phone 기준만 사용 (동명이인 격리). phone이 없을 때만 이름 폴백.
     (myPhoneNorm.length >= 9
@@ -515,6 +533,55 @@ export default function Contacts() {
         return !dphone || dphone === myPhoneNorm;  // phone 없는 옛 데이터는 통과
       });
     }).then(setContactDeals).catch(() => setContactDeals([]));
+
+    // 캠페인 신청 이력 — phone_normalized로 campaign_leads 조회 + 캠페인명/체험권 코드 join
+    if (myPhoneNorm.length >= 9) {
+      (async () => {
+        try {
+          const headers = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY };
+          const leadsRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/campaign_leads?phone_normalized=eq.${encodeURIComponent(myPhoneNorm)}&select=id,campaign_id,name,school_name,position,email,source,source_etc,custom_fields,created_at,status&order=created_at.desc`,
+            { headers },
+          );
+          if (!leadsRes.ok) { setCampaignLeadsHistory([]); return; }
+          const leads = await leadsRes.json() as Omit<ContactCampaignLead, 'campaign_name' | 'form_settings' | 'coupon_code'>[];
+          if (leads.length === 0) { setCampaignLeadsHistory([]); return; }
+
+          // 캠페인 이름 + form_settings 조회
+          const campaignIds = Array.from(new Set(leads.map(l => l.campaign_id)));
+          const cRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/campaigns?id=in.(${campaignIds.join(',')})&select=id,name,form_settings`,
+            { headers },
+          );
+          const campaigns = cRes.ok ? await cRes.json() as { id: string; name: string; form_settings: ContactCampaignLead['form_settings'] }[] : [];
+          const cMap = new Map(campaigns.map(c => [c.id, c]));
+
+          // 각 lead의 체험권 코드 (campaign_licenses)
+          const leadIds = leads.map(l => l.id);
+          const licRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/campaign_licenses?lead_id=in.(${leadIds.join(',')})&select=lead_id,coupon_code`,
+            { headers },
+          );
+          const lics = licRes.ok ? await licRes.json() as { lead_id: string; coupon_code: string }[] : [];
+          const lMap = new Map(lics.map(x => [x.lead_id, x.coupon_code]));
+
+          const result: ContactCampaignLead[] = leads.map(l => {
+            const c = cMap.get(l.campaign_id);
+            return {
+              ...l,
+              campaign_name: c?.name ?? '(캠페인 정보 없음)',
+              form_settings: c?.form_settings ?? null,
+              coupon_code: lMap.get(l.id) ?? null,
+            };
+          });
+          setCampaignLeadsHistory(result);
+        } catch {
+          setCampaignLeadsHistory([]);
+        }
+      })();
+    } else {
+      setCampaignLeadsHistory([]);
+    }
   }, [selected?.id]);
 
   useEffect(() => {
@@ -1088,6 +1155,59 @@ export default function Contacts() {
                       ))}
                     </div>
                   </section>
+
+                  {/* 캠페인 신청 이력 */}
+                  {campaignLeadsHistory.length > 0 && (
+                    <section>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                        🎯 캠페인 신청 이력 <span className="text-muted-foreground/60">({campaignLeadsHistory.length}건)</span>
+                      </p>
+                      <div className="space-y-2">
+                        {campaignLeadsHistory.map(l => {
+                          const cf = l.custom_fields ?? null;
+                          const fs = l.form_settings;
+                          const cfEntries: { label: string; value: string }[] = [];
+                          if (cf) {
+                            if (cf.usage_plan) cfEntries.push({ label: fs?.usage_plan?.label || '활용 방안', value: cf.usage_plan });
+                            (fs?.custom_questions ?? []).forEach((q, i) => {
+                              const v = cf[`custom_q${i + 1}`];
+                              if (v && q.label) cfEntries.push({ label: q.label, value: v });
+                            });
+                          }
+                          return (
+                            <div key={l.id} className="rounded-lg border border-purple-100 bg-purple-50/40 px-3 py-2.5 text-xs">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="rounded-full px-2 py-0.5 text-[11px] font-medium bg-purple-100 text-purple-700 shrink-0">
+                                  {l.campaign_name}
+                                </span>
+                                <span className="text-muted-foreground/70 shrink-0">{l.created_at.slice(0, 10)}</span>
+                                {l.coupon_code && (
+                                  <span className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded shrink-0">
+                                    🎫 {l.coupon_code}
+                                  </span>
+                                )}
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 shrink-0 ml-auto">
+                                  {l.status}
+                                </span>
+                              </div>
+                              <div className="mt-1.5 space-y-0.5 pl-1">
+                                {l.school_name && <div><span className="text-muted-foreground">학교</span> {l.school_name}</div>}
+                                {l.position && <div><span className="text-muted-foreground">담당</span> {l.position}</div>}
+                                {l.email && <div><span className="text-muted-foreground">이메일</span> <span className="font-mono">{l.email}</span></div>}
+                                {l.source && <div><span className="text-muted-foreground">경로</span> {l.source === '기타' ? (l.source_etc || '기타') : l.source}</div>}
+                                {cfEntries.map((e, i) => (
+                                  <div key={i} className="pt-0.5">
+                                    <span className="text-muted-foreground">{e.label}</span>
+                                    <div className="whitespace-pre-wrap break-words text-foreground mt-0.5">{e.value}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  )}
 
                   {/* 이용권 현황 */}
                   {licenses.length > 0 && (
