@@ -81,6 +81,18 @@ export default function CampaignForm() {
   const isJP = formCfg.locale === 'ja';
   // 일본어/한국어 문자열 헬퍼 (i18n 라이브러리 도입 없이 인라인)
   const t = (ko: string, ja: string) => (isJP ? ja : ko);
+  // 저장된 라벨이 한국어인데 일본어 캠페인이면 일본어 default로 폴백 (legacy 데이터 방어)
+  const HANGUL_RE = /[가-힯]/;
+  const localeLabel = (saved: string | undefined, koDefault: string, jaDefault: string): string => {
+    const s = (saved ?? '').trim();
+    if (!s) return isJP ? jaDefault : koDefault;
+    if (isJP && HANGUL_RE.test(s)) return jaDefault;
+    if (!isJP && /[぀-ヿ一-鿿]/.test(s) && !HANGUL_RE.test(s)) return koDefault;
+    return s;
+  };
+  const schoolLabel    = localeLabel(formCfg.school.label,     '학교명',    '学校名・組織名');
+  const roleLabel      = localeLabel(formCfg.role.label,       '담당 업무',   'ご担当・役職');
+  const usagePlanLabel = localeLabel(formCfg.usage_plan.label, '활용 방안',   '利用目的・関心領域');
 
   // 캠페인 로드 시 customAnswers 길이 맞춤
   useEffect(() => {
@@ -175,14 +187,14 @@ export default function CampaignForm() {
     // 옵션 필드 — 켜져있을 때만 검증
     if (formCfg.school.enabled && !schoolInfo && !schoolQuery.trim()) {
       alert(t(
-        `${formCfg.school.label || '학교명'}을(를) 입력해주세요.`,
-        `${formCfg.school.label || '学校名・組織名'} を入力してください。`,
+        `${schoolLabel}을(를) 입력해주세요.`,
+        `${schoolLabel} を入力してください。`,
       )); return;
     }
     if (formCfg.role.enabled && !position.trim()) {
       alert(t(
-        `${formCfg.role.label || '담당 업무'}을(를) 입력해주세요.`,
-        `${formCfg.role.label || 'ご担当・役職'} を入力してください。`,
+        `${roleLabel}을(를) 입력해주세요.`,
+        `${roleLabel} を入力してください。`,
       )); return;
     }
     if (formCfg.source.enabled && !isJP) {
@@ -439,10 +451,10 @@ export default function CampaignForm() {
   return (
     <div className="min-h-screen bg-muted/20 py-6 px-4">
       <div className="max-w-md mx-auto bg-card rounded-xl shadow-lg ring-1 ring-border overflow-hidden">
-        {/* 상단 이미지 */}
+        {/* 상단 이미지 — 가장자리 여백 확보 */}
         {campaign.image_url && (
-          <div className="bg-muted/10">
-            <img src={campaign.image_url} alt={campaign.name} className="w-full h-auto" />
+          <div className="bg-muted/10 px-6 pt-6 pb-2">
+            <img src={campaign.image_url} alt={campaign.name} className="w-full h-auto rounded-md" />
           </div>
         )}
 
@@ -459,7 +471,7 @@ export default function CampaignForm() {
           {/* 학교/기관명 (옵션) — 일본어 캠페인에서는 항상 free_text */}
           {formCfg.school.enabled && (
             <div ref={schoolRef} className="relative space-y-1.5">
-              <Label className="text-xs">{formCfg.school.label || t('학교명', '学校名・組織名')} <span className="text-destructive">*</span></Label>
+              <Label className="text-xs">{schoolLabel} <span className="text-destructive">*</span></Label>
               <div className="relative">
                 <Input
                   value={schoolQuery}
@@ -471,10 +483,10 @@ export default function CampaignForm() {
                   }}
                   placeholder={(isJP || formCfg.school.mode === 'free_text')
                     ? t(
-                        `${formCfg.school.label || '기관명'}을 입력하세요`,
-                        `${formCfg.school.label || '学校名・組織名'}を入力してください`,
+                        `${schoolLabel}을 입력하세요`,
+                        `${schoolLabel}を入力してください`,
                       )
-                    : `${formCfg.school.label || '학교명'}을 입력하세요 (2자 이상)`}
+                    : `${schoolLabel}을 입력하세요 (2자 이상)`}
                   className="h-10 text-sm pr-9"
                 />
                 <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
@@ -511,7 +523,7 @@ export default function CampaignForm() {
           {/* 직책/전공 (옵션) */}
           {formCfg.role.enabled && (
             <div className="space-y-1.5">
-              <Label className="text-xs">{formCfg.role.label || t('담당 업무', 'ご担当・役職')} <span className="text-destructive">*</span></Label>
+              <Label className="text-xs">{roleLabel} <span className="text-destructive">*</span></Label>
               <Input value={position} onChange={e => setPosition(e.target.value)}
                 placeholder={t('예: 담임, 상담교사, 컴퓨터교육과', '例: 担任、教務主任、ICT 担当')} className="h-10 text-sm" />
             </div>
@@ -545,7 +557,7 @@ export default function CampaignForm() {
           {/* 활용 방안 (옵션, 서술형) */}
           {formCfg.usage_plan.enabled && (
             <div className="space-y-1.5">
-              <Label className="text-xs">{formCfg.usage_plan.label || t('활용 방안', '利用目的・関心領域')}</Label>
+              <Label className="text-xs">{usagePlanLabel}</Label>
               <textarea
                 value={usagePlan}
                 onChange={e => setUsagePlan(e.target.value)}

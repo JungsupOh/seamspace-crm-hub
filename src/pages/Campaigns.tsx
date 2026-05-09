@@ -406,13 +406,32 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
   });
   // locale 변경 시 자동 분기:
   // - ja면 학교 모드는 free_text 강제, trial 채널은 email 강제
-  // - ko로 돌아오면 사용자 선택을 다시 살림 (단, 강제 분기 직전 값은 보존하지 않음 — 단순화)
+  // - 라벨이 한국어 default 그대로면 일본어 default로 치환 (사용자가 커스텀한 라벨은 보존)
+  // - ko로 돌아오면 일본어 default → 한국어 default로 역치환
+  const KO_DEFAULT_LABELS = { school: '학교명', role: '담당 업무', usage_plan: '활용 방안' };
+  const JA_DEFAULT_LABELS = { school: '学校名・組織名', role: 'ご担当・役職', usage_plan: '利用目的・関心領域' };
   const setLocale = (loc: CampaignLocale) => {
-    setFormCfg(c => ({
-      ...c,
-      locale: loc,
-      school: { ...c.school, mode: loc === 'ja' ? 'free_text' : c.school.mode },
-    }));
+    setFormCfg(c => {
+      const from = loc === 'ja' ? KO_DEFAULT_LABELS : JA_DEFAULT_LABELS;
+      const to   = loc === 'ja' ? JA_DEFAULT_LABELS : KO_DEFAULT_LABELS;
+      const swap = (k: keyof typeof from, current: string | undefined): string => {
+        const cur = (current ?? '').trim();
+        // 현재가 비어있거나 반대 locale의 default와 같으면 새 default로 치환
+        if (!cur || cur === from[k]) return to[k];
+        return cur;
+      };
+      return {
+        ...c,
+        locale: loc,
+        school: {
+          ...c.school,
+          mode:  loc === 'ja' ? 'free_text' : c.school.mode,
+          label: swap('school', c.school.label),
+        },
+        role: { ...c.role, label: swap('role', c.role.label) },
+        usage_plan: { ...c.usage_plan, label: swap('usage_plan', c.usage_plan.label) },
+      };
+    });
     if (loc === 'ja') {
       setTrial(t => ({ ...t, delivery_channel: 'email' }));
     } else {
@@ -512,7 +531,6 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
         form_settings: cleanedFormSettings,
         trial_license_settings: trialPayload,
       };
-      console.log('[Campaign save] payload:', JSON.stringify(body, null, 2));
       if (isEdit) {
         // slug 입력 있으면 사용, 없으면 기존 slug 유지 (없을 시 자동 생성 — 구 events 마이그레이션 대응)
         body.slug = userSlug || initial!.slug || generateSlug();
