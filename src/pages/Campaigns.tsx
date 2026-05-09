@@ -810,7 +810,7 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                 onChange={e => setTrial(t => ({ ...t, enabled: e.target.checked }))}
                 className="accent-primary"
               />
-              <span className="text-sm font-semibold">체험 이용권 — 캠페인 리드에게 mDiary 체험권 발급</span>
+              <span className="text-sm font-semibold">체험 이용권 — 캠페인 리드에게 seamspace 체험권 발급</span>
             </label>
             {trial.enabled && (
               <div className="space-y-2 pl-5">

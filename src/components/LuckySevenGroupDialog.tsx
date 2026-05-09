@@ -583,7 +583,7 @@ function GroupDetail({ group, campaignName, onClose, onChange, refreshKey }: { g
                 )}
                 {isIssued && (
                   <p className="text-destructive font-medium">
-                    ⚠️ 라이선스가 이미 발급되어 사용자에게 전달되었습니다. mDiary 쿠폰은 외부 시스템이라 삭제되지 않습니다.
+                    ⚠️ 라이선스가 이미 발급되어 사용자에게 전달되었습니다. seamspace 쿠폰은 외부 시스템이라 삭제되지 않습니다.
                   </p>
                 )}
                 <p className="pt-1">계속하시겠습니까?</p>

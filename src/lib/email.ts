@@ -368,7 +368,7 @@ export async function sendTrialLicenseEmailJP(params: {
   const html = layoutJP(`
     <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">${params.contactName} 様、ありがとうございました</h2>
     <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
-      Seamspace (mDiary) にご関心をお寄せいただき、誠にありがとうございます。<br/>
+      seamspace にご関心をお寄せいただき、誠にありがとうございます。<br/>
       ${params.campaignName} のご登録ありがとうございました。下記のトライアルコードを発行いたしました。
     </p>
 
@@ -379,14 +379,14 @@ export async function sendTrialLicenseEmailJP(params: {
     </p>
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">ご利用方法</p>
-    <p style="margin:0 0 4px;font-size:13px;color:#334155;line-height:1.7;">1. <a href="https://m.seamspace.co.kr" style="color:#6366f1;">https://m.seamspace.co.kr</a> にアクセス</p>
-    <p style="margin:0 0 4px;font-size:13px;color:#334155;line-height:1.7;">2. 言語設定で「日本語」を選択</p>
-    <p style="margin:0 0 4px;font-size:13px;color:#334155;line-height:1.7;">3. 学校/組織アカウント登録時に上記コードを入力</p>
-    <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">4. すぐに mDiary をご利用いただけます</p>
+    <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
+      ご利用開始の手順は、添付の <strong>Quick Guide (PDF)</strong> をご参照ください。<br/>
+      アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
+    </p>
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">デモミーティングをご希望の場合</p>
     <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
-      オンラインで mDiary の活用方法をご案内いたします。<strong>このメールにそのままご返信ください</strong> — 担当者よりご連絡差し上げます。
+      オンラインで seamspace の活用方法をご案内いたします。<strong>このメールにそのままご返信ください</strong> — 担当者よりご連絡差し上げます。
     </p>
 
     <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">ご不明な点がございましたら、お気軽にお問い合わせください。</p>
@@ -404,23 +404,44 @@ export async function sendTrialLicenseEmailJP(params: {
   const text = [
     `${params.contactName} 様、ありがとうございました。`,
     ``,
-    `Seamspace (mDiary) にご関心をお寄せいただき、誠にありがとうございます。`,
+    `seamspace にご関心をお寄せいただき、誠にありがとうございます。`,
     `${params.campaignName} のご登録ありがとうございました。`,
     ``,
     `トライアルコード: ${params.couponCode}`,
     `${expireLine} ・ 最大 ${params.userLimit} ユーザーまでご利用可能`,
     ``,
-    `ご利用方法:`,
-    `1. https://m.seamspace.co.kr にアクセス`,
-    `2. 言語設定で「日本語」を選択`,
-    `3. 学校/組織アカウント登録時に上記コードを入力`,
-    `4. すぐに mDiary をご利用いただけます`,
+    `ご利用開始の手順は、添付の Quick Guide (PDF) をご参照ください。`,
+    `アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。`,
     ``,
     `デモミーティングをご希望の場合は、このメールにそのままご返信ください。`,
     ``,
     `お問い合わせ: contact@tebahsoft.com`,
     `テバソフト株式会社`,
   ].join('\n');
+
+  // Quick Guide PDF 첨부 (public/docs/Quick Guide_HowToStart(JP).pdf)
+  // public 자산은 fetch로 base64로 읽어서 첨부.
+  let attachments: Array<{ filename: string; content: string }> | undefined;
+  try {
+    const r = await fetch('/docs/Quick%20Guide_HowToStart(JP).pdf');
+    if (r.ok) {
+      const blob = await r.blob();
+      const buf = await blob.arrayBuffer();
+      // base64 인코딩
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+      }
+      const base64 = btoa(binary);
+      attachments = [{ filename: 'seamspace_QuickGuide_JP.pdf', content: base64 }];
+    } else {
+      console.warn('[sendTrialLicenseEmailJP] Quick Guide PDF 로드 실패', r.status);
+    }
+  } catch (e) {
+    console.warn('[sendTrialLicenseEmailJP] Quick Guide PDF 첨부 실패 (메일은 진행)', e);
+  }
 
   await sendEmail(
     params.to,
@@ -430,6 +451,7 @@ export async function sendTrialLicenseEmailJP(params: {
     {
       text,
       reply_to: 'contact@tebahsoft.com',
+      attachments,
       // cc는 default(sales@tebahsoft.com) 그대로 — 본사 가시성
     },
   );

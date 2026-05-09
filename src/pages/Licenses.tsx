@@ -358,7 +358,7 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
               Phone:            updated[i].contact_phone,
               phone_normalized: normPhone,
               Org_Name:         updated[i].org_name || undefined,
-              Lead_Source:      'mDiary 이용권',
+              Lead_Source:      'seamspace 이용권',
             });
           } else if (!existing[0].fields.phone_normalized) {
             // 기존 레코드에 phone_normalized가 없으면 백필
@@ -914,7 +914,7 @@ export default function Licenses() {
               Name: name,
               Org_Name: usedCoupon.group_name || usedCoupon.descript || undefined,
               Lead_Stage: '체험',
-              Notes: `[mDiary 체험권] 코드: ${usedCoupon.coupon_code} | 발급: ${usedCoupon.created_at.slice(0, 10)}${usedCoupon.edu_office_name ? ` | ${usedCoupon.edu_office_name}` : ''}`,
+              Notes: `[seamspace 체험권] 코드: ${usedCoupon.coupon_code} | 발급: ${usedCoupon.created_at.slice(0, 10)}${usedCoupon.edu_office_name ? ` | ${usedCoupon.edu_office_name}` : ''}`,
             });
             newContactId = newContact.id;
             created++;

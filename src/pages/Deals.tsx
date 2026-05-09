@@ -3556,7 +3556,7 @@ export default function Deals() {
           {canEdit && <DealUploadDialog existingDeals={deals} onDone={() => qc.invalidateQueries({ queryKey: ['deals'] })} />}
           {canEdit && (
             <Button size="sm" variant="outline" onClick={handleAutoDealLink} disabled={autoDealLinking || stageSyncing}
-              title="mDiary 학교명 기준으로 이용권을 딜에 자동 연결">
+              title="seamspace 학교명 기준으로 이용권을 딜에 자동 연결">
               <CheckCircle2 className={`h-4 w-4 mr-1 ${autoDealLinking ? 'animate-pulse' : ''}`} />
               {autoDealLinking ? autoDealLinkProgress || '연결 중...' : '이용권 자동 연결'}
             </Button>

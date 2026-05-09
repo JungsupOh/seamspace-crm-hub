@@ -245,7 +245,7 @@ function AddContactDialog({ open, onClose }: { open: boolean; onClose: () => voi
     // mDiary 쿠폰 이력 자동 매칭 확인
     const coupons = await getMDiaryCouponsByName(f.Name.trim()).catch(() => []);
     if (coupons.length > 0) {
-      toast.success(`고객 추가 완료 — mDiary 체험 이력 ${coupons.length}건 연결됨`);
+      toast.success(`고객 추가 완료 — seamspace 체험 이력 ${coupons.length}건 연결됨`);
     } else {
       toast.success('고객이 추가되었습니다');
     }

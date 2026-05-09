@@ -1000,7 +1000,7 @@ function OrderDetailDialog(props: {
               <div className="text-sm font-semibold text-destructive">주문 삭제</div>
               <div className="text-xs text-muted-foreground">
                 {hasDigital
-                  ? '⚠️ 디지털 발급분(딜/이용권)도 함께 삭제됩니다. mDiary 쿠폰은 외부 시스템이라 삭제 안 됨.'
+                  ? '⚠️ 디지털 발급분(딜/이용권)도 함께 삭제됩니다. seamspace 쿠폰은 외부 시스템이라 삭제 안 됨.'
                   : order.status === '결제완료' || order.status === '배송준비' || order.status === '배송중'
                   ? '⚠️ 결제 환불은 별도 처리 필요. 주문 데이터만 삭제됩니다.'
                   : '주문 데이터를 영구 삭제합니다.'}
@@ -1031,7 +1031,7 @@ function OrderDetailDialog(props: {
                   )}
                   {hasDigital && (
                     <p className="text-destructive font-medium">
-                      ⚠️ mDiary 발급된 쿠폰은 외부 시스템이라 그대로 남습니다.
+                      ⚠️ seamspace 발급된 쿠폰은 외부 시스템이라 그대로 남습니다.
                     </p>
                   )}
                   <p className="pt-1">계속하시겠습니까?</p>
