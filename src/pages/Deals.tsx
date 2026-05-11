@@ -1136,8 +1136,45 @@ function DealForm({
     }
   }, [f.Contact_Name, f.Contact_Phone, f.Contact_Email]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Quote_Plan이 비동기 로드되거나 dealUsers 초기화 시점에 stale이었을 경우 보정 —
+  // primary user의 plan_name이 비어있거나 deal의 Quote_Plan과 불일치하면 동기화 + 그에 맞춰 capacity 갱신
+  useEffect(() => {
+    if (!dealUsersLoaded) return;
+    const dealPlan = initial?.Quote_Plan;
+    if (!dealPlan) return;
+    setDealUsers(prev => {
+      if (prev.length === 0) return prev;
+      const first = prev[0];
+      const expectedCap = resolvePlanCapacity(dealPlan).capacity;
+      const currentCap = resolvePlanCapacity(first.plan_name).capacity;
+      const needsPlanSync  = !first.plan_name || first.plan_name !== dealPlan;
+      // student_count가 비어있거나, 현재 plan_name의 default와 같다면(=사용자 수동 입력 X) deal plan의 capacity로 sync
+      const needsCountSync = !first.student_count || first.student_count === currentCap;
+      if (!needsPlanSync && !needsCountSync) return prev;
+      const next = [...prev];
+      next[0] = {
+        ...first,
+        plan_name:     needsPlanSync  ? dealPlan : first.plan_name,
+        student_count: needsCountSync ? expectedCap : first.student_count,
+      };
+      return next;
+    });
+  }, [initial?.Quote_Plan, dealUsersLoaded]);
+
   const updateDealUser = (idx: number, field: keyof DealUserInput, value: unknown) => {
-    setDealUsers(prev => prev.map((u, i) => i === idx ? { ...u, [field]: value } : u));
+    setDealUsers(prev => prev.map((u, i) => {
+      if (i !== idx) return u;
+      // plan_name 변경 시 student_count도 해당 플랜의 capacity로 자동 동기화 (사용자가 직접 student_count 수정 후엔 그대로 유지)
+      if (field === 'plan_name' && typeof value === 'string') {
+        const newCap = resolvePlanCapacity(value).capacity;
+        const prevCap = resolvePlanCapacity(u.plan_name).capacity;
+        // 기존 student_count가 직전 plan의 default였다면 (= 사용자가 별도로 안 만진 상태) 새 plan의 default로 갱신
+        if (!u.student_count || u.student_count === prevCap) {
+          return { ...u, plan_name: value, student_count: newCap };
+        }
+      }
+      return { ...u, [field]: value };
+    }));
   };
   const addDealUser = () => {
     const base = dealUsers[0];
