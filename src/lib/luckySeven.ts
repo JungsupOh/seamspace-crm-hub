@@ -634,6 +634,21 @@ export async function createDealFromLuckySevenGroup(params: {
 // ─────────────────────────────────────────────────
 
 export async function issueLuckySevenLicenses(group: LSGroupRow, members: LSLeadRow[]): Promise<void> {
+  // 사전: 이 그룹에 연결된 deal_id 조회 (quote_number = group.group_code)
+  // 각 멤버 쿠폰을 deal_licenses에도 INSERT해서 딜관리/이용권관리에서 확인 가능하도록 한다.
+  let dealId: string | null = null;
+  try {
+    const dr = await fetch(
+      `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(group.group_code)}&select=id&limit=1`,
+      { headers: HEADERS },
+    );
+    if (dr.ok) {
+      const rows = await dr.json() as { id: string }[];
+      dealId = rows[0]?.id ?? null;
+    }
+  } catch (e) { console.warn('[issueLuckySevenLicenses] deal 조회 실패', e); }
+  if (!dealId) console.warn(`[issueLuckySevenLicenses] deal 매칭 없음 — group_code=${group.group_code}, deal_licenses INSERT 스킵`);
+
   for (const m of members) {
     // 1) 쿠폰 생성
     const couponCode = await apiCreateCoupon(
@@ -659,6 +674,35 @@ export async function issueLuckySevenLicenses(group: LSGroupRow, members: LSLead
         service_expire_at: LS_SERVICE_EXPIRE_AT,
       }),
     });
+
+    // 2-b) deal_licenses 행도 생성 — 딜관리/이용권관리에 코드 노출
+    if (dealId) {
+      // 중복 코드 skip (재발급 시 안전망)
+      try {
+        const dupCheck = await fetch(
+          `${SUPABASE_URL}/rest/v1/deal_licenses?coupon_code=eq.${encodeURIComponent(couponCode)}&select=id&limit=1`,
+          { headers: HEADERS },
+        );
+        const dups = dupCheck.ok ? (await dupCheck.json() as { id: string }[]) : [];
+        if (dups.length === 0) {
+          await fetch(`${SUPABASE_URL}/rest/v1/deal_licenses`, {
+            method: 'POST',
+            headers: { ...HEADERS, Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              deal_id:           dealId,
+              coupon_code:       couponCode,
+              contact_name:      m.name,
+              contact_phone:     m.phone,
+              org_name:          m.school_name,
+              duration:          String(LS_DURATION_MONTHS),
+              user_count:        String(LS_USER_COUNT),
+              status:            '대기',
+              service_expire_at: LS_SERVICE_EXPIRE_AT,
+            }),
+          });
+        }
+      } catch (e) { console.warn(`[issueLuckySevenLicenses] deal_licenses INSERT 실패 (${m.name})`, e); }
+    }
 
     // 3) 쿠폰 알림톡 발송 (기존 인프라)
     await apiSendCoupon({
