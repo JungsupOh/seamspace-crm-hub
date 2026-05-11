@@ -955,6 +955,16 @@ function DealForm({
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   // ── 견적 탭 상태 ───────────────────────────────
+  // 잘못된 (plan, duration) 조합을 로드 시 자동 보정 (예: 소수학급플랜 + 1개월 → 최소 4개월로)
+  const normalizeItem = (it: QuoteLineItem): QuoteLineItem => {
+    const minDur = getMinDuration(it.plan);
+    if (it.duration < minDur) {
+      const fixedDur = minDur;
+      const fixedPrice = it.unit_price && it.duration === fixedDur ? it.unit_price : 0;
+      return { ...it, duration: fixedDur, unit_price: fixedPrice, amount: fixedPrice * it.qty };
+    }
+    return it;
+  };
   const [localTabs, setLocalTabs] = useState<QuoteTab[]>(() => {
     if (draftIsMeaningful && draft?.tabs) return draft.tabs;
     if (initialQuotes && initialQuotes.length > 0) {
@@ -970,6 +980,8 @@ function DealForm({
             s2b_number: getS2BNumber(q.plan, q.duration),
           }];
         }
+        // 보정: 잘못된 plan+duration 조합 (소수학급 < 4개월 등) 자동 수정
+        items = items.map(normalizeItem);
         return ({
         id: q.id, is_selected: q.is_selected,
         quote_number: q.quote_number, quote_date: q.quote_date,
