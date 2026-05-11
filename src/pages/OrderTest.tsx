@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { formatPhone } from '@/lib/utils';
 import { searchSchools, SchoolInfo } from '@/lib/neis';
 import { notifyWebQuote, notifyWebPayment, notifyWebLicenseIssued } from '@/lib/telegram';
+import { upsertLeadContact } from '@/lib/luckySeven';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -552,16 +553,63 @@ export default function OrderTest() {
         'Content-Type': 'application/json',
       };
 
-      // 1) deals 행 INSERT — /딜관리에 가시화. created deal_id를 deal_quotes에 연결.
+      // 1) 동일 phone의 기존 deal 전체 검색 (재구매 분류 + 머지 판정 동시)
+      // 클로즈 상태: 입금완료/이용권발송완료/딜취소/계약파기/Closed_Won/Contract
+      const CLOSED_STAGES = ['입금완료', '이용권 발송완료', '딜취소', '계약파기', 'Closed_Won', 'Contract'];
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
       let dealId: string = 'web';
+      let mergedIntoExisting = false;
+      let dealType: 'New' | 'Renewal' = 'New';
       try {
+        // 전체 기간의 동일 phone deal — 재구매(Renewal) 판정용
+        const allRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/deals?contact_phone=eq.${encodeURIComponent(info.phone)}&select=id,deal_stage,created_date,quote_number&order=created_date.desc&limit=20`,
+          { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+        );
+        if (allRes.ok) {
+          const all = await allRes.json() as { id: string; deal_stage: string; created_date: string; quote_number: string }[];
+          // Renewal: 과거 클로즈된 deal이 1건 이상이면 재구매로 분류
+          if (all.some(d => CLOSED_STAGES.includes(d.deal_stage))) {
+            dealType = 'Renewal';
+          }
+          // Merge: 최근 30일 + 미클로즈 deal이 있으면 거기에 머지
+          const open = all.find(d => !CLOSED_STAGES.includes(d.deal_stage) && d.created_date >= thirtyDaysAgo);
+          if (open) {
+            dealId = open.id;
+            mergedIntoExisting = true;
+            setSavedDealId(dealId);
+            console.log(`[saveWebQuote] 기존 오픈 딜 머지: deal_id=${dealId} (created ${open.created_date}, quote ${open.quote_number})`);
+            // 기존 딜의 surface 정보를 가장 최근 견적으로 갱신
+            await fetch(`${SUPABASE_URL}/rest/v1/deals?id=eq.${dealId}`, {
+              method: 'PATCH',
+              headers: { ...restHeaders, Prefer: 'return=minimal' },
+              body: JSON.stringify({
+                quote_date:          today,
+                quote_qty:           info.qty,
+                quote_plan:          planLabel,
+                quote_number:        qNum,     // 가장 최근 견적번호
+                license_duration:    selectedProduct.code === '01' ? info.months : null,
+                unit_price:          selectedProduct.code === '01' ? unitPrice : null,
+                supply_price:        selectedProduct.code === '01' ? supply : null,
+                tax_amount:          selectedProduct.code === '01' ? tax : null,
+                final_contract_value: selectedProduct.code === '01' ? total : null,
+              }),
+            }).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn('[saveWebQuote] 기존 딜 검색 예외', e);
+      }
+
+      // 2) 신규 딜이면 INSERT — deal_type은 위에서 판정 (New / Renewal)
+      if (!mergedIntoExisting) try {
         const dealRes = await fetch(`${SUPABASE_URL}/rest/v1/deals`, {
           method: 'POST',
           headers: { ...restHeaders, Prefer: 'return=representation' },
           body: JSON.stringify({
             deal_name:           `심스페이스-${selectedProduct.name} - ${info.orgName}`,
             deal_stage:          '견적',
-            deal_type:           'New',
+            deal_type:           dealType,
             contact_name:        info.contactName,
             contact_phone:       info.phone,
             contact_email:       info.email.trim() || null,
@@ -594,7 +642,16 @@ export default function OrderTest() {
         console.warn('[saveWebQuote] deals INSERT 예외', e);
       }
 
-      // 2) deal_quotes INSERT — deals.id 연결
+      // 머지된 딜이면 기존 quote들의 is_selected=false 처리 (가장 최근 quote를 active로)
+      if (mergedIntoExisting && dealId !== 'web') {
+        await fetch(`${SUPABASE_URL}/rest/v1/deal_quotes?deal_id=eq.${dealId}&is_selected=is.true`, {
+          method: 'PATCH',
+          headers: { ...restHeaders, Prefer: 'return=minimal' },
+          body: JSON.stringify({ is_selected: false }),
+        }).catch(() => {});
+      }
+
+      // 3) deal_quotes INSERT — deals.id 연결 (머지든 신규든 항상 새 행 INSERT)
       const saveRes = await fetch(`${SUPABASE_URL}/rest/v1/deal_quotes`, {
         method: 'POST',
         headers: { ...restHeaders, Prefer: 'return=minimal' },
@@ -610,6 +667,7 @@ export default function OrderTest() {
           final_value: selectedProduct.code === '01' ? total : undefined,
           contact_phone: phoneNorm,
           quote_date: today,
+          is_selected: true,
           notes: `[웹주문] 상품: 심스페이스-${selectedProduct.name} / 기관: ${info.orgName} / 담당자: ${info.contactName} / 연락처: ${info.phone} / 이메일: ${info.email}${info.students ? ` / 학생수: ${info.students}명` : ''}`,
           // 웹 주문 필드
           source: 'web',
@@ -624,7 +682,29 @@ export default function OrderTest() {
       });
       if (saveRes.ok || saveRes.status === 201) {
         setSavedQuoteNum(qNum);
-        // 텔레그램 알림
+
+        // 4) contacts upsert + 활동이력 누적 (동일 phone의 모든 deal/quote가 한 고객 히스토리에 쌓이도록)
+        // 머지든 신규든 항상 호출 — 동일 contact 정보 보강 + 활동이력 추가
+        try {
+          const activityNote = `[${today}] 웹 견적서 발급 — ${qNum} / ${planLabel} ${info.months}개월 × ${info.qty} / ${total.toLocaleString()}원${mergedIntoExisting ? ' (기존 딜에 추가)' : (dealType === 'Renewal' ? ' (재구매)' : '')}`;
+          await upsertLeadContact(
+            {
+              name: info.contactName,
+              phone: info.phone,
+              email: info.email.trim(),
+              orgName: info.orgName,
+            },
+            {
+              country: 'kr',
+              leadSource: 'Web 견적',
+              activityNote,
+            },
+          );
+        } catch (e) {
+          console.warn('[saveWebQuote] contacts upsert 실패 (무시)', e);
+        }
+
+        // 5) 텔레그램 알림
         notifyWebQuote({
           quoteNumber: qNum,
           orgName: info.orgName,
