@@ -23,6 +23,28 @@ export const PLAN_CAPACITY: Record<string, number> = {
   '럭키세븐이벤트플랜': 40,
 };
 
+// 플랜명 변형(공백 포함 등) 정규화 + capacity 조회.
+// 예: '소수학급 플랜', '학급플랜', '학년플랜 (200명)' → 정확한 PLAN_CAPACITY 키로 매핑.
+export function resolvePlanCapacity(planLabel?: string | null): { capacity: number; key: string } {
+  const raw = (planLabel ?? '').trim();
+  if (!raw) return { capacity: 40, key: '학급플랜' };
+  const normalized = raw.replace(/\s+/g, '');  // 공백 제거
+  if (PLAN_CAPACITY[normalized] != null) return { capacity: PLAN_CAPACITY[normalized], key: normalized };
+  for (const key of Object.keys(PLAN_CAPACITY)) {
+    if (normalized.includes(key.replace(/\s+/g, ''))) return { capacity: PLAN_CAPACITY[key], key };
+  }
+  return { capacity: 40, key: '학급플랜' };
+}
+
+// 플랜별 판매 최소 개월수 (소수학급은 4개월 이상부터)
+export const PLAN_MIN_DURATION: Record<string, number> = {
+  '소수학급플랜': 4,
+};
+export function getMinDuration(plan?: string | null): number {
+  const { key } = resolvePlanCapacity(plan);
+  return PLAN_MIN_DURATION[key] ?? 1;
+}
+
 // 학년플랜 이상 = "대형 플랜" — 이용권 무제한, 기간 중 전체 인원 커버
 const BIG_PLANS = ['학년플랜', '학교(소)', '학교(중)', '학교(대)'];
 

@@ -30,7 +30,7 @@ import { uploadDealFile, parseFileLinks, getDealFiles, saveDealFileRecord, delet
 import { searchSchools, SchoolInfo } from '@/lib/neis';
 import { generateQuotePdf, generateQuotePdfBlob } from '@/lib/generateQuotePdf';
 import { sendQuoteEmail } from '@/lib/email';
-import { QuoteLineItem, PLAN_LIST, DURATION_OPTIONS, makeItem, recommendItems, calcQuoteTotals, getS2BNumber } from '@/lib/pricing';
+import { QuoteLineItem, PLAN_LIST, DURATION_OPTIONS, makeItem, recommendItems, calcQuoteTotals, getS2BNumber, resolvePlanCapacity, getMinDuration } from '@/lib/pricing';
 import { notifyNewDeal } from '@/lib/telegram';
 import { syncPartnerDealDates } from '@/lib/partner-deals';
 import { getDealUsers, saveDealUsers, type DealUserInput } from '@/lib/deal-users';
@@ -1107,7 +1107,8 @@ function DealForm({
         } else {
           setDealUsers([{
             user_name: initial?.Contact_Name, user_phone: initial?.Contact_Phone, user_email: initial?.Contact_Email,
-            student_count: 40, month_count: initial?.License_Duration, plan_name: initial?.Quote_Plan || '학급별', is_primary: true,
+            student_count: resolvePlanCapacity(initial?.Quote_Plan).capacity,
+            month_count: initial?.License_Duration, plan_name: initial?.Quote_Plan || '학급별', is_primary: true,
           }]);
         }
         setDealUsersLoaded(true);
@@ -1116,7 +1117,8 @@ function DealForm({
       if (dealUsers.length === 0) {
         setDealUsers([{
           user_name: initial?.Contact_Name, user_phone: initial?.Contact_Phone, user_email: initial?.Contact_Email,
-          student_count: 40, month_count: initial?.License_Duration, plan_name: initial?.Quote_Plan || '학급별', is_primary: true,
+          student_count: resolvePlanCapacity(initial?.Quote_Plan).capacity,
+          month_count: initial?.License_Duration, plan_name: initial?.Quote_Plan || '학급별', is_primary: true,
         }]);
       }
       setDealUsersLoaded(true);
@@ -1141,7 +1143,7 @@ function DealForm({
     const base = dealUsers[0];
     const next = [...dealUsers, {
       user_name: '', user_phone: '', user_email: '',
-      student_count: base?.student_count ?? 40,
+      student_count: base?.student_count ?? resolvePlanCapacity(base?.plan_name).capacity,
       month_count: base?.month_count,
       plan_name: base?.plan_name ?? '학급별',
       is_primary: false,
@@ -1924,7 +1926,10 @@ function DealForm({
                               } else if (nextPlan === '럭키세븐이벤트플랜') {
                                 updateItem(idx, { plan: nextPlan, duration: 7, unit_price: 0 });
                               } else {
-                                updateItem(idx, { plan: nextPlan, unit_price: 0 });
+                                // 최소 개월수 보장 (예: 소수학급플랜은 4개월부터)
+                                const minDur = getMinDuration(nextPlan);
+                                const adjustedDur = (it.duration < minDur) ? minDur : it.duration;
+                                updateItem(idx, { plan: nextPlan, duration: adjustedDur, unit_price: 0 });
                               }
                             }}
                             className="h-7 text-xs border rounded px-1.5 flex-1 bg-background"
@@ -1941,11 +1946,20 @@ function DealForm({
                               className="h-7 text-xs border rounded px-1.5 w-32 bg-background"
                             />
                           )}
-                          <select value={it.duration} onChange={e => updateItem(idx, { duration: Number(e.target.value), unit_price: 0 })}
-                            className="h-7 text-xs border rounded px-1.5 w-20 bg-background"
-                            disabled={it.plan === '럭키세븐이벤트플랜'}>
-                            {DURATION_OPTIONS.map(d => <option key={d} value={d}>{d}개월</option>)}
-                          </select>
+                          {(() => {
+                            const minDur = getMinDuration(it.plan);
+                            // 소수학급플랜은 1만원/월 직선이라 4~12 모든 정수 허용. 그 외는 표준 옵션 + 최소기간 필터.
+                            const allowedDurations = it.plan === '소수학급플랜'
+                              ? [4, 5, 6, 7, 8, 9, 10, 11, 12]
+                              : DURATION_OPTIONS.filter(d => d >= minDur);
+                            return (
+                              <select value={it.duration} onChange={e => updateItem(idx, { duration: Number(e.target.value), unit_price: 0 })}
+                                className="h-7 text-xs border rounded px-1.5 w-20 bg-background"
+                                disabled={it.plan === '럭키세븐이벤트플랜'}>
+                                {allowedDurations.map(d => <option key={d} value={d}>{d}개월</option>)}
+                              </select>
+                            );
+                          })()}
                           <span className="text-xs text-muted-foreground">×</span>
                           <input type="number" value={it.qty || ''} min={1}
                             onChange={e => updateItem(idx, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
