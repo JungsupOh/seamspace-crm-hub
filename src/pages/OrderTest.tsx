@@ -761,21 +761,38 @@ export default function OrderTest() {
         });
 
         // PDF를 딜관리에도 첨부 (deal_files 업로드 + 메타 저장)
-        if (savedDealId && blob) {
+        // savedDealId state가 stale일 수 있으니 qNum으로 deals를 다시 조회해서 dealId 확보
+        let attachDealId: string | null = savedDealId && savedDealId !== 'web' ? savedDealId : null;
+        if (!attachDealId && qNum) {
+          try {
+            const dr = await fetch(
+              `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(qNum)}&select=id&limit=1`,
+              { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+            );
+            if (dr.ok) {
+              const rows = await dr.json() as { id: string }[];
+              attachDealId = rows[0]?.id ?? null;
+            }
+          } catch (e) { console.warn('[sendQuoteEmail] deal lookup 실패', e); }
+        }
+        if (attachDealId && blob) {
           try {
             const { uploadDealFile, saveDealFileRecord } = await import('@/lib/storage');
             const file = new File([blob], fileName, { type: 'application/pdf' });
-            const uploaded = await uploadDealFile(savedDealId, file);
+            const uploaded = await uploadDealFile(attachDealId, file);
             await saveDealFileRecord({
-              deal_id:   savedDealId,
+              deal_id:   attachDealId,
               slot_key:  `quote_${qNum}`,
               label:     `견적서 ${qNum}`,
               file_name: uploaded.name,
               file_url:  uploaded.url,
             });
+            console.log(`[sendQuoteEmail] deal_files 업로드 완료: deal=${attachDealId}, file=${uploaded.name}`);
           } catch (e) {
-            console.warn('[sendQuoteEmail] deal_files 업로드 실패 (이메일은 정상)', e);
+            console.error('[sendQuoteEmail] deal_files 업로드 실패 (이메일은 정상)', e);
           }
+        } else {
+          console.warn(`[sendQuoteEmail] deal_files 업로드 스킵 (attachDealId=${attachDealId}, blob=${!!blob})`);
         }
       }
       await sendQuoteEmailLib({

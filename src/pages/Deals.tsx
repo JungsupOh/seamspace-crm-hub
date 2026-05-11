@@ -3851,8 +3851,8 @@ export default function Deals() {
                         ? new Intl.NumberFormat('ko-KR').format(d.fields.Final_Contract_Value)
                         : '-'}
                     </td>
-                    <td className="px-4 py-2.5 text-xs tabular-nums text-muted-foreground">{d.fields.Contract_Date || d.fields.Order_Date}</td>
-                    <td className="px-4 py-2.5 text-xs tabular-nums text-muted-foreground">{d.fields.Payment_Date}</td>
+                    <td className="px-4 py-2.5 text-xs tabular-nums text-muted-foreground">{d.fields.Contract_Date || '-'}</td>
+                    <td className="px-4 py-2.5 text-xs tabular-nums text-muted-foreground">{d.fields.Payment_Date || '-'}</td>
                     <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[100px] truncate">{d.fields.Lead_Source}</td>
                     <td className="px-4 py-2.5">
                       {fileCount > 0 && (
