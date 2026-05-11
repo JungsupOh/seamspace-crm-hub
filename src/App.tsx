@@ -22,6 +22,7 @@ import OrderComplete from "./pages/OrderComplete";
 import OrderFail from "./pages/OrderFail";
 import ChangePassword from "./pages/ChangePassword";
 import Users from "./pages/Users";
+import AdminBackfillQuotePdfs from "./pages/AdminBackfillQuotePdfs";
 import Shop from "./pages/Shop";
 import ShopProductDetail from "./pages/ShopProductDetail";
 import ShopCart from "./pages/ShopCart";
@@ -266,6 +267,16 @@ function AppRoutes() {
           <RequireAuth>
             <AppLayout>
               <Users />
+            </AppLayout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/admin/backfill-quote-pdfs"
+        element={
+          <RequireAuth>
+            <AppLayout>
+              <AdminBackfillQuotePdfs />
             </AppLayout>
           </RequireAuth>
         }

@@ -683,6 +683,46 @@ export default function OrderTest() {
       if (saveRes.ok || saveRes.status === 201) {
         setSavedQuoteNum(qNum);
 
+        // 3-b) PDF 견적서 자동 생성 + deal_files 첨부 (이메일 발송과 무관하게 항상 첨부)
+        // 이렇게 해두면 사용자가 '이메일로 견적서 받기'를 안 눌러도 딜관리에서 PDF 확인 가능.
+        if (dealId && dealId !== 'web' && selectedProduct.code === '01') {
+          (async () => {
+            try {
+              const { generateQuotePdfBlob } = await import('@/lib/generateQuotePdf');
+              const planNameForS2b = `${activePlan.id === '소수학급' ? '소수학급' : activePlan.id}플랜`;
+              const { blob, fileName } = await generateQuotePdfBlob({
+                quoteNumber: qNum,
+                quoteDate:   today,
+                orgName:     info.orgName,
+                contactName: info.contactName,
+                plan:        planNameForS2b,
+                duration:    info.months,
+                unitPrice,
+                licenseQty:  info.qty,
+                finalValue:  total,
+                supplyPrice: supply,
+                taxAmount:   tax,
+                paymentUrl:  `${window.location.origin}/order/pay/${encodeURIComponent(qNum)}`,
+              });
+              if (blob) {
+                const { uploadDealFile, saveDealFileRecord } = await import('@/lib/storage');
+                const file = new File([blob], fileName, { type: 'application/pdf' });
+                const uploaded = await uploadDealFile(dealId, file);
+                await saveDealFileRecord({
+                  deal_id:   dealId,
+                  slot_key:  `quote_${qNum}`,
+                  label:     `견적서 ${qNum}`,
+                  file_name: uploaded.name,
+                  file_url:  uploaded.url,
+                });
+                console.log(`[saveWebQuote] PDF 자동 첨부 완료: deal=${dealId}, quote=${qNum}`);
+              }
+            } catch (e) {
+              console.error('[saveWebQuote] PDF 자동 첨부 실패', e);
+            }
+          })();
+        }
+
         // 4) contacts upsert + 활동이력 누적 (동일 phone의 모든 deal/quote가 한 고객 히스토리에 쌓이도록)
         // 머지든 신규든 항상 호출 — 동일 contact 정보 보강 + 활동이력 추가
         try {
