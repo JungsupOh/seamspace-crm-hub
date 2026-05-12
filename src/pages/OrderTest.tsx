@@ -652,14 +652,26 @@ export default function OrderTest() {
       }
 
       // 3) deal_quotes INSERT — deals.id 연결 (머지든 신규든 항상 새 행 INSERT)
+      // 중요: items JSONB와 license_qty를 명시적으로 저장 — 딜편집 다이얼로그가 재구성 로직에
+      // 의존하지 않도록 (재구성은 qty/40 나누기로 학생수 오해석 위험)
+      const webItems = selectedProduct.code === '01' ? [{
+        plan: planLabel,
+        duration: info.months,
+        qty: info.qty,                 // 이용권 수 (license_qty 의미)
+        unit_price: unitPrice,
+        amount: unitPrice * info.qty,
+        s2b_number: '',
+      }] : [];
       const saveRes = await fetch(`${SUPABASE_URL}/rest/v1/deal_quotes`, {
         method: 'POST',
-        headers: { ...restHeaders, Prefer: 'return=minimal' },
+        headers: { ...restHeaders, Prefer: 'return=representation' },  // 생성된 id 회수 (PDF 첨부 slot_key용)
         body: JSON.stringify({
           deal_id: dealId,
           quote_number: qNum,
           plan: planLabel,
-          qty: info.qty,
+          qty: info.qty,                                     // legacy 호환 (이용권 수)
+          license_qty: info.qty,                             // 명시적 라이선스 수 (재구성 폴백 차단)
+          items: webItems,                                   // 명시적 라인 아이템 (dialog 표시 정확)
           duration: selectedProduct.code === '01' ? info.months : undefined,
           unit_price: selectedProduct.code === '01' ? unitPrice : undefined,
           supply_price: selectedProduct.code === '01' ? supply : undefined,
@@ -682,6 +694,12 @@ export default function OrderTest() {
       });
       if (saveRes.ok || saveRes.status === 201) {
         setSavedQuoteNum(qNum);
+        // 생성된 deal_quote.id 회수 (PDF 첨부의 slot_key='quote_file_{id}'에 사용 — 딜편집 다이얼로그 호환)
+        let createdQuoteId: string | null = null;
+        try {
+          const rows = await saveRes.clone().json().catch(() => []);
+          if (Array.isArray(rows) && rows[0]?.id) createdQuoteId = rows[0].id as string;
+        } catch { /* ignore */ }
 
         // 3-b) PDF 견적서 자동 생성 + deal_files 첨부 (이메일 발송과 무관하게 항상 첨부)
         // 이렇게 해두면 사용자가 '이메일로 견적서 받기'를 안 눌러도 딜관리에서 PDF 확인 가능.
@@ -708,9 +726,12 @@ export default function OrderTest() {
                 const { uploadDealFile, saveDealFileRecord } = await import('@/lib/storage');
                 const file = new File([blob], fileName, { type: 'application/pdf' });
                 const uploaded = await uploadDealFile(dealId, file);
+                // slot_key는 딜편집 다이얼로그가 인식하는 'quote_file_{deal_quote_id}' 형식
+                // (deal_quote_id가 없으면 폴백으로 quote_{qNum} 사용 — initStoredFiles의 legacy 매핑 처리)
+                const slotKey = createdQuoteId ? `quote_file_${createdQuoteId}` : `quote_${qNum}`;
                 await saveDealFileRecord({
                   deal_id:   dealId,
-                  slot_key:  `quote_${qNum}`,
+                  slot_key:  slotKey,
                   label:     `견적서 ${qNum}`,
                   file_name: uploaded.name,
                   file_url:  uploaded.url,

@@ -856,7 +856,7 @@ function DealForm({
   allDeals?: AirtableRecord<DealFields>[];
 }) {
   // existingFiles(DB)로 슬롯별 파일 초기화 (receipt, license 제외)
-  // 구형 슬롯 → quote_file_{id}로 리매핑 (quote, quote_tab_N 호환)
+  // 구형 슬롯 → quote_file_{id}로 리매핑 (quote, quote_tab_N, quote_{qNum} 호환)
   const initStoredFiles = (): Record<string, DealFileRecord> => {
     const result: Record<string, DealFileRecord> = {};
     for (const rec of existingFiles ?? []) {
@@ -871,6 +871,13 @@ function DealForm({
       // 구형 'quote' 슬롯 → 첫 번째 견적의 quote_file_{id}
       if (key === 'quote' && initialQuotes?.[0]?.id) {
         key = `quote_file_${initialQuotes[0].id}`;
+      }
+      // /order 자동 첨부 슬롯 (quote_{qNum}) → 해당 quote_number 매칭되는 quote_file_{id}
+      const qNumMatch = key.match(/^quote_(20\d{2}-\d{2}-\d{4})$/);
+      if (qNumMatch && initialQuotes) {
+        const qNum = qNumMatch[1];
+        const matchQ = initialQuotes.find(q => q.quote_number === qNum);
+        if (matchQ?.id) key = `quote_file_${matchQ.id}`;
       }
       result[key] = rec;
     }
@@ -974,9 +981,13 @@ function DealForm({
     if (initialQuotes && initialQuotes.length > 0) {
       return initialQuotes.map(q => {
         let items = (q.items as QuoteLineItem[] | undefined) ?? [];
-        // items가 비어있으면 저장된 단가로 복원 (표준 단가가 아닌 실제 단가 사용)
+        // items가 비어있으면 저장된 단가로 복원
+        // web 주문(source='web')은 q.qty 자체가 이용권 수량이므로 /40 나누기 X
+        // CRM 어드민 직접 입력 (source='crm' 또는 null)은 q.qty가 총인원수일 수 있어 /40 나누기 폴백
         if (items.length === 0 && q.plan && q.duration) {
-          const lq = q.license_qty || (q.qty ? Math.ceil(q.qty / 40) : 1);
+          const isWeb = q.source === 'web';
+          const lq = q.license_qty
+            ?? (isWeb ? (q.qty || 1) : (q.qty ? Math.ceil(q.qty / 40) : 1));
           const unitPrice = q.unit_price || 0;
           items = [{
             plan: q.plan, duration: q.duration, qty: lq,
