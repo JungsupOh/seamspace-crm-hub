@@ -93,7 +93,9 @@ function normalizePhone(raw: unknown): { display: string; country: string | null
   if (s.startsWith('+82') || s.startsWith('0082')) {
     const local = digits.startsWith('82') ? digits.slice(2) : digits.slice(4);
     const d = '0' + local; // 010xxxxxxxx
-    const formatted = d.length === 11
+    const formatted = d.length === 12 && /^050[5-9]/.test(d)
+      ? `${d.slice(0,4)}-${d.slice(4,8)}-${d.slice(8)}`
+      : d.length === 11
       ? `${d.slice(0,3)}-${d.slice(3,7)}-${d.slice(7)}`
       : d.length === 10
         ? `${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6)}`
@@ -101,9 +103,11 @@ function normalizePhone(raw: unknown): { display: string; country: string | null
     return { display: formatted, country: 'Korea' };
   }
 
-  // 010/011/016/017/018/019 으로 시작 → 한국
-  if (/^0(10|11|16|17|18|19)/.test(digits)) {
-    const formatted = digits.length === 11
+  // 010/011/016/017/018/019/050[5-9] 으로 시작 → 한국
+  if (/^0(10|11|16|17|18|19|50[5-9])/.test(digits)) {
+    const formatted = digits.length === 12 && /^050[5-9]/.test(digits)
+      ? `${digits.slice(0,4)}-${digits.slice(4,8)}-${digits.slice(8)}`
+      : digits.length === 11
       ? `${digits.slice(0,3)}-${digits.slice(3,7)}-${digits.slice(7)}`
       : digits.length === 10
         ? `${digits.slice(0,3)}-${digits.slice(3,6)}-${digits.slice(6)}`

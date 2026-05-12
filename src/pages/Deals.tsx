@@ -39,15 +39,19 @@ import { toast } from 'sonner';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-// ── 전화번호 정규화 ───────────────────────────────
+// ── 전화번호 정규화 (표시용 하이픈 포맷) ──────────────
 function normalizePhone(raw: string): string {
   if (!raw) return '';
   const d = raw.replace(/\D/g, '');
   if (d.startsWith('82') && d.length >= 11) {
     const local = '0' + d.slice(2);
     if (local.length === 11) return `${local.slice(0, 3)}-${local.slice(3, 7)}-${local.slice(7)}`;
+    if (local.length === 12 && /^050[5-9]/.test(local)) return `${local.slice(0, 4)}-${local.slice(4, 8)}-${local.slice(8)}`;
   }
-  if (d.length === 11 && d.startsWith('010')) return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
+  // 050[5-9] 안심번호: 12자리 4-4-4
+  if (d.length === 12 && /^050[5-9]/.test(d)) return `${d.slice(0, 4)}-${d.slice(4, 8)}-${d.slice(8)}`;
+  // 010 등: 11자리 3-4-4
+  if (d.length === 11 && d.startsWith('01')) return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
   if (d.length === 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
   return raw;
 }
