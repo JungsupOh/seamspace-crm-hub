@@ -416,6 +416,7 @@ export default function OrderTest() {
   const [savedQuoteNum, setSavedQuoteNum] = useState<string | null>(null);
   const [savedDealId, setSavedDealId] = useState<string | null>(null);
   const [savingQuote, setSavingQuote] = useState(false);
+  const savingQuoteRef = useRef(false);   // 동기적 중복 호출 차단 (state 전파 지연 윈도우 보호)
   const [sendingEmail, setSendingEmail] = useState(false);
 
   // ── Payment Stage (입금) ───────────────────────
@@ -527,6 +528,12 @@ export default function OrderTest() {
 
   // ── 견적 저장 ─────────────────────────────────
   const saveWebQuote = async (): Promise<string | null> => {
+    // 동기적 더블 발화 차단 (state setSavingQuote는 비동기라 빠른 더블클릭 방어 X)
+    if (savingQuoteRef.current) {
+      console.warn('[saveWebQuote] 이미 진행 중 — 중복 호출 무시');
+      return null;
+    }
+    savingQuoteRef.current = true;
     const today = new Date().toISOString().slice(0, 10);
     const year = today.slice(0, 4);
     const pCode = selectedProduct.code;
@@ -723,12 +730,23 @@ export default function OrderTest() {
                 paymentUrl:  `${window.location.origin}/order/pay/${encodeURIComponent(qNum)}`,
               });
               if (blob) {
-                const { uploadDealFile, saveDealFileRecord } = await import('@/lib/storage');
-                const file = new File([blob], fileName, { type: 'application/pdf' });
-                const uploaded = await uploadDealFile(dealId, file);
                 // slot_key는 딜편집 다이얼로그가 인식하는 'quote_file_{deal_quote_id}' 형식
                 // (deal_quote_id가 없으면 폴백으로 quote_{qNum} 사용 — initStoredFiles의 legacy 매핑 처리)
                 const slotKey = createdQuoteId ? `quote_file_${createdQuoteId}` : `quote_${qNum}`;
+                // 멱등성: 동일 (deal_id, slot_key)로 이미 첨부된 row 있으면 skip
+                // (saveWebQuote 더블 호출 또는 sendQuoteEmail과의 중복 방지)
+                const existCheck = await fetch(
+                  `${SUPABASE_URL}/rest/v1/deal_files?deal_id=eq.${dealId}&slot_key=eq.${encodeURIComponent(slotKey)}&select=id&limit=1`,
+                  { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+                );
+                const exists = existCheck.ok ? ((await existCheck.json() as { id: string }[]).length > 0) : false;
+                if (exists) {
+                  console.log(`[saveWebQuote] PDF 이미 첨부됨 (skip): deal=${dealId}, slot=${slotKey}`);
+                  return;
+                }
+                const { uploadDealFile, saveDealFileRecord } = await import('@/lib/storage');
+                const file = new File([blob], fileName, { type: 'application/pdf' });
+                const uploaded = await uploadDealFile(dealId, file);
                 await saveDealFileRecord({
                   deal_id:   dealId,
                   slot_key:  slotKey,
@@ -782,6 +800,7 @@ export default function OrderTest() {
       console.error('견적 저장 실패', e);
     } finally {
       setSavingQuote(false);
+      savingQuoteRef.current = false;
     }
     return null;
   };
@@ -821,40 +840,8 @@ export default function OrderTest() {
           reader.readAsDataURL(blob);
         });
 
-        // PDF를 딜관리에도 첨부 (deal_files 업로드 + 메타 저장)
-        // savedDealId state가 stale일 수 있으니 qNum으로 deals를 다시 조회해서 dealId 확보
-        let attachDealId: string | null = savedDealId && savedDealId !== 'web' ? savedDealId : null;
-        if (!attachDealId && qNum) {
-          try {
-            const dr = await fetch(
-              `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(qNum)}&select=id&limit=1`,
-              { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
-            );
-            if (dr.ok) {
-              const rows = await dr.json() as { id: string }[];
-              attachDealId = rows[0]?.id ?? null;
-            }
-          } catch (e) { console.warn('[sendQuoteEmail] deal lookup 실패', e); }
-        }
-        if (attachDealId && blob) {
-          try {
-            const { uploadDealFile, saveDealFileRecord } = await import('@/lib/storage');
-            const file = new File([blob], fileName, { type: 'application/pdf' });
-            const uploaded = await uploadDealFile(attachDealId, file);
-            await saveDealFileRecord({
-              deal_id:   attachDealId,
-              slot_key:  `quote_${qNum}`,
-              label:     `견적서 ${qNum}`,
-              file_name: uploaded.name,
-              file_url:  uploaded.url,
-            });
-            console.log(`[sendQuoteEmail] deal_files 업로드 완료: deal=${attachDealId}, file=${uploaded.name}`);
-          } catch (e) {
-            console.error('[sendQuoteEmail] deal_files 업로드 실패 (이메일은 정상)', e);
-          }
-        } else {
-          console.warn(`[sendQuoteEmail] deal_files 업로드 스킵 (attachDealId=${attachDealId}, blob=${!!blob})`);
-        }
+        // 주의: PDF는 saveWebQuote에서 이미 deal_files에 자동 첨부됨 (commit e27e369).
+        // 여기서 다시 INSERT하지 않음 (중복 row 생성 방지). 이메일 첨부용 base64만 사용.
       }
       await sendQuoteEmailLib({
         to:           info.email.trim(),
