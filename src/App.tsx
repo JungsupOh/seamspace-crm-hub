@@ -23,6 +23,11 @@ import OrderFail from "./pages/OrderFail";
 import ChangePassword from "./pages/ChangePassword";
 import Users from "./pages/Users";
 import AdminBackfillQuotePdfs from "./pages/AdminBackfillQuotePdfs";
+import ApkPage from "./pages/Apk";
+import ApkSubscribe from "./pages/ApkSubscribe";
+import ApkInfo from "./pages/ApkInfo";
+import ApkDownload from "./pages/ApkDownload";
+import ApkUnsubscribe from "./pages/ApkUnsubscribe";
 import Shop from "./pages/Shop";
 import ShopProductDetail from "./pages/ShopProductDetail";
 import ShopCart from "./pages/ShopCart";
@@ -147,6 +152,12 @@ function AppRoutes() {
       <Route path="/event/lucky-seven/pay/fail" element={<LuckySevenPayFail />} />
       <Route path="/event/lucky-seven/pay/:quoteNumber" element={<LuckySevenPay />} />
       <Route path="/event/lucky-seven/status" element={<LuckySevenStatus />} />
+      {/* APK 구독 — 공개 페이지 (로그인 불필요) */}
+      <Route path="/apk/subscribe" element={<ApkSubscribe />} />
+      <Route path="/apk/info" element={<ApkInfo />} />
+      <Route path="/apk/download/:versionId" element={<ApkDownload />} />
+      <Route path="/apk/unsubscribe" element={<ApkUnsubscribe />} />
+
       {/* /order — 견적 생성/조회/결제 통합 페이지 (구 /order-test) */}
       <Route path="/order" element={<OrderTest />} />
       <Route path="/order/pay/:quoteNumber" element={<OrderPay />} />
@@ -277,6 +288,16 @@ function AppRoutes() {
           <RequireAuth>
             <AppLayout>
               <AdminBackfillQuotePdfs />
+            </AppLayout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/apk"
+        element={
+          <RequireAuth>
+            <AppLayout>
+              <ApkPage />
             </AppLayout>
           </RequireAuth>
         }

@@ -456,3 +456,111 @@ export async function sendTrialLicenseEmailJP(params: {
     },
   );
 }
+
+// ── APK 배포 안내 이메일 (심스페이스 Android 앱) ────────
+// 사용자 노출은 '심스페이스'만 사용 (mDiary 표기 금지)
+// 문의처는 info@tebahsoft.com (APK 배포 전용 채널)
+export async function sendApkEmail(params: {
+  to: string;
+  contactName: string;
+  schoolName: string;
+  versionName: string;
+  versionCode: number;
+  changelog?: string;
+  minAndroid?: string;
+  fileSize?: number;
+  sha256?: string;
+  downloadUrl: string;          // /apk/download/{versionId} (절대 URL)
+  unsubscribeUrl: string;       // /apk/unsubscribe?token=... (절대 URL)
+}): Promise<void> {
+  const sizeMB = params.fileSize ? `${(params.fileSize / 1024 / 1024).toFixed(1)} MB` : '';
+  // changelog markdown → 매우 단순 변환 (한 줄당 <li>)
+  const changelogHtml = (params.changelog || '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0)
+    .map(l => `<li>${l.replace(/^[-*]\s*/, '')}</li>`)
+    .join('');
+
+  const html = layout(`
+    <h2 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#18181b;">심스페이스 Android 앱 업데이트 📱</h2>
+    <p style="margin:0 0 16px;font-size:14px;color:#18181b;line-height:1.8;">
+      안녕하세요 ${params.schoolName} ${params.contactName} 선생님,<br/>
+      심스페이스 Android 앱 새 버전이 배포되었습니다. (MDM 환경용 sideload 패키지)
+    </p>
+
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:8px;padding:16px;margin-bottom:20px;">
+      <tr><td style="padding:4px 0;font-size:13px;color:#64748b;width:90px;">버전</td>
+          <td style="padding:4px 0;font-size:13px;color:#18181b;font-weight:600;">v${params.versionName} (빌드 ${params.versionCode})</td></tr>
+      ${params.minAndroid ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">최소 Android</td>
+          <td style="padding:4px 0;font-size:13px;color:#18181b;">${params.minAndroid}</td></tr>` : ''}
+      ${sizeMB ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;">파일 크기</td>
+          <td style="padding:4px 0;font-size:13px;color:#18181b;">${sizeMB}</td></tr>` : ''}
+      ${params.sha256 ? `<tr><td style="padding:4px 0;font-size:13px;color:#64748b;vertical-align:top;">SHA256</td>
+          <td style="padding:4px 0;font-size:11px;color:#71717a;font-family:monospace;word-break:break-all;">${params.sha256}</td></tr>` : ''}
+    </table>
+
+    ${changelogHtml ? `
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">변경 사항</p>
+    <ul style="margin:0 0 20px;padding-left:20px;font-size:13px;color:#334155;line-height:1.7;">
+      ${changelogHtml}
+    </ul>` : ''}
+
+    <p style="margin:0 0 24px;text-align:center;">
+      <a href="${params.downloadUrl}" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-size:14px;font-weight:600;">다운로드 페이지로 이동</a>
+    </p>
+
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;background:#f8fafc;border-left:3px solid #6366f1;padding:10px 14px;line-height:1.7;">
+      ※ 다운로드 페이지에서 본 메일 수신 이메일(<strong>${params.to}</strong>)을 입력해 주세요.<br/>
+      ※ 동일 이메일당 최대 2회까지 다운로드 가능합니다.
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">설치 안내</p>
+    <ol style="margin:0 0 24px;padding-left:20px;font-size:13px;color:#334155;line-height:1.7;">
+      <li>다운로드한 APK 파일 실행</li>
+      <li>"출처를 알 수 없는 앱 설치" 권한 허용 (안드로이드 설정)</li>
+      <li>설치 완료 후 학교 코드 입력</li>
+    </ol>
+
+    <p style="margin:24px 0 0;font-size:12px;color:#a1a1aa;text-align:center;line-height:1.7;">
+      더 이상 받지 않으려면 <a href="${params.unsubscribeUrl}" style="color:#6366f1;">구독 취소</a><br/>
+      문의: <a href="mailto:info@tebahsoft.com" style="color:#6366f1;">info@tebahsoft.com</a>
+    </p>
+  `);
+
+  const text = [
+    `심스페이스 Android 앱 업데이트 안내`,
+    ``,
+    `안녕하세요 ${params.schoolName} ${params.contactName} 선생님,`,
+    `심스페이스 Android 앱 새 버전이 배포되었습니다. (MDM 환경용 sideload 패키지)`,
+    ``,
+    `버전: v${params.versionName} (빌드 ${params.versionCode})`,
+    params.minAndroid ? `최소 Android: ${params.minAndroid}` : '',
+    sizeMB ? `파일 크기: ${sizeMB}` : '',
+    params.sha256 ? `SHA256: ${params.sha256}` : '',
+    ``,
+    params.changelog ? `변경 사항:\n${params.changelog}` : '',
+    ``,
+    `다운로드: ${params.downloadUrl}`,
+    `※ 다운로드 페이지에서 본 메일 수신 이메일(${params.to})을 입력해 주세요. 동일 이메일당 최대 2회 다운로드 가능합니다.`,
+    ``,
+    `설치 안내:`,
+    `1. 다운로드한 APK 파일 실행`,
+    `2. "출처를 알 수 없는 앱 설치" 권한 허용`,
+    `3. 설치 완료 후 학교 코드 입력`,
+    ``,
+    `구독 취소: ${params.unsubscribeUrl}`,
+    `문의: info@tebahsoft.com`,
+  ].filter(Boolean).join('\n');
+
+  await sendEmail(
+    params.to,
+    `[심스페이스] 심스페이스 Android 앱 v${params.versionName} 업데이트 안내`,
+    html,
+    {
+      text,
+      reply_to: 'info@tebahsoft.com',
+      // cc=sales@ default 그대로 (본사 가시성)
+    },
+  );
+}
