@@ -174,15 +174,22 @@ Deno.serve(async (req: Request) => {
     let dealId: string | null = null;
     let licenseSaved = false;
 
+    // 매칭한 deal의 org_name 도 회수 — deal_licenses.org_name NOT NULL 제약 회피용 fallback
+    let dealOrgName: string | null = null;
     for (const cand of candidates) {
       try {
         const dealRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(cand)}&select=id&limit=1`,
+          `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(cand)}&select=id,org_name&limit=1`,
           { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
         );
         if (dealRes.ok) {
-          const rows = await dealRes.json() as { id: string }[];
-          if (rows[0]?.id) { dealId = rows[0].id; console.log(`[confirm-payment] deals 매칭(${cand}):`, dealId); break; }
+          const rows = await dealRes.json() as { id: string; org_name: string | null }[];
+          if (rows[0]?.id) {
+            dealId = rows[0].id;
+            dealOrgName = rows[0].org_name;
+            console.log(`[confirm-payment] deals 매칭(${cand}):`, dealId);
+            break;
+          }
         } else {
           const txt = await dealRes.text().catch(() => "(read failed)");
           console.error(`[confirm-payment] deals 조회 실패 ${dealRes.status}:`, txt);
@@ -236,7 +243,8 @@ Deno.serve(async (req: Request) => {
               coupon_code:    couponCode,
               contact_name:   customerName,
               contact_phone:  customerPhone,
-              org_name:       orgName ?? null,
+              // org_name NOT NULL — sessionStorage 누락 시 deals.org_name 으로 fallback
+              org_name:       orgName ?? dealOrgName ?? "(미입력)",
               duration:       String(duration),
               user_count:     userLimit,
               status:         "대기",
@@ -257,6 +265,42 @@ Deno.serve(async (req: Request) => {
       } catch (e) { console.error("[confirm-payment] deal/deal_licenses 업데이트 예외:", e); }
     }
 
+    // ── Step 5-b: deal_quotes 결제 메타 갱신 — quote_number 매칭 ──
+    // 다이얼로그/리포트에서 "결제완료" 상태와 paid_at, payment_method 노출용.
+    // dealId 매칭 여부와 무관 — quote_number만 있으면 갱신 가능.
+    let dealQuoteUpdated = false;
+    if (quoteNumber) {
+      try {
+        const dqRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=eq.${encodeURIComponent(quoteNumber)}`,
+          {
+            method: "PATCH",
+            headers: {
+              Authorization: `Bearer ${SUPABASE_KEY}`,
+              apikey: SUPABASE_KEY,
+              "Content-Type": "application/json",
+              Prefer: "return=minimal",
+            },
+            body: JSON.stringify({
+              order_status:   "결제완료",
+              payment_method: (tossData.method === "카드" || tossData.method === "card") ? "card" : "bank",
+              payment_key:    paymentKey,
+              paid_at:        tossData.approvedAt ?? new Date().toISOString(),
+            }),
+          },
+        );
+        if (dqRes.ok) {
+          dealQuoteUpdated = true;
+          console.log("[confirm-payment] deal_quotes 결제 메타 갱신 성공");
+        } else {
+          const txt = await dqRes.text().catch(() => "(read failed)");
+          console.error(`[confirm-payment] deal_quotes PATCH 실패 ${dqRes.status}:`, txt);
+        }
+      } catch (e) {
+        console.error("[confirm-payment] deal_quotes PATCH 예외:", e);
+      }
+    }
+
     // ── Step 6: 텔레그램 알림 (서버사이드, 신뢰성↑) ─────
     await notifyWebPaymentTG({
       quoteNumber: quoteNumber ?? orderId,
@@ -275,6 +319,7 @@ Deno.serve(async (req: Request) => {
       // 진단용 — 프론트가 실패 시 경고 표시 가능
       deal_id:            dealId,
       license_saved:      licenseSaved,
+      deal_quote_updated: dealQuoteUpdated,
       order_payment_saved: orderPaymentSaved,
       ...buildReceiptFields(tossData, amount),
     });

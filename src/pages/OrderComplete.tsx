@@ -49,10 +49,12 @@ export default function OrderComplete() {
         if (ok && data.coupon_code) {
           setCouponCode(data.coupon_code);
           setConfirmed(true);
-          // CRM 연동 진단 — license_saved=false면 경고 표시 (재발송 시 코드 중복 발급 위험)
-          if (data.license_saved === false) {
+          // CRM 연동 진단 — 어느 하나라도 실패하면 경고 표시 (재발송 시 코드 중복 발급 위험)
+          if (data.license_saved === false || data.deal_quote_updated === false) {
             const reasons: string[] = [];
             if (!data.deal_id) reasons.push('견적서 매칭 실패');
+            if (data.license_saved === false) reasons.push('deal_licenses 저장 실패');
+            if (data.deal_quote_updated === false) reasons.push('견적 결제상태 갱신 실패');
             if (data.order_payment_saved === false) reasons.push('order_payments 저장 실패');
             setLinkWarning(`CRM 연동 미완료(${reasons.join(', ') || 'unknown'}) — 고객센터에 견적번호와 함께 문의해 주세요.`);
             console.warn('[OrderComplete] CRM 연동 진단:', data);
