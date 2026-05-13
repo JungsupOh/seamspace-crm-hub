@@ -977,6 +977,21 @@ function DealForm({
     return it;
   };
   const [localTabs, setLocalTabs] = useState<QuoteTab[]>(() => {
+    // draft가 있어도 DB의 quote id/quote_number/is_selected/created_at은 항상 DB값 우선.
+    // (draft에 id 없는 구버전 데이터가 남아있으면 qSlot 매칭이 깨져 PDF가 다이얼로그에 안 보임 — #12/#15/#18 재발 원인)
+    if (draftIsMeaningful && draft?.tabs && initialQuotes && initialQuotes.length > 0) {
+      return draft.tabs.map((dt: QuoteTab, i: number) => {
+        const dbQ = initialQuotes[i];
+        if (!dbQ) return dt;  // draft에만 있는 신규 탭 (저장 안 된 상태)
+        return {
+          ...dt,
+          id: dbQ.id,
+          quote_number: dt.quote_number ?? dbQ.quote_number,
+          is_selected: dbQ.is_selected,
+          quote_date: dt.quote_date ?? dbQ.quote_date,
+        };
+      });
+    }
     if (draftIsMeaningful && draft?.tabs) return draft.tabs;
     if (initialQuotes && initialQuotes.length > 0) {
       return initialQuotes.map(q => {
