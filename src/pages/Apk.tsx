@@ -25,7 +25,7 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 export default function ApkPage() {
-  const { user, canEdit } = useAuth();
+  const { canEdit } = useAuth();
   const qc = useQueryClient();
   const [tab, setTab] = useState<'versions' | 'subscribers'>('versions');
   const [selectedVersion, setSelectedVersion] = useState<ApkVersion | null>(null);

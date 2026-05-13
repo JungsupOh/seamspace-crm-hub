@@ -566,6 +566,8 @@ export default function OrderTest() {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
       let dealId: string = 'web';
       let mergedIntoExisting = false;
+      // 총인원(학생수) — 미입력 시 null. quote_qty/qty 필드는 이 값으로 저장 (info.qty는 이용권 수 의미)
+      const studentCount = info.students ? parseInt(info.students, 10) || null : null;
       let dealType: 'New' | 'Renewal' = 'New';
       try {
         // 전체 기간의 동일 phone deal — 재구매(Renewal) 판정용
@@ -592,7 +594,8 @@ export default function OrderTest() {
               headers: { ...restHeaders, Prefer: 'return=minimal' },
               body: JSON.stringify({
                 quote_date:          today,
-                quote_qty:           info.qty,
+                quote_qty:           studentCount,
+                license_code_count:  info.qty,
                 quote_plan:          planLabel,
                 quote_number:        qNum,     // 가장 최근 견적번호
                 license_duration:    selectedProduct.code === '01' ? info.months : null,
@@ -622,7 +625,8 @@ export default function OrderTest() {
             contact_email:       info.email.trim() || null,
             org_name:            info.orgName,
             quote_date:          today,
-            quote_qty:           info.qty,
+            quote_qty:           studentCount,                 // 총인원(학생수) — 미입력 시 null
+            license_code_count:  info.qty,                     // 이용권 수
             quote_plan:          planLabel,
             quote_number:        qNum,
             license_duration:    selectedProduct.code === '01' ? info.months : null,
@@ -676,7 +680,7 @@ export default function OrderTest() {
           deal_id: dealId,
           quote_number: qNum,
           plan: planLabel,
-          qty: info.qty,                                     // legacy 호환 (이용권 수)
+          qty: studentCount,                                 // 총인원(학생수) — 다이얼로그 "총인원" 필드
           license_qty: info.qty,                             // 명시적 라이선스 수 (재구성 폴백 차단)
           items: webItems,                                   // 명시적 라인 아이템 (dialog 표시 정확)
           duration: selectedProduct.code === '01' ? info.months : undefined,
