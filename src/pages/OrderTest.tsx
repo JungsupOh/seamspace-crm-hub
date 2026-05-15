@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { formatPhone } from '@/lib/utils';
 import { searchSchools, SchoolInfo } from '@/lib/neis';
-import { notifyWebQuote, notifyWebPayment, notifyWebLicenseIssued } from '@/lib/telegram';
+import { notifyWebQuoteInquiry, notifyWebQuoteSent, notifyWebPayment, notifyWebLicenseIssued } from '@/lib/telegram';
 import { upsertLeadContact } from '@/lib/luckySeven';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -417,6 +417,7 @@ export default function OrderTest() {
   const [savedDealId, setSavedDealId] = useState<string | null>(null);
   const [savingQuote, setSavingQuote] = useState(false);
   const savingQuoteRef = useRef(false);   // 동기적 중복 호출 차단 (state 전파 지연 윈도우 보호)
+  const lastInquiryHashRef = useRef('');  // 동일 form 반복 진입 시 텔레그램 '견적조회' 알림 dedup
   const [sendingEmail, setSendingEmail] = useState(false);
 
   // ── Payment Stage (입금) ───────────────────────
@@ -526,7 +527,46 @@ export default function OrderTest() {
 
   const step1Valid = !!(info.orgName.trim() && info.contactName.trim() && info.phone.trim() && info.email.trim());
 
-  // ── 견적 저장 ─────────────────────────────────
+  // ── 견적 미리보기 (Step 2 → 3 전환) ─────────────────────────────
+  // DB 미저장. contact upsert + 텔레그램 '견적조회' 알림만 발화.
+  // 견적서 번호도 발급하지 않음 — 이메일 발송 시점까지 보류해서 미사용 번호 낭비 방지.
+  // 동일 세션에서 같은 form으로 여러 번 진입해도 1회만 알림 (form 변경 시 재발화).
+  const previewQuote = async (): Promise<void> => {
+    if (!info.orgName || !info.contactName || !info.phone) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const planLabel = selectedProduct.code === '01' ? activePlan.label : selectedProduct.name;
+    // 알림 dedup hash — form 내용이 같으면 재알림 안 함
+    const inquiryHash = `${info.phone}|${info.orgName}|${planLabel}|${info.months}|${info.qty}|${total}`;
+    if (lastInquiryHashRef.current === inquiryHash) return;
+    lastInquiryHashRef.current = inquiryHash;
+
+    // contact upsert — '견적 조회' 활동이력 누적
+    try {
+      const activityNote = `[${today}] 웹 견적 조회 — ${planLabel} ${info.months}개월 × ${info.qty} / 예상 ${total.toLocaleString()}원`;
+      await upsertLeadContact(
+        { name: info.contactName, phone: info.phone, email: info.email.trim(), orgName: info.orgName },
+        { country: 'kr', leadSource: 'Web 견적조회', activityNote },
+      );
+    } catch (e) {
+      console.warn('[previewQuote] contacts upsert 실패 (무시)', e);
+    }
+
+    // 텔레그램 '견적조회' 알림 — 영업팀 follow-up 가능하도록 연락처 포함
+    notifyWebQuoteInquiry({
+      orgName: info.orgName,
+      buyerName: info.contactName,
+      buyerPhone: info.phone,
+      buyerEmail: info.email.trim() || undefined,
+      plan: planLabel,
+      duration: info.months,
+      quantity: info.qty,
+      totalAmount: total,
+    });
+  };
+
+  // ── 견적 저장 (이메일 발송 시점에만 호출) ─────────────────────────────
+  // 견적서 번호 발급 + deals/deal_quotes INSERT + PDF 생성 + deal_files 등록.
+  // 미리보기만 한 케이스에서는 호출되지 않으므로 견적서 번호 낭비 없음.
   const saveWebQuote = async (): Promise<string | null> => {
     // 동기적 더블 발화 차단 (state setSavingQuote는 비동기라 빠른 더블클릭 방어 X)
     if (savingQuoteRef.current) {
@@ -787,12 +827,13 @@ export default function OrderTest() {
           console.warn('[saveWebQuote] contacts upsert 실패 (무시)', e);
         }
 
-        // 5) 텔레그램 알림
-        notifyWebQuote({
+        // 5) 텔레그램 알림 — 정식 발송 (이메일 발송 완료 시점)
+        notifyWebQuoteSent({
           quoteNumber: qNum,
           orgName: info.orgName,
           buyerName: info.contactName,
           buyerPhone: info.phone,
+          buyerEmail: info.email.trim() || undefined,
           plan: planLabel,
           duration: info.months,
           quantity: info.qty,
@@ -1040,6 +1081,7 @@ export default function OrderTest() {
     setQStep(1); setQStep3Sub('preview');
     setInfo({ school: null, orgName: '', contactName: '', phone: '', email: '', planId: '학년', months: DEFAULT_MONTHS, qty: 1, students: '' });
     setSavedQuoteNum(null); setSelectedProduct(PRODUCTS[0]);
+    lastInquiryHashRef.current = '';
     setPSub('lookup'); setPQuoteNum(''); setPEmail(''); setPPhone(''); setPQuote(null); setPContact({ name: '', phone: '', email: '' }); setPError('');
     setLSub('lookup'); setLQuoteNum(''); setLEmail(''); setLPhone(''); setLQuote(null); setLContact({ name: '', phone: '', email: '' }); setLError(''); setLCoupons([]);
   };
@@ -1619,12 +1661,14 @@ export default function OrderTest() {
                   <Button variant="outline" className="flex-1 h-12" onClick={() => setQStep(1)}>이전</Button>
                   <Button className="flex-[2] h-12 text-base"
                     onClick={async () => {
-                      const qNum = await saveWebQuote();
-                      if (qNum) { setQStep(3); setQStep3Sub('preview'); }
+                      // Step 2 → 3: 미리보기 단계로 진입 (DB 미저장, 견적서 번호 미발급)
+                      // 텔레그램 '견적조회' 알림 + contacts upsert만 발화
+                      await previewQuote();
+                      setQStep(3);
+                      setQStep3Sub('preview');
                     }}
-                    disabled={aiTab || !unitPrice || savingQuote}>
-                    {savingQuote ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                    견적서 생성 <ChevronRight className="h-4 w-4 ml-1" />
+                    disabled={aiTab || !unitPrice}>
+                    견적서 확인 <ChevronRight className="h-4 w-4 ml-1" />
                   </Button>
                 </div>
               </div>
@@ -1640,9 +1684,13 @@ export default function OrderTest() {
                       <div>
                         <h2 className="font-bold text-lg">견 적 서</h2>
                         <p className="text-xs text-muted-foreground mt-0.5">Tebahsoft, Inc. · 심스페이스-{selectedProduct.name}</p>
-                        {savedQuoteNum && (
+                        {savedQuoteNum ? (
                           <span className="inline-flex items-center mt-1.5 bg-teal-50 text-teal-700 border border-teal-200 rounded-md px-2.5 py-1 font-mono font-bold text-sm tracking-wide">
                             {savedQuoteNum}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center mt-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-md px-2.5 py-1 text-xs">
+                            (예정 — 이메일 발송 시 번호 발급)
                           </span>
                         )}
                       </div>
@@ -1737,23 +1785,37 @@ export default function OrderTest() {
 
                 {/* 액션 버튼 */}
                 {qStep3Sub !== 'sent' && (
-                  <div className="flex gap-3">
-                    <Button variant="outline" className="flex-1 h-12" onClick={() => setQStep(2)}>이전</Button>
-                    <Button variant="outline" className="flex-1 h-12 print:hidden" onClick={() => window.print()}>
-                      <Printer className="h-4 w-4 mr-2" />인쇄
-                    </Button>
-                    <Button className="flex-[2] h-12 text-base"
-                      onClick={async () => {
-                        setQStep3Sub('sending');
-                        await sendQuoteEmail(savedQuoteNum ?? '');
-                        setQStep3Sub('sent');
-                      }}
-                      disabled={qStep3Sub === 'sending' || !info.email}>
-                      {qStep3Sub === 'sending'
-                        ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />발송 중...</>
-                        : <><Send className="h-4 w-4 mr-2" />이메일로 견적서 받기</>}
-                    </Button>
-                  </div>
+                  <>
+                    <div className="rounded-lg bg-amber-50 border border-amber-200 px-3.5 py-2.5 text-xs text-amber-900">
+                      <p className="font-medium mb-0.5">이메일을 보내야 정식 견적서가 발급됩니다.</p>
+                      <p className="opacity-90">미리보기만 한 견적은 저장되지 않으며, 견적서 번호도 발급되지 않습니다.</p>
+                    </div>
+                    <div className="flex gap-3">
+                      <Button variant="outline" className="flex-1 h-12" onClick={() => setQStep(2)}>이전</Button>
+                      <Button variant="outline" className="flex-1 h-12 print:hidden" onClick={() => window.print()}>
+                        <Printer className="h-4 w-4 mr-2" />인쇄
+                      </Button>
+                      <Button className="flex-[2] h-12 text-base"
+                        onClick={async () => {
+                          setQStep3Sub('sending');
+                          // 정식 발급: DB INSERT + PDF 생성 + 이메일 발송 + 텔레그램 '견적서발송'
+                          // 재시도 케이스: savedQuoteNum이 이미 있으면 saveWebQuote 재호출 안 하고 이메일만 재발송 (중복 INSERT 방지)
+                          const qNum = savedQuoteNum || (await saveWebQuote());
+                          if (qNum) {
+                            await sendQuoteEmail(qNum);
+                            setQStep3Sub('sent');
+                          } else {
+                            // 견적 저장 실패 시 다시 preview로 복귀
+                            setQStep3Sub('preview');
+                          }
+                        }}
+                        disabled={qStep3Sub === 'sending' || !info.email || savingQuote}>
+                        {qStep3Sub === 'sending'
+                          ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />발송 중...</>
+                          : <><Send className="h-4 w-4 mr-2" />견적서 이메일 발송</>}
+                      </Button>
+                    </div>
+                  </>
                 )}
               </div>
             )}

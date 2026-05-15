@@ -65,27 +65,59 @@ export function notifyCampaignLead(params: {
   );
 }
 
-// ── 웹 견적 발송 알림 ──────────────────────────────
-export function notifyWebQuote(params: {
-  quoteNumber: string;
+// ── 웹 견적 조회 알림 (Step 2 미리보기 진입) ──────────
+// 사용자가 견적 정보 입력 → 미리보기 단계 진입 시 발송.
+// 아직 DB에 deal_quotes/deals 미생성 상태 — 영업팀이 follow-up 가능하도록 연락처 포함.
+export function notifyWebQuoteInquiry(params: {
   orgName: string;
   buyerName: string;
   buyerPhone: string;
+  buyerEmail?: string;
   plan: string;
   duration: number;
   quantity: number;
   totalAmount: number;
 }): void {
-  const { quoteNumber, orgName, buyerName, buyerPhone, plan, duration, quantity, totalAmount } = params;
+  const { orgName, buyerName, buyerPhone, buyerEmail, plan, duration, quantity, totalAmount } = params;
+  const emailStr = buyerEmail ? `\n📧 ${buyerEmail}` : '';
   sendTelegramNotification(
-    `📄 <b>웹 견적서 발급</b>\n\n` +
+    `🔍 <b>웹 견적 조회</b>\n\n` +
+    `🏫 ${orgName || '(미입력)'}\n` +
+    `👤 ${buyerName} / ${buyerPhone}${emailStr}\n` +
+    `📦 ${plan} ${duration}개월 × ${quantity}건\n` +
+    `💰 (예상) ${totalAmount.toLocaleString()}원\n` +
+    `\n<i>※ 이메일 미발송 — 미리보기 단계</i>`
+  );
+}
+
+// ── 웹 견적서 발송 알림 (Step 3 이메일 발송 완료) ──────
+// 정식 견적 번호 발급 + DB 저장 + 이메일 발송 완료된 케이스만 알림.
+// (이전 명 notifyWebQuote → notifyWebQuoteSent 로 의미 명확화)
+export function notifyWebQuoteSent(params: {
+  quoteNumber: string;
+  orgName: string;
+  buyerName: string;
+  buyerPhone: string;
+  buyerEmail?: string;
+  plan: string;
+  duration: number;
+  quantity: number;
+  totalAmount: number;
+}): void {
+  const { quoteNumber, orgName, buyerName, buyerPhone, buyerEmail, plan, duration, quantity, totalAmount } = params;
+  const emailStr = buyerEmail ? `\n📧 ${buyerEmail}` : '';
+  sendTelegramNotification(
+    `📨 <b>웹 견적서 발송 완료</b>\n\n` +
     `📌 ${quoteNumber}\n` +
     `🏫 ${orgName || '(미입력)'}\n` +
-    `👤 ${buyerName} / ${buyerPhone}\n` +
+    `👤 ${buyerName} / ${buyerPhone}${emailStr}\n` +
     `📦 ${plan} ${duration}개월 × ${quantity}건\n` +
     `💰 ${totalAmount.toLocaleString()}원`
   );
 }
+
+// 하위 호환 — 기존 호출처(notifyWebQuote)는 그대로 동작하되 새 이름으로 위임.
+export const notifyWebQuote = notifyWebQuoteSent;
 
 // ── 웹 결제 완료 알림 ──────────────────────────────
 export function notifyWebPayment(params: {
