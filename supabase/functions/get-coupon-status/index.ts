@@ -40,13 +40,19 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // codes 미제공 시 → deal_licenses(대기/사용중) + mdiary_coupons(is_used=true) 자동 조회
+    // codes 미제공 시 → deal_licenses + campaign_licenses(대기/사용중) + mdiary_coupons(is_used=true) 자동 조회
     // 미사용 쿠폰은 그룹 데이터가 없어 MySQL 부하만 높임 → 제외
+    // 캠페인 발송 이용권(campaign_licenses)이 누락되면 캠페인 페이지의 사용/만료 상태가 갱신 안 됨 — #21 fix
     let codes: string[] = body.codes ?? [];
     if (codes.length === 0) {
-      const [{ data: dealData }, { data: mdiaryData }] = await Promise.all([
+      const [{ data: dealData }, { data: campaignData }, { data: mdiaryData }] = await Promise.all([
         supabase
           .from("deal_licenses")
+          .select("coupon_code")
+          .in("status", ["대기", "사용중"])
+          .not("coupon_code", "is", null),
+        supabase
+          .from("campaign_licenses")
           .select("coupon_code")
           .in("status", ["대기", "사용중"])
           .not("coupon_code", "is", null),
@@ -56,9 +62,10 @@ Deno.serve(async (req: Request) => {
           .eq("is_used", true)
           .not("coupon_code", "is", null),
       ]);
-      const dealCodes   = (dealData   ?? []).map((r: { coupon_code: string }) => r.coupon_code).filter(Boolean);
-      const mdiaryCodes = (mdiaryData ?? []).map((r: { coupon_code: string }) => r.coupon_code).filter(Boolean);
-      codes = [...new Set([...dealCodes, ...mdiaryCodes])];
+      const dealCodes     = (dealData     ?? []).map((r: { coupon_code: string }) => r.coupon_code).filter(Boolean);
+      const campaignCodes = (campaignData ?? []).map((r: { coupon_code: string }) => r.coupon_code).filter(Boolean);
+      const mdiaryCodes   = (mdiaryData   ?? []).map((r: { coupon_code: string }) => r.coupon_code).filter(Boolean);
+      codes = [...new Set([...dealCodes, ...campaignCodes, ...mdiaryCodes])];
     }
     const totalCodes = codes.length;
     if (totalCodes === 0) return json({ updated: 0, total: 0, hasMore: false });
@@ -152,6 +159,8 @@ Deno.serve(async (req: Request) => {
           : row.service_expire_at && row.service_expire_at < today ? "만료"
           : "사용중";
 
+        // campaign_licenses / deal_licenses 는 group_name / member_count 컬럼 없음 — 보내면 schema 에러로 전체 UPDATE 실패
+        // group_name / member_count 는 mdiary_coupons에만 저장하고 UI에서 join으로 가져옴
         return Promise.all([
           supabase.from("deal_licenses").update({
             status,
@@ -160,8 +169,6 @@ Deno.serve(async (req: Request) => {
           supabase.from("campaign_licenses").update({
             status,
             service_expire_at: row.service_expire_at ?? null,
-            group_name:        row.group_name ?? null,
-            member_count:      row.member_count ?? null,
           }).eq("coupon_code", row.coupon_code),
           supabase.from("mdiary_coupons").update({
             is_used:           !!row.is_used,
