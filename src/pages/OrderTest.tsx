@@ -3,6 +3,7 @@ import { formatPhone } from '@/lib/utils';
 import { searchSchools, SchoolInfo } from '@/lib/neis';
 import { notifyWebQuoteInquiry, notifyWebQuoteSent, notifyWebPayment, notifyWebLicenseIssued } from '@/lib/telegram';
 import { upsertLeadContact } from '@/lib/luckySeven';
+import { getS2BNumber } from '@/lib/pricing';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -705,13 +706,15 @@ export default function OrderTest() {
       // 3) deal_quotes INSERT — deals.id 연결 (머지든 신규든 항상 새 행 INSERT)
       // 중요: items JSONB와 license_qty를 명시적으로 저장 — 딜편집 다이얼로그가 재구성 로직에
       // 의존하지 않도록 (재구성은 qty/40 나누기로 학생수 오해석 위험)
+      // s2b_number: 견적서 PDF에 학교장터 물품번호를 노출하기 위해 명시적으로 채움 (이전 빈 문자열로 저장돼 PDF 누락 회귀)
+      const s2bPlanKey = planLabel.replace(/\s+/g, '');  // '학급 플랜' → '학급플랜' (S2B_MAP 키 정규화)
       const webItems = selectedProduct.code === '01' ? [{
         plan: planLabel,
         duration: info.months,
         qty: info.qty,                 // 이용권 수 (license_qty 의미)
         unit_price: unitPrice,
         amount: unitPrice * info.qty,
-        s2b_number: '',
+        s2b_number: getS2BNumber(s2bPlanKey, info.months),
       }] : [];
       const saveRes = await fetch(`${SUPABASE_URL}/rest/v1/deal_quotes`, {
         method: 'POST',
