@@ -80,7 +80,7 @@ Deno.serve(async (req: Request) => {
         continue;
       }
       try {
-        await sendApkMail({
+        const resendId = await sendApkMail({
           to: s.email,
           contactName: s.contact_name,
           schoolName: s.school_name,
@@ -93,7 +93,9 @@ Deno.serve(async (req: Request) => {
           sha256: v.sha256,
           unsubscribeToken: s.unsubscribe_token,
         });
+        console.log(`[apk-broadcast] ✓ ${s.email} → Resend ID: ${resendId}`);
         // history INSERT (UNIQUE 충돌은 무시 — force_resend 시 ON CONFLICT 처리)
+        // Resend 메일 ID를 error_message 컬럼에 저장(추적용) — 컬럼 재활용
         await fetch(`${SUPABASE_URL}/rest/v1/apk_send_history`, {
           method: "POST",
           headers: { ...DB_HEADERS, Prefer: "return=minimal,resolution=merge-duplicates" },
@@ -102,6 +104,7 @@ Deno.serve(async (req: Request) => {
             subscriber_id: s.id,
             email_status: "sent",
             sent_at: new Date().toISOString(),
+            error_message: resendId ? `resend_id=${resendId}` : null,
           }),
         }).catch(() => {});
         sent++;
@@ -147,7 +150,7 @@ async function sendApkMail(p: {
   fileSize?: number;
   sha256?: string;
   unsubscribeToken: string;
-}): Promise<void> {
+}): Promise<string | null> {
   const downloadUrl = `${APP_URL}/apk/download/${p.versionId}`;
   const unsubscribeUrl = `${APP_URL}/apk/unsubscribe?token=${encodeURIComponent(p.unsubscribeToken)}`;
   const sizeMB = p.fileSize ? `${(p.fileSize / 1024 / 1024).toFixed(1)} MB` : "";
@@ -223,5 +226,12 @@ ${changelogHtml ? `<p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-we
   if (!r.ok) {
     const err = await r.text().catch(() => "(read failed)");
     throw new Error(`send-email ${r.status}: ${err}`);
+  }
+  // Resend 응답에서 메일 ID 추출 (추적용)
+  try {
+    const data = await r.json() as { id?: string };
+    return data.id ?? null;
+  } catch {
+    return null;
   }
 }
