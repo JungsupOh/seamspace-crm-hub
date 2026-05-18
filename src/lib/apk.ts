@@ -72,25 +72,23 @@ export async function sha256Hex(file: File): Promise<string> {
 }
 
 // ── Storage 업로드 ───────────────────────────────────
+// apk-files 는 private bucket — RLS 'TO authenticated' 정책이라
+// anon key fetch 직접 호출하면 401. supabase client 의 storage API 는
+// 자동으로 로그인 세션의 access_token 을 Authorization 헤더에 사용해서 RLS 통과.
 export async function uploadApkFile(versionName: string, file: File): Promise<{ path: string; url: string }> {
   if (!file.name.toLowerCase().endsWith('.apk')) {
     throw new Error('APK 파일만 업로드 가능합니다 (.apk 확장자)');
   }
+  const { supabase } = await import('./supabase');
   const ts = Date.now();
   const safe = versionName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 30) || 'v';
   const path = `releases/${ts}-${safe}.apk`;
-  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/vnd.android.package-archive',
-      'x-upsert': 'false',
-    },
-    body: file,
+  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
+    contentType: 'application/vnd.android.package-archive',
+    upsert: false,
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || `APK 업로드 실패 (${res.status})`);
+  if (error) {
+    throw new Error(`APK 업로드 실패: ${error.message}`);
   }
   return { path, url: `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}` };
 }
