@@ -438,17 +438,23 @@ function UploadVersionDialog({ uploaderId, onClose, onCreated }: {
   const [minAndroid, setMinAndroid] = useState('7.0+');
   const [isLatest, setIsLatest] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [uploadStage, setUploadStage] = useState<'idle' | 'hashing' | 'uploading' | 'saving'>('idle');
 
   const handleUpload = async () => {
     if (!file) { toast.error('APK 파일을 선택해 주세요.'); return; }
     if (!versionName.trim()) { toast.error('버전명을 입력해 주세요.'); return; }
     if (!versionCode.trim() || isNaN(Number(versionCode))) { toast.error('버전 코드(정수)를 입력해 주세요.'); return; }
     setUploading(true);
+    setUploadPct(0);
     try {
       // 1) SHA256 계산
+      setUploadStage('hashing');
       const hash = await sha256Hex(file);
-      // 2) Storage 업로드
-      const { path } = await uploadApkFile(versionName.trim(), file);
+      // 2) Storage 업로드 (TUS resumable — 6MB chunk)
+      setUploadStage('uploading');
+      const { path } = await uploadApkFile(versionName.trim(), file, (pct) => setUploadPct(pct));
+      setUploadStage('saving');
       // 3) DB INSERT
       await createApkVersion({
         version_name: versionName.trim(),
@@ -467,8 +473,15 @@ function UploadVersionDialog({ uploaderId, onClose, onCreated }: {
       toast.error(`업로드 실패: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setUploading(false);
+      setUploadStage('idle');
+      setUploadPct(0);
     }
   };
+
+  const stageLabel =
+    uploadStage === 'hashing'   ? 'SHA256 계산 중...' :
+    uploadStage === 'uploading' ? `업로드 중... ${uploadPct}%` :
+    uploadStage === 'saving'    ? 'DB 저장 중...' : '';
 
   return (
     <Dialog open onOpenChange={v => { if (!v) onClose(); }}>
@@ -512,10 +525,18 @@ function UploadVersionDialog({ uploaderId, onClose, onCreated }: {
             <span className="text-xs">이 버전을 최신(latest)으로 표시 (기존 latest는 해제됨)</span>
           </label>
         </div>
+        {uploading && uploadStage === 'uploading' && (
+          <div className="px-1">
+            <div className="h-2 rounded-full bg-muted overflow-hidden">
+              <div className="h-full bg-primary transition-all duration-300" style={{ width: `${uploadPct}%` }} />
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1.5 text-center font-mono">{uploadPct}%</p>
+          </div>
+        )}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>취소</Button>
+          <Button variant="outline" onClick={onClose} disabled={uploading}>취소</Button>
           <Button disabled={uploading} onClick={handleUpload}>
-            {uploading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />업로드 중...</> : <><Upload className="h-4 w-4 mr-2" />업로드</>}
+            {uploading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{stageLabel}</> : <><Upload className="h-4 w-4 mr-2" />업로드</>}
           </Button>
         </DialogFooter>
       </DialogContent>

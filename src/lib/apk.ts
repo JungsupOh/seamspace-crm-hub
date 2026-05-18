@@ -72,24 +72,53 @@ export async function sha256Hex(file: File): Promise<string> {
 }
 
 // ── Storage 업로드 ───────────────────────────────────
-// apk-files 는 private bucket — RLS 'TO authenticated' 정책이라
-// anon key fetch 직접 호출하면 401. supabase client 의 storage API 는
-// 자동으로 로그인 세션의 access_token 을 Authorization 헤더에 사용해서 RLS 통과.
-export async function uploadApkFile(versionName: string, file: File): Promise<{ path: string; url: string }> {
+// apk-files 는 private bucket (RLS 'TO authenticated').
+// 단일 POST 는 Supabase 프로젝트 글로벌 한도(기본 50MB)에 걸리므로
+// 100MB+ APK 는 TUS resumable upload (6MB 청크) 사용 — 글로벌 한도와 무관.
+// supabase client 의 storage upload 는 단일 POST 만 지원하므로 tus-js-client 직접 사용.
+export async function uploadApkFile(
+  versionName: string,
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<{ path: string; url: string }> {
   if (!file.name.toLowerCase().endsWith('.apk')) {
     throw new Error('APK 파일만 업로드 가능합니다 (.apk 확장자)');
   }
   const { supabase } = await import('./supabase');
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
+
+  const tus = await import('tus-js-client');
   const ts = Date.now();
   const safe = versionName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 30) || 'v';
   const path = `releases/${ts}-${safe}.apk`;
-  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    contentType: 'application/vnd.android.package-archive',
-    upsert: false,
+
+  await new Promise<void>((resolve, reject) => {
+    const upload = new tus.Upload(file, {
+      endpoint: `${SUPABASE_URL}/storage/v1/upload/resumable`,
+      retryDelays: [0, 3000, 5000, 10000, 20000],
+      headers: {
+        authorization: `Bearer ${session.access_token}`,
+        'x-upsert': 'false',
+      },
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true,
+      metadata: {
+        bucketName: BUCKET,
+        objectName: path,
+        contentType: 'application/vnd.android.package-archive',
+        cacheControl: '3600',
+      },
+      chunkSize: 6 * 1024 * 1024,        // 6MB — Supabase TUS 권장값
+      onError: (err) => reject(new Error(`APK 업로드 실패: ${err.message ?? err}`)),
+      onProgress: (sent, total) => {
+        if (onProgress && total > 0) onProgress(Math.round((sent / total) * 100));
+      },
+      onSuccess: () => resolve(),
+    });
+    upload.start();
   });
-  if (error) {
-    throw new Error(`APK 업로드 실패: ${error.message}`);
-  }
+
   return { path, url: `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}` };
 }
 
