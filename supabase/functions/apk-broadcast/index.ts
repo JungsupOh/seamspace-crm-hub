@@ -10,6 +10,9 @@ const CORS = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+// Edge → Edge 호출(send-email)은 SERVICE_ROLE_KEY 로 Bearer 시 401 UNAUTHORIZED_INVALID_JWT_FORMAT.
+// ANON_KEY 로 호출해야 Gateway JWT 검증 통과.
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const APP_URL = Deno.env.get("APP_URL") ?? "https://seamspace-crm-hub.vercel.app";
 
 const DB_HEADERS = {
@@ -212,8 +215,8 @@ ${changelogHtml ? `<p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-we
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${SUPABASE_KEY}`,
-      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      apikey: SUPABASE_ANON_KEY,
     },
     body: JSON.stringify({
       to: p.to,
