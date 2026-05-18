@@ -6,11 +6,25 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const BUCKET = 'apk-files';
 
+// SELECT용 (anon SELECT 정책 있는 테이블).
 const HEADERS = {
   Authorization: `Bearer ${SUPABASE_KEY}`,
   apikey: SUPABASE_KEY,
   'Content-Type': 'application/json',
 };
+
+// INSERT/UPDATE/DELETE 용 — RLS 정책 'TO authenticated' 통과를 위해 로그인 세션 access_token 사용.
+// anon key 로는 mutation 시 RLS 차단 (42501 insufficient_privilege).
+async function authHeaders(): Promise<Record<string, string>> {
+  const { supabase } = await import('./supabase');
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token ?? SUPABASE_KEY;
+  return {
+    Authorization: `Bearer ${token}`,
+    apikey: SUPABASE_KEY,
+    'Content-Type': 'application/json',
+  };
+}
 
 // ── Types ────────────────────────────────────────────
 export interface ApkVersion {
@@ -138,16 +152,17 @@ export async function getLatestApkVersion(): Promise<ApkVersion | null> {
 
 export async function createApkVersion(v: Omit<ApkVersion, 'id' | 'created_at'>): Promise<ApkVersion> {
   // is_latest 처리: 새 버전이 is_latest=true면 기존 row 모두 false로
+  const h = await authHeaders();
   if (v.is_latest) {
     await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?is_latest=is.true`, {
       method: 'PATCH',
-      headers: { ...HEADERS, Prefer: 'return=minimal' },
+      headers: { ...h, Prefer: 'return=minimal' },
       body: JSON.stringify({ is_latest: false }),
     }).catch(() => {});
   }
   const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_versions`, {
     method: 'POST',
-    headers: { ...HEADERS, Prefer: 'return=representation' },
+    headers: { ...h, Prefer: 'return=representation' },
     body: JSON.stringify(v),
   });
   if (!r.ok) {
@@ -174,7 +189,7 @@ export async function deleteApkVersion(id: string): Promise<void> {
   }
   const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=eq.${id}`, {
     method: 'DELETE',
-    headers: HEADERS,
+    headers: await authHeaders(),
   });
   if (!r.ok) throw new Error('버전 삭제 실패');
 }
@@ -198,7 +213,7 @@ export async function deleteApkFileOnly(id: string): Promise<void> {
   // DB는 file_path/sha256/file_size 만 null 처리 (이력 보존)
   const upd = await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=eq.${id}`, {
     method: 'PATCH',
-    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    headers: { ...(await authHeaders()), Prefer: 'return=minimal' },
     body: JSON.stringify({ file_path: null, sha256: null, file_size: null }),
   });
   if (!upd.ok) throw new Error('DB 마킹 실패');
@@ -233,7 +248,7 @@ export async function cleanupOldApkFiles(
   const ids = toDelete.map(x => x.id).join(',');
   await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=in.(${ids})`, {
     method: 'PATCH',
-    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    headers: { ...(await authHeaders()), Prefer: 'return=minimal' },
     body: JSON.stringify({ file_path: null, sha256: null, file_size: null }),
   });
 
@@ -280,7 +295,7 @@ export async function createSubscriber(input: {
 }): Promise<ApkSubscriber> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_subscribers`, {
     method: 'POST',
-    headers: { ...HEADERS, Prefer: 'return=representation' },
+    headers: { ...(await authHeaders()), Prefer: 'return=representation' },
     body: JSON.stringify({ ...input, status: 'active' }),
   });
   if (!r.ok) {
@@ -294,7 +309,7 @@ export async function createSubscriber(input: {
 export async function updateSubscriberStatus(id: string, status: SubscriberStatus): Promise<void> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_subscribers?id=eq.${id}`, {
     method: 'PATCH',
-    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    headers: { ...(await authHeaders()), Prefer: 'return=minimal' },
     body: JSON.stringify({ status }),
   });
   if (!r.ok) throw new Error('상태 변경 실패');
@@ -303,16 +318,17 @@ export async function updateSubscriberStatus(id: string, status: SubscriberStatu
 export async function deleteSubscriber(id: string): Promise<void> {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_subscribers?id=eq.${id}`, {
     method: 'DELETE',
-    headers: HEADERS,
+    headers: await authHeaders(),
   });
   if (!r.ok) throw new Error('구독자 삭제 실패');
 }
 
 // ── 발송/다운로드 이력 조회 ──────────────────────────
 export async function listSendHistoryByVersion(versionId: string): Promise<ApkSendHistory[]> {
+  // apk_send_history 는 RLS 'TO authenticated' 만 — anon SELECT 정책 없음
   const r = await fetch(
     `${SUPABASE_URL}/rest/v1/apk_send_history?version_id=eq.${versionId}&order=sent_at.desc`,
-    { headers: HEADERS },
+    { headers: await authHeaders() },
   );
   if (!r.ok) return [];
   return r.json();
