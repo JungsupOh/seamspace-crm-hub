@@ -204,33 +204,41 @@ export async function deleteApkFileOnly(id: string): Promise<void> {
   if (!upd.ok) throw new Error('DB 마킹 실패');
 }
 
-// ── 오래된 (non-latest) 버전 파일 일괄 정리 ──────────────────────
-// is_latest=true 외 모든 버전의 Storage 파일 삭제. DB row + 이력은 유지.
-// Returns: 정리한 파일 수 + 회수된 바이트 합.
-export async function cleanupOldApkFiles(): Promise<{ deleted: number; bytesFreed: number }> {
+// ── 오래된 버전 파일 일괄 정리 — 최근 N개만 보존 ──────────────────
+// 정책: version_code 내림차순으로 정렬해 상위 KEEP_RECENT 개의 파일만 보존,
+//      나머지는 Storage 파일만 삭제 (DB row + 발송/다운로드 이력은 유지).
+// 기본값 2개 — 사용자 요청: "가장 최근의 2개 파일만 보관".
+const KEEP_RECENT_FILES = 2;
+
+export async function cleanupOldApkFiles(
+  keepRecent: number = KEEP_RECENT_FILES,
+): Promise<{ deleted: number; bytesFreed: number; kept: number }> {
+  // file_path 가 살아있는 버전만 정리 대상. version_code desc.
   const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/apk_versions?is_latest=is.false&file_path=not.is.null&select=id,file_path,file_size`,
+    `${SUPABASE_URL}/rest/v1/apk_versions?file_path=not.is.null&select=id,version_code,file_path,file_size&order=version_code.desc`,
     { headers: HEADERS },
   );
   if (!r.ok) throw new Error('정리 대상 조회 실패');
-  const rows = await r.json() as { id: string; file_path: string; file_size: number | null }[];
-  if (rows.length === 0) return { deleted: 0, bytesFreed: 0 };
+  const rows = await r.json() as { id: string; version_code: number; file_path: string; file_size: number | null }[];
+
+  const toDelete = rows.slice(keepRecent);  // 상위 keepRecent 개 제외
+  if (toDelete.length === 0) return { deleted: 0, bytesFreed: 0, kept: rows.length };
 
   const { supabase } = await import('./supabase');
-  const paths = rows.map(x => x.file_path);
+  const paths = toDelete.map(x => x.file_path);
   const { error } = await supabase.storage.from(BUCKET).remove(paths);
   if (error) throw new Error(`Storage 일괄 삭제 실패: ${error.message}`);
 
-  // DB 일괄 마킹 — id IN (...)
-  const ids = rows.map(x => x.id).join(',');
+  // DB 일괄 마킹 — id IN (...) — 이력 보존, 파일 메타만 NULL
+  const ids = toDelete.map(x => x.id).join(',');
   await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=in.(${ids})`, {
     method: 'PATCH',
     headers: { ...HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify({ file_path: null, sha256: null, file_size: null }),
   });
 
-  const bytesFreed = rows.reduce((sum, x) => sum + (x.file_size ?? 0), 0);
-  return { deleted: rows.length, bytesFreed };
+  const bytesFreed = toDelete.reduce((sum, x) => sum + (x.file_size ?? 0), 0);
+  return { deleted: toDelete.length, bytesFreed, kept: Math.min(rows.length, keepRecent) };
 }
 
 // ── apk_subscribers CRUD ─────────────────────────────

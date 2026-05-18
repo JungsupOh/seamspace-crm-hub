@@ -56,12 +56,14 @@ export default function ApkPage() {
   const activeCount = subscribers.filter(s => s.status === 'active').length;
 
   const handleCleanupOldFiles = async () => {
-    const oldCount = versions.filter(v => !v.is_latest && v.file_path).length;
-    if (oldCount === 0) { toast.info('정리할 오래된 파일이 없습니다.'); return; }
-    if (!confirm(`최신 외 ${oldCount}개 버전의 Storage 파일을 삭제합니다.\n발송/다운로드 이력(DB)은 유지됩니다. 진행할까요?`)) return;
+    // version_code 내림차순 상위 2개 제외 — 파일이 살아있는 것만 카운트
+    const withFile = [...versions].filter(v => v.file_path).sort((a, b) => b.version_code - a.version_code);
+    const oldCount = Math.max(0, withFile.length - 2);
+    if (oldCount === 0) { toast.info('정리할 오래된 파일이 없습니다 (최근 2개만 보관 중).'); return; }
+    if (!confirm(`최근 2개 외 ${oldCount}개 버전의 Storage 파일을 삭제합니다.\n발송/다운로드 이력(DB)은 유지됩니다. 진행할까요?`)) return;
     setCleaning(true);
     try {
-      const { deleted, bytesFreed } = await cleanupOldApkFiles();
+      const { deleted, bytesFreed } = await cleanupOldApkFiles(2);
       const mb = (bytesFreed / 1024 / 1024).toFixed(1);
       toast.success(`${deleted}개 파일 정리 완료 — ${mb} MB 회수`);
       qc.invalidateQueries({ queryKey: ['apk_versions'] });
@@ -109,9 +111,9 @@ export default function ApkPage() {
         </div>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={handleCleanupOldFiles} disabled={cleaning}
-            title="최신 외 모든 버전의 Storage 파일을 삭제합니다 (DB 이력은 유지)">
+            title="최근 2개 외 모든 버전의 Storage 파일을 삭제합니다 (DB 이력은 유지)">
             {cleaning ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
-            오래된 파일 정리
+            오래된 파일 정리 (최근 2개만 보관)
           </Button>
           <Button size="sm" variant="outline" onClick={() => window.open('/apk/subscribe', '_blank')}>
             공개 신청폼 열기
@@ -550,6 +552,13 @@ function UploadVersionDialog({ uploaderId, onClose, onCreated }: {
         is_latest: isLatest,
       });
       toast.success(`v${versionName} 업로드 완료`);
+      // 새 업로드 직후 자동 cleanup — 최근 2개만 파일 보존 (이력은 유지)
+      cleanupOldApkFiles(2).then(r => {
+        if (r.deleted > 0) {
+          const mb = (r.bytesFreed / 1024 / 1024).toFixed(1);
+          toast.info(`오래된 파일 ${r.deleted}개 자동 정리 (${mb} MB 회수)`);
+        }
+      }).catch(() => { /* silent — 업로드는 이미 성공 */ });
       onCreated();
     } catch (e) {
       toast.error(`업로드 실패: ${e instanceof Error ? e.message : String(e)}`);
