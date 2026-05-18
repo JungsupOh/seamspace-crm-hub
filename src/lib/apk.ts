@@ -159,11 +159,78 @@ export async function createApkVersion(v: Omit<ApkVersion, 'id' | 'created_at'>)
 }
 
 export async function deleteApkVersion(id: string): Promise<void> {
+  // DB row 삭제 전에 Storage 파일도 삭제 — 고아 파일 방지
+  const fetchRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/apk_versions?id=eq.${id}&select=file_path`,
+    { headers: HEADERS },
+  );
+  if (fetchRes.ok) {
+    const rows = await fetchRes.json() as { file_path: string | null }[];
+    const path = rows[0]?.file_path;
+    if (path) {
+      const { supabase } = await import('./supabase');
+      await supabase.storage.from(BUCKET).remove([path]).catch(() => {});
+    }
+  }
   const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=eq.${id}`, {
     method: 'DELETE',
     headers: HEADERS,
   });
   if (!r.ok) throw new Error('버전 삭제 실패');
+}
+
+// ── Storage 파일만 삭제 (DB row 보존 — 발송/다운로드 이력 유지) ─────
+// file_path 를 NULL 로 마킹해서 UI에서 "파일 없음" 표시 + 다운로드 차단.
+export async function deleteApkFileOnly(id: string): Promise<void> {
+  const fetchRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/apk_versions?id=eq.${id}&select=file_path`,
+    { headers: HEADERS },
+  );
+  if (!fetchRes.ok) throw new Error('버전 조회 실패');
+  const rows = await fetchRes.json() as { file_path: string | null }[];
+  const path = rows[0]?.file_path;
+  if (!path) return;  // 이미 파일 없음
+
+  const { supabase } = await import('./supabase');
+  const { error } = await supabase.storage.from(BUCKET).remove([path]);
+  if (error) throw new Error(`Storage 파일 삭제 실패: ${error.message}`);
+
+  // DB는 file_path/sha256/file_size 만 null 처리 (이력 보존)
+  const upd = await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=eq.${id}`, {
+    method: 'PATCH',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    body: JSON.stringify({ file_path: null, sha256: null, file_size: null }),
+  });
+  if (!upd.ok) throw new Error('DB 마킹 실패');
+}
+
+// ── 오래된 (non-latest) 버전 파일 일괄 정리 ──────────────────────
+// is_latest=true 외 모든 버전의 Storage 파일 삭제. DB row + 이력은 유지.
+// Returns: 정리한 파일 수 + 회수된 바이트 합.
+export async function cleanupOldApkFiles(): Promise<{ deleted: number; bytesFreed: number }> {
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/apk_versions?is_latest=is.false&file_path=not.is.null&select=id,file_path,file_size`,
+    { headers: HEADERS },
+  );
+  if (!r.ok) throw new Error('정리 대상 조회 실패');
+  const rows = await r.json() as { id: string; file_path: string; file_size: number | null }[];
+  if (rows.length === 0) return { deleted: 0, bytesFreed: 0 };
+
+  const { supabase } = await import('./supabase');
+  const paths = rows.map(x => x.file_path);
+  const { error } = await supabase.storage.from(BUCKET).remove(paths);
+  if (error) throw new Error(`Storage 일괄 삭제 실패: ${error.message}`);
+
+  // DB 일괄 마킹 — id IN (...)
+  const ids = rows.map(x => x.id).join(',');
+  await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=in.(${ids})`, {
+    method: 'PATCH',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    body: JSON.stringify({ file_path: null, sha256: null, file_size: null }),
+  });
+
+  const bytesFreed = rows.reduce((sum, x) => sum + (x.file_size ?? 0), 0);
+  return { deleted: rows.length, bytesFreed };
 }
 
 // ── apk_subscribers CRUD ─────────────────────────────

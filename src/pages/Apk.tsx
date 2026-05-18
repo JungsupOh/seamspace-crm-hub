@@ -12,7 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import {
-  listApkVersions, createApkVersion, deleteApkVersion, uploadApkFile, sha256Hex,
+  listApkVersions, createApkVersion, deleteApkVersion, deleteApkFileOnly, cleanupOldApkFiles,
+  uploadApkFile, sha256Hex,
   listApkSubscribers, createSubscriber, updateSubscriberStatus, deleteSubscriber, findSubscriberByEmail,
   listSendHistoryByVersion, listDownloadsByVersion,
   type ApkVersion, type ApkSubscriber, type ApkSendHistory, type ApkDownload, type SubscriberStatus,
@@ -32,6 +33,7 @@ export default function ApkPage() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [subAddOpen, setSubAddOpen] = useState(false);
   const [broadcasting, setBroadcasting] = useState<string | null>(null);  // broadcasting version id
+  const [cleaning, setCleaning] = useState(false);
 
   const { data: versions = [] } = useQuery({
     queryKey: ['apk_versions'],
@@ -52,6 +54,23 @@ export default function ApkPage() {
   }
 
   const activeCount = subscribers.filter(s => s.status === 'active').length;
+
+  const handleCleanupOldFiles = async () => {
+    const oldCount = versions.filter(v => !v.is_latest && v.file_path).length;
+    if (oldCount === 0) { toast.info('정리할 오래된 파일이 없습니다.'); return; }
+    if (!confirm(`최신 외 ${oldCount}개 버전의 Storage 파일을 삭제합니다.\n발송/다운로드 이력(DB)은 유지됩니다. 진행할까요?`)) return;
+    setCleaning(true);
+    try {
+      const { deleted, bytesFreed } = await cleanupOldApkFiles();
+      const mb = (bytesFreed / 1024 / 1024).toFixed(1);
+      toast.success(`${deleted}개 파일 정리 완료 — ${mb} MB 회수`);
+      qc.invalidateQueries({ queryKey: ['apk_versions'] });
+    } catch (e) {
+      toast.error(`정리 실패: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setCleaning(false);
+    }
+  };
 
   const broadcastVersion = async (v: ApkVersion) => {
     if (!confirm(`v${v.version_name}을(를) 활성 구독자 ${activeCount}명에게 일괄 발송할까요?`)) return;
@@ -89,6 +108,11 @@ export default function ApkPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={handleCleanupOldFiles} disabled={cleaning}
+            title="최신 외 모든 버전의 Storage 파일을 삭제합니다 (DB 이력은 유지)">
+            {cleaning ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
+            오래된 파일 정리
+          </Button>
           <Button size="sm" variant="outline" onClick={() => window.open('/apk/subscribe', '_blank')}>
             공개 신청폼 열기
           </Button>
@@ -129,14 +153,18 @@ export default function ApkPage() {
                 }`}>
                 <div className="flex items-center justify-between mb-1">
                   <span className="font-semibold text-sm">v{v.version_name}</span>
-                  {v.is_latest && <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-100 text-teal-700">최신</span>}
+                  <div className="flex gap-1">
+                    {v.is_latest && <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-100 text-teal-700">최신</span>}
+                    {!v.file_path && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">파일 없음</span>}
+                  </div>
                 </div>
                 <div className="text-[11px] text-muted-foreground space-y-0.5">
                   <p>빌드 {v.version_code} · {v.created_at.slice(0, 10)}</p>
                   {v.file_size && <p>{(v.file_size / 1024 / 1024).toFixed(1)} MB</p>}
                 </div>
                 <Button size="sm" variant="outline" className="w-full mt-2 h-7 text-xs"
-                  disabled={broadcasting === v.id}
+                  disabled={broadcasting === v.id || !v.file_path}
+                  title={!v.file_path ? '파일이 삭제된 버전은 발송할 수 없습니다' : undefined}
                   onClick={(e) => { e.stopPropagation(); broadcastVersion(v); }}>
                   {broadcasting === v.id ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" />발송 중...</> : <><Send className="h-3 w-3 mr-1" />전체 발송</>}
                 </Button>
@@ -184,7 +212,10 @@ export default function ApkPage() {
 // 버전 상세 패널
 // ─────────────────────────────────────────────────────
 function VersionDetail({ version, onDeleted }: { version: ApkVersion; onDeleted: () => void }) {
+  const qc = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmFileOnly, setConfirmFileOnly] = useState(false);
+  const [deletingFile, setDeletingFile] = useState(false);
   const { data: history = [] } = useQuery({
     queryKey: ['apk_send_history', version.id],
     queryFn: () => listSendHistoryByVersion(version.id),
@@ -210,7 +241,23 @@ function VersionDetail({ version, onDeleted }: { version: ApkVersion; onDeleted:
     }
   };
 
-  const sizeMB = version.file_size ? (version.file_size / 1024 / 1024).toFixed(1) : '?';
+  const handleDeleteFileOnly = async () => {
+    setDeletingFile(true);
+    try {
+      await deleteApkFileOnly(version.id);
+      const mb = version.file_size ? (version.file_size / 1024 / 1024).toFixed(1) : '?';
+      toast.success(`파일 삭제됨 (${mb} MB 회수). 이력은 유지됩니다.`);
+      setConfirmFileOnly(false);
+      qc.invalidateQueries({ queryKey: ['apk_versions'] });
+    } catch (e) {
+      toast.error(`파일 삭제 실패: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDeletingFile(false);
+    }
+  };
+
+  const sizeMB = version.file_size ? (version.file_size / 1024 / 1024).toFixed(1) : '—';
+  const fileGone = !version.file_path;
 
   return (
     <div className="space-y-3">
@@ -219,11 +266,26 @@ function VersionDetail({ version, onDeleted }: { version: ApkVersion; onDeleted:
           <h2 className="font-semibold flex items-center gap-2">
             v{version.version_name} 상세
             {version.is_latest && <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-100 text-teal-700">최신</span>}
+            {fileGone && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">파일 없음</span>}
           </h2>
-          <Button size="sm" variant="outline" className="text-rose-600 hover:bg-rose-50" onClick={() => setConfirmDelete(true)}>
-            <Trash2 className="h-3.5 w-3.5 mr-1" />삭제
-          </Button>
+          <div className="flex gap-1.5">
+            {!fileGone && !version.is_latest && (
+              <Button size="sm" variant="outline" className="text-amber-700 hover:bg-amber-50"
+                onClick={() => setConfirmFileOnly(true)} disabled={deletingFile}
+                title="Storage 파일만 삭제 (DB 이력 유지)">
+                <Trash2 className="h-3.5 w-3.5 mr-1" />파일만 삭제
+              </Button>
+            )}
+            <Button size="sm" variant="outline" className="text-rose-600 hover:bg-rose-50" onClick={() => setConfirmDelete(true)}>
+              <Trash2 className="h-3.5 w-3.5 mr-1" />버전 삭제
+            </Button>
+          </div>
         </div>
+        {fileGone && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 mb-2">
+            이 버전의 Storage 파일이 정리되어 다운로드/재발송이 불가능합니다. 이력은 유지됩니다.
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
           <p><span className="text-foreground/80">빌드</span> {version.version_code}</p>
           <p><span className="text-foreground/80">크기</span> {sizeMB} MB</p>
@@ -289,16 +351,36 @@ function VersionDetail({ version, onDeleted }: { version: ApkVersion; onDeleted:
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>버전 삭제</AlertDialogTitle>
+            <AlertDialogTitle>버전 완전 삭제</AlertDialogTitle>
             <AlertDialogDescription>
-              v{version.version_name}을(를) 삭제합니다. 발송 이력과 다운로드 이력도 함께 삭제됩니다.
-              (Storage 파일은 별도 정리 필요)
+              v{version.version_name}을(를) 완전히 삭제합니다.
+              Storage 파일, DB row, 발송/다운로드 이력 모두 사라집니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>취소</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              삭제
+              완전 삭제
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmFileOnly} onOpenChange={setConfirmFileOnly}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Storage 파일만 삭제</AlertDialogTitle>
+            <AlertDialogDescription>
+              v{version.version_name}의 APK 파일({sizeMB} MB)을 Storage에서 삭제합니다.
+              발송/다운로드 이력은 유지되지만 이 버전은 더 이상 다운로드/재발송 불가능합니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteFileOnly} disabled={deletingFile}
+              className="bg-amber-600 text-white hover:bg-amber-700">
+              {deletingFile ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : null}
+              파일 삭제
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
