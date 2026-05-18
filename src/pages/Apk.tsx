@@ -164,14 +164,14 @@ export default function ApkPage() {
 
       {uploadOpen && (
         <UploadVersionDialog
-          uploaderId={user?.id ?? null}
+          uploaderId={null}
           onClose={() => setUploadOpen(false)}
           onCreated={() => { setUploadOpen(false); qc.invalidateQueries({ queryKey: ['apk_versions'] }); }}
         />
       )}
       {subAddOpen && (
         <AddSubscriberDialog
-          createdBy={user?.id ?? null}
+          createdBy={null}
           onClose={() => setSubAddOpen(false)}
           onCreated={() => { setSubAddOpen(false); qc.invalidateQueries({ queryKey: ['apk_subscribers'] }); }}
         />
