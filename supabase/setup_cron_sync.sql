@@ -1,34 +1,36 @@
 -- ─────────────────────────────────────────────────────────────
--- CRM 전체 자동 동기화 — 매일 KST 18:00 (= UTC 09:00)
+-- CRM 운영DB 동기화 cron — 안전망 (webhook 보강)
 -- ─────────────────────────────────────────────────────────────
--- 동기화 대상 (mDiary 운영DB → CRM):
---   1. sync-new-coupons      — 새 쿠폰을 mdiary_coupons 에 추가
---   2. get-coupon-status     — 기존 쿠폰의 사용 상태/만료일/멤버수 갱신
---                              → deal_licenses + campaign_licenses + mdiary_coupons 모두 반영
--- 캠페인/이용권/딜관리/고객DB/대시보드 화면은 모두 위 테이블을 조회하므로
--- 이 한 번의 동기화로 전체 CRM 데이터가 최신화됨.
+-- 주 동기화 메커니즘: mDiary 백엔드 → /functions/v1/coupon-webhook (실시간)
+-- 본 cron 의 역할: webhook 누락/장애 대비 + 사용자 발급 직후 ~ activated 사이의
+--                새 쿠폰 메타 회수 (webhook 은 activated 시점에만 발화하므로)
+--
+-- 빈도: 매일 1회. KST 새벽 4~5시 (UTC 19~20시) — 운영 트래픽 적은 시간대.
 -- ─────────────────────────────────────────────────────────────
 
 -- 1. pg_net (HTTP 호출용)
 CREATE EXTENSION IF NOT EXISTS pg_net;
 
--- 2. 기존 cron 제거 (재실행 안전)
+-- 2. 기존 cron 모두 제거 (재실행 안전)
 SELECT cron.unschedule('sync-new-coupons-daily')
   WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'sync-new-coupons-daily');
 SELECT cron.unschedule('sync-coupon-status-daily')
   WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'sync-coupon-status-daily');
--- 기존 매시간 동기화도 함께 제거 (필요하면 아래 주석 해제)
--- SELECT cron.unschedule('sync-coupon-status')
---   WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'sync-coupon-status');
+-- 기존 매시간 동기화도 제거 (혹시 남아있다면)
+SELECT cron.unschedule('sync-coupon-status')
+  WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'sync-coupon-status');
 
--- 3. SERVICE_ROLE_KEY 를 Supabase Vault 에서 안전하게 꺼내 사용
---    (이 SQL을 실행하기 전에 Vault 에 'supabase_service_role_key' 시크릿이 있는지 확인)
---    없으면 임시로 아래 <SERVICE_ROLE_KEY> 자리에 service_role 키를 하드코딩.
+-- 3. (필요 시) Vault 시크릿 등록 — Supabase Dashboard → Settings → Vault → New secret
+--    Name:  supabase_service_role_key
+--    Value: (Settings → API → service_role 키)
+--    ※ 본 SQL 실행 전 시크릿이 이미 등록돼 있어야 합니다.
 
--- 4-1. 매일 KST 18:00 (UTC 09:00) — 새 쿠폰 추가
+-- 4-1. 매일 KST 04:00 (UTC 19:00) — 신규 쿠폰 메타 동기화
+--   webhook 은 activated 시점에만 발화하므로, mDiary 에 갓 발급된 unused 쿠폰들의
+--   metadata(coupon_code/duration/user_limit/descript)는 polling 으로 회수해야 함.
 SELECT cron.schedule(
   'sync-new-coupons-daily',
-  '0 9 * * *',  -- UTC 09:00 = KST 18:00
+  '0 19 * * *',  -- UTC 19:00 = KST 04:00
   $$
   SELECT net.http_post(
     url     := 'https://awosikecivzhwisqzlds.supabase.co/functions/v1/sync-new-coupons',
@@ -41,13 +43,12 @@ SELECT cron.schedule(
   $$
 );
 
--- 4-2. 매일 KST 18:05 (UTC 09:05) — 기존 쿠폰 상태 갱신
---   sync-new-coupons 가 먼저 끝나도록 5분 텀
---   limit=500 을 한번에 보내서 페이지 1회로 처리 (작은 DB 부하 환경에서는 충분).
---   500건 초과 시 hasMore=true 가 돼서 다음날까지 남은 행은 다음 cron 실행에서 처리됨.
+-- 4-2. 매일 KST 05:00 (UTC 20:00) — 사용 상태 안전망 동기화
+--   webhook 누락/장애 시 fallback. 정상이라면 변경 0건이어야 함.
+--   limit=500 으로 한 번에 처리 (대부분 활성 쿠폰 수가 그 이하).
 SELECT cron.schedule(
   'sync-coupon-status-daily',
-  '5 9 * * *',
+  '0 20 * * *',
   $$
   SELECT net.http_post(
     url     := 'https://awosikecivzhwisqzlds.supabase.co/functions/v1/get-coupon-status',
@@ -61,7 +62,7 @@ SELECT cron.schedule(
 );
 
 -- 5. 등록 확인
-SELECT jobname, schedule, active, command
+SELECT jobname, schedule, active
   FROM cron.job
  WHERE jobname IN ('sync-new-coupons-daily', 'sync-coupon-status-daily')
  ORDER BY schedule;
@@ -73,9 +74,7 @@ SELECT jobname, schedule, active, command
 --  ORDER BY start_time DESC LIMIT 10;
 
 -- ─────────────────────────────────────────────────────────────
--- Vault 시크릿 등록 방법 (1회만):
---   Supabase Dashboard → Settings → Vault → New secret
---     Name:  supabase_service_role_key
---     Value: (Settings → API → service_role 키 복사)
--- 등록 후 본 SQL을 다시 실행하면 cron 이 시크릿을 자동 사용.
+-- 향후 (webhook 안정화 후, 1~2개월 모니터링 후):
+--   - sync-coupon-status-daily 를 주 1회로 더 줄이거나 제거
+--   - sync-new-coupons-daily 는 유지 (webhook 발화 전 단계 쿠폰 처리용)
 -- ─────────────────────────────────────────────────────────────

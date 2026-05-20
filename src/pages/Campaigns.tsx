@@ -1136,7 +1136,10 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
     isLuckySeven ? 'ls_groups' : 'leads',
   );
 
-  // 캠페인 펼칠 때 쿠폰 상태 자동 동기화 (mDiary MySQL → campaign_licenses)
+  // 캠페인 펼칠 때 쿠폰 상태 자동 동기화 — coupon-webhook 가동 후 제거 가능.
+  // 현재는 webhook 미가동 + 안전망으로 유지하되, 호출 빈도를 줄이기 위해
+  // staleTime 1시간 + pendingCodes 가 있을 때만 호출.
+  // (이전: 5분 staleTime → 펼침마다 mDiary JOIN 쿼리 부하)
   const { data: syncDone } = useQuery({
     queryKey: ['campaign_license_sync', campaign.id],
     queryFn: async () => {
@@ -1153,7 +1156,7 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
       if (r.ok) qc.invalidateQueries({ queryKey: ['all_campaign_licenses'] });
       return true;
     },
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000 * 60 * 60,        // 1시간 — webhook 안정화 후 더 늘리거나 제거
     refetchOnWindowFocus: false,
   });
 
