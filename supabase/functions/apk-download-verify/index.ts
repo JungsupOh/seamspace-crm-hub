@@ -103,19 +103,22 @@ Deno.serve(async (req: Request) => {
     }
 
     // signed URL 발급
+    // 주의: 함수 내부 egress에서 Storage 라우트는 apikey 헤더를 요구함 → DB_HEADERS 동일 적용
     const signRes = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${BUCKET}/${v.file_path}`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+      headers: DB_HEADERS,
       body: JSON.stringify({ expiresIn: SIGNED_URL_EXPIRES_SEC }),
     });
     if (!signRes.ok) {
       const err = await signRes.text();
-      console.error("[apk-download-verify] signed URL 발급 실패:", err);
+      console.error("[apk-download-verify] signed URL 발급 실패:", signRes.status, err);
       return json({ ok: false, reason: "internal", message: "다운로드 링크 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요." }, 200);
     }
     const { signedURL } = await signRes.json() as { signedURL: string };
-    // signedURL은 path-only 형식 (예: /storage/v1/object/sign/apk-files/...) → 절대 URL로 prefix
-    const downloadUrl = signedURL.startsWith("http") ? signedURL : `${SUPABASE_URL}${signedURL}`;
+    // signedURL은 /object/sign/... 형식 (storage/v1 접두어 없음) → /storage/v1 prefix 후 절대 URL화
+    const downloadUrl = signedURL.startsWith("http")
+      ? signedURL
+      : `${SUPABASE_URL}/storage/v1${signedURL.startsWith("/storage/v1") ? signedURL.slice("/storage/v1".length) : signedURL}`;
 
     // 다운로드 로깅
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
