@@ -42,10 +42,10 @@ export interface CustomQuestion {
   type: 'text' | 'textarea';
 }
 
-export type CampaignLocale = 'ko' | 'ja';
+export type CampaignLocale = 'ko' | 'ja' | 'en';
 
 export interface FormSettings {
-  locale?:     CampaignLocale;     // 'ko' (기본) | 'ja' (해외 캠페인)
+  locale?:     CampaignLocale;     // 'ko' (기본) | 'ja' / 'en' (해외 캠페인)
   school?:     { enabled: boolean; mode: SchoolMode; label?: string };
   role?:       { enabled: boolean; label?: string };
   source?:     { enabled: boolean };
@@ -410,19 +410,22 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
     };
   });
   // locale 변경 시 자동 분기:
-  // - ja면 학교 모드는 free_text 강제, trial 채널은 email 강제
-  // - 라벨이 한국어 default 그대로면 일본어 default로 치환 (사용자가 커스텀한 라벨은 보존)
-  // - ko로 돌아오면 일본어 default → 한국어 default로 역치환
-  const KO_DEFAULT_LABELS = { school: '학교명', role: '담당 업무', usage_plan: '활용 방안' };
-  const JA_DEFAULT_LABELS = { school: '学校名・組織名', role: 'ご担当・役職', usage_plan: '利用目的・関心領域' };
+  // - 해외(ja/en)면 학교 모드는 free_text 강제, trial 채널은 email 강제
+  // - 라벨이 어느 locale의 default 그대로면 새 locale default로 치환 (사용자가 커스텀한 라벨은 보존)
+  type LabelKey = 'school' | 'role' | 'usage_plan';
+  const DEFAULT_LABELS: Record<CampaignLocale, Record<LabelKey, string>> = {
+    ko: { school: '학교명',          role: '담당 업무',     usage_plan: '활용 방안' },
+    ja: { school: '学校名・組織名',   role: 'ご担当・役職',   usage_plan: '利用目的・関心領域' },
+    en: { school: 'School / Organization', role: 'Role / Position', usage_plan: 'Intended Use' },
+  };
   const setLocale = (loc: CampaignLocale) => {
+    const overseas = loc !== 'ko';
     setFormCfg(c => {
-      const from = loc === 'ja' ? KO_DEFAULT_LABELS : JA_DEFAULT_LABELS;
-      const to   = loc === 'ja' ? JA_DEFAULT_LABELS : KO_DEFAULT_LABELS;
-      const swap = (k: keyof typeof from, current: string | undefined): string => {
+      const swap = (k: LabelKey, current: string | undefined): string => {
         const cur = (current ?? '').trim();
-        // 현재가 비어있거나 반대 locale의 default와 같으면 새 default로 치환
-        if (!cur || cur === from[k]) return to[k];
+        // 비어있거나, 어느 locale의 default와 일치하면 새 locale default로 치환
+        const isDefault = Object.values(DEFAULT_LABELS).some(d => d[k] === cur);
+        if (!cur || isDefault) return DEFAULT_LABELS[loc][k];
         return cur;
       };
       return {
@@ -430,14 +433,14 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
         locale: loc,
         school: {
           ...c.school,
-          mode:  loc === 'ja' ? 'free_text' : c.school.mode,
+          mode:  overseas ? 'free_text' : c.school.mode,
           label: swap('school', c.school.label),
         },
         role: { ...c.role, label: swap('role', c.role.label) },
         usage_plan: { ...c.usage_plan, label: swap('usage_plan', c.usage_plan.label) },
       };
     });
-    if (loc === 'ja') {
+    if (overseas) {
       setTrial(t => ({ ...t, delivery_channel: 'email' }));
     } else {
       setTrial(t => ({ ...t, delivery_channel: t.delivery_channel ?? 'alimtalk' }));
@@ -579,7 +582,7 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
             </div>
           </div>
 
-          {/* 언어 — ko(한국) / ja(해외) */}
+          {/* 언어 — ko(한국) / ja·en(해외) */}
           <div className="space-y-1">
             <Label className="text-xs">언어</Label>
             <Select value={formCfg.locale ?? 'ko'} onValueChange={v => setLocale(v as CampaignLocale)}>
@@ -587,11 +590,12 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
               <SelectContent>
                 <SelectItem value="ko">한국어 (ko) — 카카오 알림톡 발송</SelectItem>
                 <SelectItem value="ja">日本語 (ja) — 이메일 발송 (해외)</SelectItem>
+                <SelectItem value="en">English (en) — 이메일 발송 (해외)</SelectItem>
               </SelectContent>
             </Select>
-            {formCfg.locale === 'ja' && (
+            {formCfg.locale !== 'ko' && (
               <p className="text-[10px] text-amber-700">
-                일본어 캠페인은 학교명=자유입력, 트라이얼 발송 채널=이메일로 자동 고정됩니다.
+                해외({formCfg.locale}) 캠페인은 학교명=자유입력, 트라이얼 발송 채널=이메일로 자동 고정됩니다.
               </p>
             )}
           </div>
@@ -704,7 +708,7 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                     <Select
                       value={formCfg.school.mode}
                       onValueChange={v => setFormCfg(c => ({ ...c, school: { ...c.school, mode: v as SchoolMode } }))}
-                      disabled={formCfg.locale === 'ja'}
+                      disabled={formCfg.locale !== 'ko'}
                     >
                       <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -713,8 +717,8 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                         <SelectItem value="mixed"      className="text-xs">초중고+대학 (혼합)</SelectItem>
                       </SelectContent>
                     </Select>
-                    {formCfg.locale === 'ja' && (
-                      <p className="text-[10px] text-amber-700 mt-0.5">日本語 캠페인은 자유입력 고정 (NEIS는 한국 전용)</p>
+                    {formCfg.locale !== 'ko' && (
+                      <p className="text-[10px] text-amber-700 mt-0.5">해외({formCfg.locale}) 캠페인은 자유입력 고정 (NEIS는 한국 전용)</p>
                     )}
                   </div>
                 </div>
@@ -872,12 +876,12 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                 <div className="space-y-1.5">
                   <Label className="text-[10px]">발송 채널</Label>
                   <div className="grid grid-cols-2 gap-2">
-                    <label className={`flex items-start gap-2 cursor-pointer rounded border p-2 ${(trial.delivery_channel ?? 'alimtalk') === 'alimtalk' ? 'border-primary bg-primary/5' : 'border-border bg-card'} ${formCfg.locale === 'ja' ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                    <label className={`flex items-start gap-2 cursor-pointer rounded border p-2 ${(trial.delivery_channel ?? 'alimtalk') === 'alimtalk' ? 'border-primary bg-primary/5' : 'border-border bg-card'} ${formCfg.locale !== 'ko' ? 'opacity-50 cursor-not-allowed' : ''}`}>
                       <input
                         type="radio"
                         name="delivery_channel"
                         checked={(trial.delivery_channel ?? 'alimtalk') === 'alimtalk'}
-                        disabled={formCfg.locale === 'ja'}
+                        disabled={formCfg.locale !== 'ko'}
                         onChange={() => setTrial(t => ({ ...t, delivery_channel: 'alimtalk' }))}
                         className="mt-0.5 accent-primary"
                       />
@@ -900,8 +904,8 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                       </span>
                     </label>
                   </div>
-                  {formCfg.locale === 'ja' && (
-                    <p className="text-[10px] text-amber-700">언어=日本語 캠페인은 이메일로 자동 고정됩니다.</p>
+                  {formCfg.locale !== 'ko' && (
+                    <p className="text-[10px] text-amber-700">해외({formCfg.locale}) 캠페인은 이메일로 자동 고정됩니다.</p>
                   )}
                 </div>
               </div>

@@ -2,13 +2,13 @@
 // auto_issue=true 인 캠페인에서 리드 등록 시:
 // 0) phone_normalized로 기존 체험권 조회 → 미사용이면 재발송, 사용중/만료면 차단
 // 1) (신규일 때만) mDiary 쿠폰 생성 (apiCreateCoupon)
-// 2) 발송: delivery_channel='alimtalk'(기본) → 카카오 알림톡 / 'email' → 일본어 이메일 (해외 캠페인)
+// 2) 발송: delivery_channel='alimtalk'(기본) → 카카오 알림톡 / 'email' → 이메일 (해외: en→영어, 그 외→일본어)
 // 3) campaign_licenses INSERT (재발송 시는 skip)
 // 4) lead.status='체험발송' / '체험중복' UPDATE
 // 실패해도 lead 등록 자체는 성공 처리 (각 단계 try/catch)
 
 import { apiCreateCoupon, apiSendCoupon } from '@/lib/coupons';
-import { sendTrialLicenseEmailJP } from '@/lib/email';
+import { sendTrialLicenseEmailJP, sendTrialLicenseEmailEN } from '@/lib/email';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -40,6 +40,7 @@ export const PLAN_USER_COUNT: Record<TrialPlanId, number> = {
 interface IssueParams {
   campaign: { id: string; name: string; trial_license_settings?: TrialLicenseSettings | null };
   lead: { id: string; name: string; phone: string; phone_normalized: string; email?: string | null; school_name?: string | null };
+  locale?: 'ko' | 'ja' | 'en';  // 이메일 채널일 때 언어 선택 ('en' → 영어 메일, 그 외 → 일본어 메일)
 }
 
 export type IssueOutcome = 'new' | 'resent' | 'blocked_used' | 'blocked_expired';
@@ -117,6 +118,8 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
 
   const { plan, duration_months } = settings;
   const channel: TrialDeliveryChannel = settings.delivery_channel ?? 'alimtalk';
+  // 이메일 채널 언어 선택 — 'en' 캠페인은 영어 메일, 그 외(ja 등)는 일본어 메일
+  const sendTrialEmail = params.locale === 'en' ? sendTrialLicenseEmailEN : sendTrialLicenseEmailJP;
   const userCount = settings.user_count ?? PLAN_USER_COUNT[plan] ?? 40;
   const description = `${params.campaign.name} ${params.lead.school_name ?? ''} ${params.lead.name} 체험이용권`.trim();
   const expireAt = settings.service_expire_at || expiresAtFromDuration(duration_months);
@@ -159,7 +162,7 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
     if (channel === 'email') {
       if (params.lead.email) {
         try {
-          await sendTrialLicenseEmailJP({
+          await sendTrialEmail({
             to:           params.lead.email,
             contactName:  params.lead.name,
             orgName:      params.lead.school_name ?? undefined,
@@ -224,7 +227,7 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
       console.error('[trial-license] email 채널이지만 lead.email 없음 — 발송 스킵, 어드민에서 수동 발송 필요');
     } else {
       try {
-        await sendTrialLicenseEmailJP({
+        await sendTrialEmail({
           to:           params.lead.email,
           contactName:  params.lead.name,
           orgName:      params.lead.school_name ?? undefined,
@@ -235,9 +238,9 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
           serviceExpireAt: expireAt,
         });
         emailSent = true;
-        console.log(`[trial-license] 일본어 이메일 발송 성공 → ${params.lead.email}`);
+        console.log(`[trial-license] ${params.locale === 'en' ? '영어' : '일본어'} 이메일 발송 성공 → ${params.lead.email}`);
       } catch (e) {
-        console.error('[trial-license] 일본어 이메일 발송 실패', e);
+        console.error('[trial-license] 이메일 발송 실패', e);
       }
     }
   } else {

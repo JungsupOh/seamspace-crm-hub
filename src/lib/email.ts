@@ -457,6 +457,152 @@ export async function sendTrialLicenseEmailJP(params: {
   );
 }
 
+// ── 영어 레이아웃 (해외 캠페인 전용) ────────────────────
+function layoutEN(content: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seamspace</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+        <tr>
+          <td style="background:#0f172a;padding:24px 40px;text-align:center;">
+            <img
+              src="https://awosikecivzhwisqzlds.supabase.co/storage/v1/object/public/assets/logo.png"
+              alt="Seamspace"
+              width="200"
+              style="display:inline-block;height:auto;max-width:200px;"
+            />
+          </td>
+        </tr>
+        <tr><td style="background:#6366f1;height:4px;font-size:0;line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:36px 40px 32px;">${content}</td></tr>
+        <tr>
+          <td style="padding:20px 40px;border-top:1px solid #e4e4e7;background:#fafafa;">
+            <p style="margin:0;font-size:11px;color:#a1a1aa;line-height:1.6;">
+              This email was sent automatically by the Seamspace CRM system.<br/>
+              Contact: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+// ── 영어 트라이얼 안내 메일 (해외 캠페인) ───────────────
+// 영어권 전시회/캠페인 리드에게 발송하는 무료 체험 코드 안내.
+// replyTo는 contact@tebahsoft.com (해외 문의 채널), cc는 기본 sales@tebahsoft.com (가시성).
+export async function sendTrialLicenseEmailEN(params: {
+  to: string;
+  contactName: string;
+  orgName?: string;
+  campaignName: string;
+  couponCode: string;
+  durationDays: number;
+  userLimit: number;
+  serviceExpireAt?: string;  // YYYY-MM-DD
+}): Promise<void> {
+  const expireLine = params.serviceExpireAt
+    ? `Valid until ${params.serviceExpireAt}`
+    : `Valid for ${params.durationDays} days from issue date`;
+
+  const html = layoutEN(`
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">Thank you, ${params.contactName}!</h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
+      Thank you for your interest in seamspace.<br/>
+      We appreciate your registration for ${params.campaignName}. Your trial code is ready below.
+    </p>
+
+    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">Trial code</p>
+    ${codeBox(params.couponCode)}
+    <p style="margin:0 0 20px;font-size:12px;color:#a1a1aa;text-align:center;">
+      ${expireLine} ・ Up to ${params.userLimit} users
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">How to get started</p>
+    <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
+      Please refer to the attached <strong>Quick Guide (PDF)</strong> to get started.<br/>
+      It walks you through account sign-up and entering your trial code, step by step with screenshots.
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">Would you like a demo meeting?</p>
+    <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
+      We'd be happy to walk you through seamspace online. <strong>Simply reply to this email</strong> and our team will get in touch.
+    </p>
+
+    <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">If you have any questions, please don't hesitate to reach out.</p>
+    <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
+      Contact: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+    </p>
+
+    <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
+      Best regards,<br/>
+      Tebahsoft Inc.
+    </p>
+  `);
+
+  // plain text 대체본 — Gmail/Outlook 스팸 점수 크게 감소
+  const text = [
+    `Thank you, ${params.contactName}!`,
+    ``,
+    `Thank you for your interest in seamspace.`,
+    `We appreciate your registration for ${params.campaignName}.`,
+    ``,
+    `Trial code: ${params.couponCode}`,
+    `${expireLine} ・ Up to ${params.userLimit} users`,
+    ``,
+    `Please refer to the attached Quick Guide (PDF) to get started.`,
+    `It walks you through account sign-up and entering your trial code, step by step with screenshots.`,
+    ``,
+    `Would you like a demo meeting? Simply reply to this email and our team will get in touch.`,
+    ``,
+    `Contact: contact@tebahsoft.com`,
+    `Tebahsoft Inc.`,
+  ].join('\n');
+
+  // Quick Guide PDF 첨부 (public/docs/Quick Guide_How To Start (En).pdf)
+  let attachments: Array<{ filename: string; content: string }> | undefined;
+  try {
+    const r = await fetch('/docs/Quick%20Guide_How%20To%20Start%20(En).pdf');
+    if (r.ok) {
+      const blob = await r.blob();
+      const buf = await blob.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+      }
+      const base64 = btoa(binary);
+      attachments = [{ filename: 'seamspace_QuickGuide_EN.pdf', content: base64 }];
+    } else {
+      console.warn('[sendTrialLicenseEmailEN] Quick Guide PDF 로드 실패', r.status);
+    }
+  } catch (e) {
+    console.warn('[sendTrialLicenseEmailEN] Quick Guide PDF 첨부 실패 (메일은 진행)', e);
+  }
+
+  await sendEmail(
+    params.to,
+    `Seamspace ${params.campaignName} Trial Code${params.orgName ? ` - ${params.orgName}` : ''}`,
+    html,
+    {
+      text,
+      reply_to: 'contact@tebahsoft.com',
+      attachments,
+      // cc는 default(sales@tebahsoft.com) 그대로 — 본사 가시성
+    },
+  );
+}
+
 // ── APK 배포 안내 이메일 (심스페이스 Android 앱) ────────
 // 사용자 노출은 '심스페이스'만 사용 (mDiary 표기 금지)
 // 문의처는 info@tebahsoft.com (APK 배포 전용 채널)

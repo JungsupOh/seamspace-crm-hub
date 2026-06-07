@@ -2,11 +2,14 @@
 // 한국: 숫자만 추출 (010-1234-5678 → 01012345678)
 // 일본: +81/81 prefix 제거하고 선두 0 보존 (+81 90-1234-5678 → 09012345678)
 
-export type PhoneCountry = 'kr' | 'jp';
+export type PhoneCountry = 'kr' | 'jp' | 'intl';
 
 export function normalizePhone(raw: string, country: PhoneCountry = 'kr'): string {
   const digits = (raw ?? '').replace(/\D/g, '');
   if (!digits) return '';
+
+  // intl: 국가 특정 가공 없이 숫자만 보존 (영어권 해외 캠페인 — 국가 불특정)
+  if (country === 'intl') return digits;
 
   if (country === 'jp') {
     // +81 9012345678 → 09012345678
