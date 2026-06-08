@@ -96,8 +96,17 @@ function formatDate(dateStr: string): string {
 }
 
 async function adminAuthFetch(action: string, params: Record<string, unknown> = {}) {
-  const session = (await supabase.auth.getSession()).data.session;
+  let session = (await supabase.auth.getSession()).data.session;
   if (!session) throw new Error('로그인이 필요합니다.');
+  // access_token이 만료됐거나 60초 내 만료 예정이면 명시적으로 갱신.
+  // getSession()은 강제 갱신을 하지 않아, 오래 머문 어드민이 만료 토큰을 보내
+  // 엣지 함수가 'Invalid or expired token'으로 거부하는 것을 방지.
+  const expiresAtMs = (session.expires_at ?? 0) * 1000;
+  if (expiresAtMs - Date.now() < 60_000) {
+    const { data, error } = await supabase.auth.refreshSession();
+    if (error || !data.session) throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
+    session = data.session;
+  }
   const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-auth`, {
     method: 'POST',
     headers: {
