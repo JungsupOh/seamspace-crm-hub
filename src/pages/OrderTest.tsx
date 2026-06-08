@@ -707,7 +707,9 @@ export default function OrderTest() {
       // 중요: items JSONB와 license_qty를 명시적으로 저장 — 딜편집 다이얼로그가 재구성 로직에
       // 의존하지 않도록 (재구성은 qty/40 나누기로 학생수 오해석 위험)
       // s2b_number: 견적서 PDF에 학교장터 물품번호를 노출하기 위해 명시적으로 채움 (이전 빈 문자열로 저장돼 PDF 누락 회귀)
-      const s2bPlanKey = planLabel.replace(/\s+/g, '');  // '학급 플랜' → '학급플랜' (S2B_MAP 키 정규화)
+      // S2B_MAP 정규 키는 activePlan.id 기준 — 학교 플랜은 '플랜' 접미사 없음('학교(소)' 등),
+      // 그 외(학급/학년/소수학급)는 'id+플랜'. 라벨 문자열 가공은 학교 플랜에서 키 불일치 발생.
+      const s2bPlanKey = activePlan.id.startsWith('학교') ? activePlan.id : `${activePlan.id}플랜`;
       const webItems = selectedProduct.code === '01' ? [{
         plan: planLabel,
         duration: info.months,
@@ -767,6 +769,7 @@ export default function OrderTest() {
                 quoteDate:   today,
                 orgName:     info.orgName,
                 contactName: info.contactName,
+                items:       webItems,   // S2B 물품번호 포함 라인 — 딜추가와 동일하게 PDF에 노출
                 plan:        planNameForS2b,
                 duration:    info.months,
                 unitPrice,
@@ -863,11 +866,22 @@ export default function OrderTest() {
       // 1) 견적서 PDF 생성
       const { generateQuotePdfBlob } = await import('@/lib/generateQuotePdf');
       const planNameForS2b = `${activePlan.id === '소수학급' ? '소수학급' : activePlan.id}플랜`;
+      // S2B 물품번호 포함 라인 (저장 시 webItems와 동일 로직) — 학교 플랜은 접미사 없는 키 사용
+      const s2bPlanKey = activePlan.id.startsWith('학교') ? activePlan.id : `${activePlan.id}플랜`;
+      const emailItems = selectedProduct.code === '01' ? [{
+        plan: planLabel,
+        duration: info.months,
+        qty: info.qty,
+        unit_price: unitPrice,
+        amount: unitPrice * info.qty,
+        s2b_number: getS2BNumber(s2bPlanKey, info.months),
+      }] : [];
       const { blob, fileName } = await generateQuotePdfBlob({
         quoteNumber: qNum,
         quoteDate:   today,
         orgName:     info.orgName,
         contactName: info.contactName,
+        items:       emailItems,
         plan:        planNameForS2b,
         duration:    info.months,
         unitPrice,
