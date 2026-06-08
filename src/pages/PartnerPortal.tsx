@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Plus, Pencil, Trash2, Loader2, Search, X, Users, Package } from 'lucide-react';
-import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, createDealBuyers, getDealBuyers } from '@/lib/partner-deals';
+import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, createDealBuyers, getDealBuyers, deleteDealBuyers } from '@/lib/partner-deals';
 import { notifyPartnerDeal } from '@/lib/telegram';
 import type { PartnerDeal, PartnerDealBuyer } from '@/lib/partner-deals';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
@@ -62,10 +62,9 @@ export default function PartnerPortal() {
   const [deals, setDeals] = useState<PartnerDeal[]>([]);
   const [dealBuyersMap, setDealBuyersMap] = useState<Record<string, PartnerDealBuyer[]>>({});
   const [loading, setLoading] = useState(true);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<Partial<PartnerDeal>>({});
   const [adding, setAdding] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [editingDealId, setEditingDealId] = useState<string | null>(null);  // null = 추가 모드, 값 있으면 해당 딜 수정 모드
   const [deleteDealConfirmOpen, setDeleteDealConfirmOpen] = useState(false);
   const [deleteDealTargetId, setDeleteDealTargetId] = useState<string | null>(null);
   const [addForm, setAddForm] = useState<Partial<PartnerDeal>>({});
@@ -177,10 +176,60 @@ export default function PartnerPortal() {
   const commissionRate = partner?.commission_rate ?? 15;
 
   const handleOpenAddDialog = () => {
+    setEditingDealId(null);
     setAddForm({ quantity: 1 });
     setBuyers([emptyBuyer()]);
     setItems([emptyItem()]);
     setSchoolQuery('');
+    setSchoolResults([]);
+    setShowSchoolDropdown(false);
+    setAddDialogOpen(true);
+  };
+
+  // 기존 딜 상세보기·수정 — 생성 다이얼로그를 재사용해 품명·구매자까지 프리필
+  const handleOpenEditDialog = (deal: PartnerDeal) => {
+    setEditingDealId(deal.id);
+    setAddForm({
+      contract_date: deal.contract_date,
+      school_name: deal.school_name,
+      remarks: deal.remarks,
+    });
+    // 품명 프리필 — items가 없으면(legacy) 요약 필드로 단일 항목 폴백
+    const dealItems = deal.items && deal.items.length > 0
+      ? deal.items.map(it => ({
+          plan: it.plan ?? '학급플랜',
+          duration: it.duration ?? 4,
+          qty: it.qty ?? 1,
+          unit_price: it.unit_price ?? 0,
+          amount: it.amount ?? 0,
+        }))
+      : [{
+          plan: deal.plan_name || '학급플랜',
+          duration: deal.month_count || 4,
+          qty: deal.quantity || 1,
+          unit_price: (deal.quantity && deal.quantity > 0) ? Math.round((deal.payment_amount ?? 0) / deal.quantity) : (deal.payment_amount ?? 0),
+          amount: deal.payment_amount ?? 0,
+        }];
+    setItems(dealItems);
+    // 구매자 프리필 — buyers 레코드가 없으면(legacy) 딜 요약 필드로 단일 구매자 폴백
+    const dbBuyers = dealBuyersMap[deal.id] ?? [];
+    const formBuyers: BuyerInput[] = dbBuyers.length > 0
+      ? dbBuyers.map(b => ({
+          buyer_name: b.buyer_name ?? '',
+          buyer_phone: b.buyer_phone ?? '',
+          buyer_email: b.buyer_email ?? '',
+          student_count: b.student_count ?? 40,
+          month_count: b.month_count ?? '',
+        }))
+      : [{
+          buyer_name: deal.buyer_name ?? '',
+          buyer_phone: deal.buyer_phone ?? '',
+          buyer_email: deal.buyer_email ?? '',
+          student_count: deal.student_count ?? 40,
+          month_count: deal.month_count ?? '',
+        }];
+    setBuyers(formBuyers.length > 0 ? formBuyers : [emptyBuyer()]);
+    setSchoolQuery(deal.school_name ?? '');
     setSchoolResults([]);
     setShowSchoolDropdown(false);
     setAddDialogOpen(true);
@@ -211,7 +260,8 @@ export default function PartnerPortal() {
     setItems(prev => prev.filter((_, i) => i !== idx));
   };
 
-  const handleAddSubmit = async () => {
+  // 추가/수정 공용 제출 — editingDealId 유무로 분기
+  const handleDialogSubmit = async () => {
     if (!partner) return;
     // 구매자 최소 1명 이름 필수
     const validBuyers = buyers.filter(b => b.buyer_name.trim());
@@ -221,15 +271,11 @@ export default function PartnerPortal() {
     }
     setAdding(true);
     try {
-      const seq = deals.length + 1;
       const totalAmount = itemsTotal;
       const { commission, settlement } = calcCommission(totalAmount, commissionRate);
       const firstBuyer = validBuyers[0];
-      // 품목에서 대표 플랜명 추출
       const planSummary = items.map(it => it.plan).filter(Boolean).join(', ');
-      const created = await createPartnerDeal({
-        partner_id: partner.id,
-        seq_number: seq,
+      const dealFields = {
         contract_date: addForm.contract_date || null,
         school_name: addForm.school_name || null,
         buyer_name: firstBuyer.buyer_name || null,
@@ -242,35 +288,42 @@ export default function PartnerPortal() {
         settlement_amount: settlement,
         items: items.map(it => ({ plan: it.plan, duration: it.duration, qty: it.qty, unit_price: it.unit_price, amount: it.amount })),
         remarks: addForm.remarks || null,
-      });
-      // 구매자 레코드 생성
-      const createdBuyers = await createDealBuyers(created.id, validBuyers.map(b => ({
+      };
+      const buyerRows = validBuyers.map(b => ({
         buyer_name: b.buyer_name || undefined,
         buyer_phone: b.buyer_phone || undefined,
         buyer_email: b.buyer_email || undefined,
         student_count: b.student_count,
         month_count: b.month_count === '' ? undefined : b.month_count,
         quantity: 1,
-      })));
-      setDeals(prev => [...prev, created]);
-      setDealBuyersMap(prev => ({ ...prev, [created.id]: createdBuyers }));
-      setAddDialogOpen(false);
-      toast.success('딜이 추가되었습니다');
-      // 텔레그램 알림
-      notifyPartnerDeal(partner.name, addForm.school_name ?? '', firstBuyer.buyer_name ?? '', totalAmount);
-    } catch { toast.error('추가 실패'); }
-    finally { setAdding(false); }
-  };
+      }));
 
-  const handleSave = async (id: string) => {
-    try {
-      const { commission, settlement } = calcCommission(editForm.payment_amount ?? 0, commissionRate);
-      const updates = { ...editForm, commission_amount: commission, settlement_amount: settlement };
-      await updatePartnerDeal(id, updates);
-      setDeals(prev => prev.map(d => d.id === id ? { ...d, ...updates } as PartnerDeal : d));
-      setEditingId(null);
-      toast.success('저장됨');
-    } catch { toast.error('저장 실패'); }
+      if (editingDealId) {
+        // ── 수정 ──
+        await updatePartnerDeal(editingDealId, dealFields);
+        // 구매자는 전량 교체 (삭제 후 재생성)
+        await deleteDealBuyers(editingDealId);
+        const newBuyers = await createDealBuyers(editingDealId, buyerRows);
+        setDeals(prev => prev.map(d => d.id === editingDealId ? { ...d, ...dealFields } as PartnerDeal : d));
+        setDealBuyersMap(prev => ({ ...prev, [editingDealId]: newBuyers }));
+        setAddDialogOpen(false);
+        toast.success('수정되었습니다');
+      } else {
+        // ── 추가 ──
+        const created = await createPartnerDeal({
+          partner_id: partner.id,
+          seq_number: deals.length + 1,
+          ...dealFields,
+        });
+        const createdBuyers = await createDealBuyers(created.id, buyerRows);
+        setDeals(prev => [...prev, created]);
+        setDealBuyersMap(prev => ({ ...prev, [created.id]: createdBuyers }));
+        setAddDialogOpen(false);
+        toast.success('딜이 추가되었습니다');
+        notifyPartnerDeal(partner.name, addForm.school_name ?? '', firstBuyer.buyer_name ?? '', totalAmount);
+      }
+    } catch { toast.error(editingDealId ? '수정 실패' : '추가 실패'); }
+    finally { setAdding(false); }
   };
 
   const handleDelete = (id: string) => {
@@ -289,10 +342,6 @@ export default function PartnerPortal() {
     setDeleteDealConfirmOpen(false);
     setDeleteDealTargetId(null);
   };
-
-  const ef = (k: keyof PartnerDeal) => (editForm[k] as string) ?? '';
-  const efn = (k: keyof PartnerDeal) => editForm[k] as number | undefined;
-  const eset = (k: keyof PartnerDeal, v: unknown) => setEditForm(prev => ({ ...prev, [k]: v }));
 
   // 구매자 입력 핸들러
   const updateBuyer = (idx: number, field: keyof BuyerInput, value: string | number) => {
@@ -390,7 +439,6 @@ export default function PartnerPortal() {
               ) : filteredDeals.length === 0 ? (
                 <tr><td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">등록된 딜이 없습니다.</td></tr>
               ) : filteredDeals.map((d, idx) => {
-                const isEditing = editingId === d.id;
                 const dbBuyers = dealBuyersMap[d.id] ?? [];
                 const buyerCount = dbBuyers.length || 1;
                 const buyerDisplay = dbBuyers.length > 1
@@ -400,33 +448,8 @@ export default function PartnerPortal() {
                   ? `${d.buyer_phone ?? ''} ...`
                   : d.buyer_phone || '-';
 
-                if (isEditing) {
-                  return (
-                    <tr key={d.id} className="bg-primary/5">
-                      <td className="px-3 py-2 text-muted-foreground text-xs">{idx + 1}</td>
-                      <td className="px-3 py-2"><input type="date" value={ef('contract_date')} onChange={e => eset('contract_date', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-32" /></td>
-                      <td className="px-3 py-2"><input value={ef('school_name')} onChange={e => eset('school_name', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-full" placeholder="학교명" /></td>
-                      <td className="px-3 py-2"><input value={ef('buyer_name')} onChange={e => eset('buyer_name', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-full" placeholder="구매자" /></td>
-                      <td className="px-3 py-2"><input value={ef('buyer_phone')} onChange={e => eset('buyer_phone', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-28" placeholder="연락처" /></td>
-                      <td className="px-3 py-2"><input value={ef('plan_name')} onChange={e => eset('plan_name', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-16" /></td>
-                      <td className="px-3 py-2"><input type="number" value={efn('quantity') ?? ''} onChange={e => eset('quantity', parseInt(e.target.value) || 1)} className="h-7 text-xs border rounded px-1.5 w-12 text-center" /></td>
-                      <td className="px-3 py-2"><AmountInput value={efn('payment_amount')} onValueChange={(n) => eset('payment_amount', n)} className="h-7 text-xs w-24 text-right" /></td>
-                      <td className="px-3 py-2 text-right text-xs text-muted-foreground tabular-nums">{calcCommission(efn('payment_amount') ?? 0, commissionRate).commission.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right text-xs text-muted-foreground tabular-nums">{calcCommission(efn('payment_amount') ?? 0, commissionRate).settlement.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">{d.license_issue_date || '-'}</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">{d.deposit_date || '-'}</td>
-                      <td className="px-3 py-2"><input value={ef('remarks')} onChange={e => eset('remarks', e.target.value)} className="h-7 text-xs border rounded px-1.5 w-full" /></td>
-                      <td className="px-3 py-2">
-                        <div className="flex gap-1">
-                          <button onClick={() => handleSave(d.id)} className="text-[10px] px-1.5 py-0.5 rounded bg-primary text-primary-foreground">저장</button>
-                          <button onClick={() => setEditingId(null)} className="text-[10px] px-1 py-0.5 rounded border border-border">취소</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                }
                 return (
-                  <tr key={d.id} className="hover:bg-muted/30">
+                  <tr key={d.id} className="hover:bg-muted/30 cursor-pointer" onClick={() => handleOpenEditDialog(d)}>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground">{idx + 1}</td>
                     <td className="px-3 py-2.5 text-xs whitespace-nowrap">{d.contract_date || '-'}</td>
                     <td className="px-3 py-2.5 text-xs font-medium">{d.school_name || '-'}</td>
@@ -445,11 +468,11 @@ export default function PartnerPortal() {
                     <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.license_issue_date || '-'}</td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground">{d.deposit_date || '-'}</td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground truncate max-w-[100px]">{d.remarks || '-'}</td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1">
-                        <button onClick={() => { setEditingId(d.id); setEditForm(d); }}
+                        <button onClick={() => handleOpenEditDialog(d)} title="상세보기 / 수정"
                           className="p-1 rounded hover:bg-muted text-muted-foreground"><Pencil className="h-3.5 w-3.5" /></button>
-                        <button onClick={() => handleDelete(d.id)}
+                        <button onClick={() => handleDelete(d.id)} title="삭제"
                           className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
                     </td>
@@ -462,10 +485,10 @@ export default function PartnerPortal() {
       </div>
 
       {/* 딜 추가 모달 */}
-      <Dialog open={addDialogOpen} onOpenChange={open => { if (!open) setAddDialogOpen(false); }}>
+      <Dialog open={addDialogOpen} onOpenChange={open => { if (!open) { setAddDialogOpen(false); setEditingDealId(null); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] flex flex-col" onOpenAutoFocus={e => e.preventDefault()}>
           <DialogHeader>
-            <DialogTitle>새 딜 추가</DialogTitle>
+            <DialogTitle>{editingDealId ? '딜 상세 / 수정' : '새 딜 추가'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2 overflow-y-auto flex-1">
             {/* 계약일 */}
@@ -642,10 +665,10 @@ export default function PartnerPortal() {
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t">
-            <Button variant="outline" size="sm" onClick={() => setAddDialogOpen(false)}>취소</Button>
-            <Button size="sm" onClick={handleAddSubmit} disabled={adding}>
+            <Button variant="outline" size="sm" onClick={() => { setAddDialogOpen(false); setEditingDealId(null); }}>취소</Button>
+            <Button size="sm" onClick={handleDialogSubmit} disabled={adding}>
               {adding && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
-              추가
+              {editingDealId ? '저장' : '추가'}
             </Button>
           </div>
         </DialogContent>
