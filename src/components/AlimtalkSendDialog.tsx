@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -52,24 +52,56 @@ export function AlimtalkSendDialog({
   const [sending, setSending] = useState(false);
   const [result,  setResult]  = useState<SendResult | null>(null);
   const [previewIdx, setPreviewIdx] = useState(0);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  const keyOf = (r: AlimtalkRecipient) => `${r.license_source}:${r.license_id}`;
   const total = recipients.length;
   const previewTarget = recipients[Math.min(previewIdx, Math.max(total - 1, 0))];
 
-  const reset = () => { setSending(false); setResult(null); setPreviewIdx(0); };
+  // 다이얼로그 오픈 또는 대상 구성이 실제로 바뀔 때만 기본 전원 선택으로 초기화.
+  // recipients 배열은 매 렌더 새 참조라, 안정적인 키 문자열로 의존 (열린 채 리렌더돼도 선택 보존)
+  const recipientsKey = recipients.map(keyOf).join('|');
+  useEffect(() => {
+    if (open) setSelected(new Set(recipientsKey ? recipientsKey.split('|') : []));
+  }, [open, recipientsKey]);
+
+  // 같은 전화번호가 2건 이상이면 '중복' 표시 (중복 발송 식별용)
+  const phoneCounts = new Map<string, number>();
+  recipients.forEach(r => {
+    const p = (r.phone ?? '').replace(/\D/g, '');
+    if (p) phoneCounts.set(p, (phoneCounts.get(p) ?? 0) + 1);
+  });
+
+  const selectedRecipients = recipients.filter(r => selected.has(keyOf(r)));
+  const selectedCount = selectedRecipients.length;
+  const allSelected = total > 0 && selectedCount === total;
+
+  const toggleOne = (r: AlimtalkRecipient) => {
+    const k = keyOf(r);
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    setSelected(allSelected ? new Set() : new Set(recipients.map(keyOf)));
+  };
+
+  const reset = () => { setSending(false); setResult(null); setPreviewIdx(0); setSelected(new Set()); };
   const close = (v: boolean) => { if (!sending) { onOpenChange(v); if (!v) reset(); } };
 
   const handleSend = async () => {
-    if (total === 0) { toast.error('발송 대상이 없습니다'); return; }
+    if (selectedCount === 0) { toast.error('선택된 발송 대상이 없습니다'); return; }
     setSending(true);
     try {
-      const r = await apiSendAlimtalk({ recipients, tpl_code, stage, sent_by });
+      const r = await apiSendAlimtalk({ recipients: selectedRecipients, tpl_code, stage, sent_by });
       setResult(r);
       if (r.failed === 0 && r.sent > 0) {
         toast.success(`${r.sent}명 발송 완료${r.skipped > 0 ? ` (중복 ${r.skipped}건 제외)` : ''}`);
       } else if (r.sent > 0) {
         toast.warning(`${r.sent}명 발송, ${r.failed}건 실패`);
-      } else if (r.skipped === total) {
+      } else if (r.skipped === selectedCount) {
         toast.info(`전원 이미 발송됨 (${r.skipped}건 스킵)`);
       } else {
         toast.error(`발송 실패: ${r.failed}건`);
@@ -91,7 +123,7 @@ export function AlimtalkSendDialog({
             {title}
           </DialogTitle>
           <DialogDescription>
-            총 <strong>{total}명</strong> 발송 예정
+            총 {total}명 중 <strong>{selectedCount}명</strong> 발송 예정
             {alreadySentCount > 0 && (
               <span className="ml-2 text-muted-foreground">
                 · 이미 발송된 {alreadySentCount}명은 자동 제외됨
@@ -106,23 +138,44 @@ export function AlimtalkSendDialog({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 overflow-hidden flex-1">
             {/* 대상자 리스트 */}
             <div className="overflow-y-auto border border-border rounded-lg">
-              <div className="px-3 py-2 text-[11px] font-medium text-muted-foreground bg-muted/30 sticky top-0">
-                발송 대상 {total}명
+              <div className="px-3 py-2 flex items-center justify-between bg-muted/30 sticky top-0 z-10">
+                <span className="text-[11px] font-medium text-muted-foreground">발송 대상 {selectedCount}/{total}명</span>
+                {total > 0 && (
+                  <button onClick={toggleAll} className="text-[11px] text-primary hover:underline">
+                    {allSelected ? '전체 해제' : '전체 선택'}
+                  </button>
+                )}
               </div>
-              {recipients.map((r, i) => (
-                <button
-                  key={`${r.license_source}:${r.license_id}`}
-                  onClick={() => setPreviewIdx(i)}
-                  className={`w-full text-left px-3 py-2 border-b border-border text-xs hover:bg-muted/30 ${
-                    i === previewIdx ? 'bg-primary/5 border-l-2 border-l-primary' : ''
-                  }`}>
-                  <div className="font-medium">{r.name} 선생님 <span className="text-muted-foreground">· {r.phone}</span></div>
-                  <div className="text-[11px] text-muted-foreground mt-0.5">
-                    {r.group_name ?? '-'} · {r.user_limit}명 / {r.duration}개월
-                    {r.expiry_date && ` · 만료 ${r.expiry_date}`}
+              {recipients.map((r, i) => {
+                const isSel = selected.has(keyOf(r));
+                const dup = (phoneCounts.get((r.phone ?? '').replace(/\D/g, '')) ?? 0) > 1;
+                return (
+                  <div
+                    key={`${r.license_source}:${r.license_id}`}
+                    onClick={() => setPreviewIdx(i)}
+                    className={`w-full flex items-start gap-2 px-3 py-2 border-b border-border text-xs cursor-pointer hover:bg-muted/30 ${
+                      i === previewIdx ? 'bg-primary/5 border-l-2 border-l-primary' : ''
+                    } ${isSel ? '' : 'opacity-50'}`}>
+                    <input
+                      type="checkbox"
+                      checked={isSel}
+                      onClick={e => e.stopPropagation()}
+                      onChange={() => toggleOne(r)}
+                      className="mt-0.5 accent-primary shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium flex items-center gap-1.5">
+                        <span className="truncate">{r.name} 선생님 <span className="text-muted-foreground">· {r.phone}</span></span>
+                        {dup && <span className="shrink-0 text-[9px] font-semibold text-amber-700 bg-amber-100 rounded px-1 py-0.5">중복</span>}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">
+                        {r.group_name ?? '-'} · {r.user_limit}명 / {r.duration}개월
+                        {r.expiry_date && ` · 만료 ${r.expiry_date}`}
+                      </div>
+                    </div>
                   </div>
-                </button>
-              ))}
+                );
+              })}
               {total === 0 && (
                 <div className="px-3 py-8 text-center text-xs text-muted-foreground">발송 대상 없음</div>
               )}
@@ -152,9 +205,9 @@ export function AlimtalkSendDialog({
             {result ? '닫기' : '취소'}
           </Button>
           {!result && (
-            <Button onClick={handleSend} disabled={sending || total === 0}>
+            <Button onClick={handleSend} disabled={sending || selectedCount === 0}>
               {sending ? (<><Loader2 className="h-4 w-4 mr-1 animate-spin" />발송 중...</>)
-                       : (<><Send className="h-4 w-4 mr-1" />{total}명에게 발송</>)}
+                       : (<><Send className="h-4 w-4 mr-1" />{selectedCount}명에게 발송</>)}
             </Button>
           )}
         </div>
