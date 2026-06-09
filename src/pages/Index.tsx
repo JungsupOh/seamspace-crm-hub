@@ -43,7 +43,8 @@ type ExpiringLic = DealLicenseRecord & {
   sentStage?: string;
   effectiveName?:  string | null;
   effectivePhone?: string | null;
-  phoneSource?:    'admin' | 'deal' | null;
+  phoneSource?:    'license' | 'admin' | 'deal' | null;
+  dupCount?:       number;   // 같은 번호로 묶인 이용권 수 (대표 행, 2 이상일 때만)
 };
 type GroupKey = 'urgent' | 'soon' | 'warn' | 'warnLate' | 'rest';
 
@@ -172,26 +173,63 @@ export default function Dashboard() {
       for (const s of ['D-1', 'D-3', 'D-7']) {
         if (isAlreadySent(sentMap, source, l.id, 'UD_5369', s)) { sentStage = s; break; }
       }
-      // CRM Deal에서 결제자 정보 fallback (운영DB admin이 sync 안 된 경우 대비)
+      // 수령자 우선순위: 각 이용권 자체(contact_*) → mDiary 그룹관리자(admin_*) → 딜 대표연락처(폴백)
+      // 한 학교 딜에 매달린 여러 이용권이 대표연락처 1명으로 뭉쳐 잘못 표시/발송되던 문제 방지.
+      // 이름·번호는 같은 출처로 묶음(번호 기준) — 실제 발송 대상 번호와 표시 이름이 어긋나지 않도록.
       const matchedDeal = l.deal_id !== 'mdiary' ? dealMap.get(l.deal_id) : undefined;
       const fallbackName  = matchedDeal?.fields.Contact_Name  ?? null;
       const fallbackPhone = matchedDeal?.fields.Contact_Phone ?? null;
-      const effectiveName  = l.admin_name  ?? fallbackName;
-      const effectivePhone = l.admin_phone ?? fallbackPhone;
-      const phoneSource: 'admin' | 'deal' | null =
-        l.admin_phone ? 'admin' : (fallbackPhone ? 'deal' : null);
+      const licName  = l.contact_name?.trim()  || null;
+      const licPhone = l.contact_phone?.trim() || null;
+      let effectiveName:  string | null;
+      let effectivePhone: string | null;
+      let phoneSource: 'license' | 'admin' | 'deal' | null;
+      if (licPhone) {
+        effectiveName = licName ?? fallbackName;
+        effectivePhone = licPhone;
+        phoneSource = 'license';
+      } else if (l.admin_phone) {
+        effectiveName = l.admin_name ?? fallbackName;
+        effectivePhone = l.admin_phone;
+        phoneSource = 'admin';
+      } else {
+        effectiveName = licName ?? l.admin_name ?? fallbackName;
+        effectivePhone = fallbackPhone;
+        phoneSource = fallbackPhone ? 'deal' : null;
+      }
       return { ...l, sentStage, effectiveName, effectivePhone, phoneSource };
     })
     .sort((a, b) => a.dd - b.dd);
 
-  // D-7 이내 긴급
-  const urgentCount = expiringSoon.filter(l => l.dd <= 7).length;
+  // 같은 번호(대표 수령자)에 여러 이용권이 묶이는 경우 → 한 명만 대표로 표시/발송.
+  // 가장 임박한 건(dd 최소, 위 sort로 먼저 등장)을 대표로, 묶인 건수는 dupCount로 부착.
+  // 번호 없는 건은 개별 유지. (다른 사람끼리는 번호가 달라 묶이지 않음)
+  const phoneTotal = new Map<string, number>();
+  expiringSoon.forEach(l => {
+    const p = (l.effectivePhone ?? '').replace(/\D/g, '');
+    if (p) phoneTotal.set(p, (phoneTotal.get(p) ?? 0) + 1);
+  });
+  const seenPhone = new Set<string>();
+  const expiringDeduped: ExpiringLic[] = expiringSoon.filter(l => {
+    const p = (l.effectivePhone ?? '').replace(/\D/g, '');
+    if (!p) return true;
+    if (seenPhone.has(p)) return false;
+    seenPhone.add(p);
+    return true;
+  }).map(l => {
+    const p = (l.effectivePhone ?? '').replace(/\D/g, '');
+    const cnt = p ? (phoneTotal.get(p) ?? 1) : 1;
+    return cnt > 1 ? { ...l, dupCount: cnt } : l;
+  });
 
-  // 그룹별 분류
+  // D-7 이내 긴급
+  const urgentCount = expiringDeduped.filter(l => l.dd <= 7).length;
+
+  // 그룹별 분류 (대표만)
   const groups: Record<GroupKey, ExpiringLic[]> = {
     urgent: [], soon: [], warn: [], warnLate: [], rest: [],
   };
-  expiringSoon.forEach(l => groups[groupOf(l.dd)].push(l));
+  expiringDeduped.forEach(l => groups[groupOf(l.dd)].push(l));
 
   // 그룹별 발송 대상 (이미 해당 stage 발송된 사람 + 연락처 없는 사람 제외)
   const targetsForGroup = (key: GroupKey): { send: ExpiringLic[]; skipped: number } => {
@@ -287,7 +325,7 @@ export default function Dashboard() {
             <AlertCircle className={`h-4 w-4 ${urgentCount > 0 ? 'text-red-500' : 'text-amber-500'}`} />
           </div>
           <p className={`text-3xl font-bold tabular-nums ${urgentCount > 0 ? 'text-red-600' : ''}`}>
-            {num(expiringSoon.length)}
+            {num(expiringDeduped.length)}
           </p>
           <p className="text-xs text-muted-foreground mt-1">
             {urgentCount > 0 ? <span className="text-red-500 font-medium">D-7 이내 {num(urgentCount)}건 긴급</span> : 'D-30 이내'}
@@ -330,9 +368,9 @@ export default function Dashboard() {
             <h2 className="font-semibold flex items-center gap-2">
               <AlertCircle className="h-4 w-4 text-amber-500" />
               영업 액션 필요 — 만기 알림
-              {expiringSoon.length > 0 && (
+              {expiringDeduped.length > 0 && (
                 <span className="ml-1 rounded-full bg-amber-100 text-amber-700 text-[11px] font-semibold px-2 py-0.5">
-                  {expiringSoon.length}건
+                  {expiringDeduped.length}건
                 </span>
               )}
             </h2>
@@ -340,7 +378,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {expiringSoon.length === 0 ? (
+        {expiringDeduped.length === 0 ? (
           <div className="px-5 py-10 text-center">
             <CheckCircle2 className="h-8 w-8 text-teal-400 mx-auto mb-2" />
             <p className="text-muted-foreground text-sm">D-30 이내 만료 예정 없음</p>
@@ -659,6 +697,11 @@ function ExpiringCard({ l, onClick }: { l: ExpiringLic; onClick?: () => void }) 
           <div className="flex items-center gap-2 flex-wrap">
             {l.effectiveName && (
               <span className="text-xs font-medium text-foreground">{l.effectiveName} 선생님</span>
+            )}
+            {(l.dupCount ?? 0) > 1 && (
+              <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded" title={`같은 번호로 이용권 ${l.dupCount}건 — 대표 1건만 발송`}>
+                외 {l.dupCount! - 1}건
+              </span>
             )}
             {l.effectivePhone && (
               <a href={`tel:${l.effectivePhone}`}
