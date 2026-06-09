@@ -302,7 +302,7 @@ export async function sendPaymentReceiptEmail(params: {
 
   await sendEmail(
     params.to,
-    `[심스페이스] 결제 완료 영수증 — ${params.orderName}`,
+    `심스페이스 - 결제 완료 영수증 — ${params.orderName}`,
     html,
     { reply_to: 'sales@tebahsoft.com' },
   );
@@ -701,7 +701,7 @@ export async function sendApkEmail(params: {
 
   await sendEmail(
     params.to,
-    `[심스페이스] 심스페이스 Android 앱 v${params.versionName} 업데이트 안내`,
+    `심스페이스 - Android 앱 v${params.versionName} 업데이트 안내`,
     html,
     {
       text,

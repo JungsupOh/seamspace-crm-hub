@@ -1022,7 +1022,7 @@ export default function OrderTest() {
         body: JSON.stringify({
           to: info.email.trim(),
           cc: 'sales@tebahsoft.com',
-          subject: `[심스페이스] 견적서 ${qNum} — ${info.orgName}`,
+          subject: `심스페이스 - 견적서 ${qNum} — ${info.orgName}`,
           html: htmlBody,
         }),
       });

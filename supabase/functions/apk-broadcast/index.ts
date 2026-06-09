@@ -220,7 +220,7 @@ ${changelogHtml ? `<p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-we
     },
     body: JSON.stringify({
       to: p.to,
-      subject: `[심스페이스] 심스페이스 Android 앱 v${p.versionName} 업데이트 안내`,
+      subject: `심스페이스 - Android 앱 v${p.versionName} 업데이트 안내`,
       html,
       text,
       reply_to: "info@tebahsoft.com",
