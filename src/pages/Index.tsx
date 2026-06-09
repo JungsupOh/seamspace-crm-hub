@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { AirtableRecord } from '@/lib/airtable';
 import type { DealFields } from '@/types/airtable';
 import { useContacts, useDeals } from '@/hooks/use-airtable';
+import { PartnerExpiryHistory } from '@/components/PartnerExpiryHistory';
 
 type AirtableRecordOfDeal = AirtableRecord<DealFields>;
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -439,6 +440,9 @@ export default function Dashboard() {
             )}
           </div>
         )}
+
+        {/* 파트너 만기 안내 메일 발송 내역 + 원문 보기 */}
+        <PartnerExpiryHistory />
       </div>
 
       {/* 일괄 발송 다이얼로그 — 만기 알림 */}
