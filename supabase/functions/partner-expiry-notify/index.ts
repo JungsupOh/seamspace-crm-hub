@@ -189,7 +189,8 @@ function buildEmail(partnerName: string, partnerContact: string | null | undefin
     </tr>`;
   }).join("");
 
-  const subject = `[심스페이스] ${partnerName} 담당 고객 이용권 만기 안내 (${org} ${total}건)`;
+  // 제목 대괄호([])는 스팸 인식률 높아 제거 — '심스페이스 -' 로 시작
+  const subject = `심스페이스 - ${partnerName} 담당 고객 이용권 만기 안내 (${org} ${total}건)`;
   const content = `
     <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#18181b;">${esc(greet)}, 안녕하세요.</h2>
     <p style="margin:0 0 18px;font-size:14px;color:#3f3f46;line-height:1.75;">
