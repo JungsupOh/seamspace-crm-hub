@@ -28,6 +28,7 @@ export interface AlimtalkRecipient {
   duration:       string;
   expiry_date?:   string | null;
   coupon_code?:   string | null;
+  partner_name?:  string | null;   // 파트너 경유 딜이면 파트너명 (발송창 표시용 — 직접 발송 주의)
 }
 
 export interface SendResult {

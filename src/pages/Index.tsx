@@ -45,6 +45,7 @@ type ExpiringLic = DealLicenseRecord & {
   effectivePhone?: string | null;
   phoneSource?:    'license' | 'admin' | 'deal' | null;
   dupCount?:       number;   // 같은 번호로 묶인 이용권 수 (대표 행, 2 이상일 때만)
+  partnerName?:    string | null;  // 파트너 경유 딜이면 파트너명 (직접 발송 금지 표시)
 };
 type GroupKey = 'urgent' | 'soon' | 'warn' | 'warnLate' | 'rest';
 
@@ -74,6 +75,7 @@ const toRecipient = (l: ExpiringLic): AlimtalkRecipient => ({
   duration:       String(l.duration ?? ''),
   expiry_date:    l.service_expire_at ?? null,
   coupon_code:    null,
+  partner_name:   l.partnerName ?? null,
 });
 
 export default function Dashboard() {
@@ -103,6 +105,23 @@ export default function Dashboard() {
     queryKey: ['converted_phones_set'],
     queryFn:  getConvertedPhonesSet,
     staleTime: 60 * 1000,
+  });
+  // 파트너 경유 딜 식별 — partner_deals.linked_deal_id → 파트너명. 만기 알림 시 직접 접촉(가로채기) 방지.
+  const { data: dealPartnerMap } = useQuery({
+    queryKey: ['deal_partner_map'],
+    queryFn: async (): Promise<Record<string, string>> => {
+      const [pdRes, pRes] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/partner_deals?linked_deal_id=not.is.null&select=linked_deal_id,partner_id`, { headers: REST_HEADERS }),
+        fetch(`${SUPABASE_URL}/rest/v1/partners?select=id,name`, { headers: REST_HEADERS }),
+      ]);
+      const pds = pdRes.ok ? (await pdRes.json() as { linked_deal_id: string; partner_id: string }[]) : [];
+      const partners = pRes.ok ? (await pRes.json() as { id: string; name: string }[]) : [];
+      const nameById = new Map(partners.map(p => [p.id, (p.name ?? '').trim() || '파트너']));
+      const map: Record<string, string> = {};
+      for (const pd of pds) if (pd.linked_deal_id) map[pd.linked_deal_id] = nameById.get(pd.partner_id) ?? '파트너';
+      return map;
+    },
+    staleTime: 5 * 60 * 1000,
   });
 
   // 작년 월별 매출 (부가세 신고 기준 SEED)
@@ -197,7 +216,8 @@ export default function Dashboard() {
         effectivePhone = fallbackPhone;
         phoneSource = fallbackPhone ? 'deal' : null;
       }
-      return { ...l, sentStage, effectiveName, effectivePhone, phoneSource };
+      const partnerName = l.deal_id && l.deal_id !== 'mdiary' ? (dealPartnerMap?.[l.deal_id] ?? null) : null;
+      return { ...l, sentStage, effectiveName, effectivePhone, phoneSource, partnerName };
     })
     .sort((a, b) => a.dd - b.dd);
 
@@ -701,6 +721,11 @@ function ExpiringCard({ l, onClick }: { l: ExpiringLic; onClick?: () => void }) 
             {(l.dupCount ?? 0) > 1 && (
               <span className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded" title={`같은 번호로 이용권 ${l.dupCount}건 — 대표 1건만 발송`}>
                 외 {l.dupCount! - 1}건
+              </span>
+            )}
+            {l.partnerName && (
+              <span className="text-[10px] font-semibold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded" title={`${l.partnerName} 파트너 경유 딜 — 직접 발송 금지, 파트너에 알림`}>
+                🤝 {l.partnerName}
               </span>
             )}
             {l.effectivePhone && (

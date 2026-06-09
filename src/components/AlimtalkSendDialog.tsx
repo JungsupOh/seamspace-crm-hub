@@ -164,9 +164,14 @@ export function AlimtalkSendDialog({
                       className="mt-0.5 accent-primary shrink-0"
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="font-medium flex items-center gap-1.5">
+                      <div className="font-medium flex items-center gap-1.5 flex-wrap">
                         <span className="truncate">{r.name} 선생님 <span className="text-muted-foreground">· {r.phone}</span></span>
                         {dup && <span className="shrink-0 text-[9px] font-semibold text-amber-700 bg-amber-100 rounded px-1 py-0.5">중복</span>}
+                        {r.partner_name && (
+                          <span className="shrink-0 text-[9px] font-semibold text-violet-700 bg-violet-100 rounded px-1 py-0.5" title={`${r.partner_name} 파트너 경유 — 직접 발송 주의`}>
+                            🤝 {r.partner_name}
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-muted-foreground mt-0.5">
                         {r.group_name ?? '-'} · {r.user_limit}명 / {r.duration}개월
