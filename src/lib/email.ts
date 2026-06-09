@@ -590,9 +590,11 @@ export async function sendTrialLicenseEmailEN(params: {
     console.warn('[sendTrialLicenseEmailEN] Quick Guide PDF 첨부 실패 (메일은 진행)', e);
   }
 
+  // 제목: 폼 제목에 이미 'Seamspace'가 있으면 접두어 생략 (중복 'Seamspace Seamspace' 방지)
+  const brandPrefix = /seamspace/i.test(params.campaignName) ? '' : 'Seamspace ';
   await sendEmail(
     params.to,
-    `Seamspace ${params.campaignName} Trial Code${params.orgName ? ` - ${params.orgName}` : ''}`,
+    `${brandPrefix}${params.campaignName} Trial Code${params.orgName ? ` - ${params.orgName}` : ''}`,
     html,
     {
       text,

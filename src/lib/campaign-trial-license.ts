@@ -38,7 +38,7 @@ export const PLAN_USER_COUNT: Record<TrialPlanId, number> = {
 };
 
 interface IssueParams {
-  campaign: { id: string; name: string; trial_license_settings?: TrialLicenseSettings | null };
+  campaign: { id: string; name: string; title?: string; trial_license_settings?: TrialLicenseSettings | null };
   lead: { id: string; name: string; phone: string; phone_normalized: string; email?: string | null; school_name?: string | null };
   locale?: 'ko' | 'ja' | 'en';  // 이메일 채널일 때 언어 선택 ('en' → 영어 메일, 그 외 → 일본어 메일)
 }
@@ -120,6 +120,9 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
   const channel: TrialDeliveryChannel = settings.delivery_channel ?? 'alimtalk';
   // 이메일 채널 언어 선택 — 'en' 캠페인은 영어 메일, 그 외(ja 등)는 일본어 메일
   const sendTrialEmail = params.locale === 'en' ? sendTrialLicenseEmailEN : sendTrialLicenseEmailJP;
+  // 메일에 노출할 캠페인명 — 사용자 노출용 폼 제목(title) 우선, 없으면 내부명(name).
+  // (해외 캠페인은 내부명이 한글일 수 있어 영어 메일에 섞이는 것 방지)
+  const campaignDisplay = params.campaign.title?.trim() || params.campaign.name;
   const userCount = settings.user_count ?? PLAN_USER_COUNT[plan] ?? 40;
   const description = `${params.campaign.name} ${params.lead.school_name ?? ''} ${params.lead.name} 체험이용권`.trim();
   const expireAt = settings.service_expire_at || expiresAtFromDuration(duration_months);
@@ -166,7 +169,7 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
             to:           params.lead.email,
             contactName:  params.lead.name,
             orgName:      params.lead.school_name ?? undefined,
-            campaignName: params.campaign.name,
+            campaignName: campaignDisplay,
             couponCode:   prior.coupon_code,
             durationDays: duration_months * 30,
             userLimit:    userCount,
@@ -231,7 +234,7 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
           to:           params.lead.email,
           contactName:  params.lead.name,
           orgName:      params.lead.school_name ?? undefined,
-          campaignName: params.campaign.name,
+          campaignName: campaignDisplay,
           couponCode:   code,
           durationDays: duration_months * 30,  // 표시 일수 (실제 만기는 service_expire_at)
           userLimit:    userCount,
