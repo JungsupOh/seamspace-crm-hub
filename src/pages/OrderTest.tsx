@@ -3,7 +3,7 @@ import { formatPhone } from '@/lib/utils';
 import { searchSchools, SchoolInfo } from '@/lib/neis';
 import { notifyWebQuoteInquiry, notifyWebQuoteSent, notifyWebPayment, notifyWebLicenseIssued } from '@/lib/telegram';
 import { upsertLeadContact } from '@/lib/luckySeven';
-import { getS2BNumber } from '@/lib/pricing';
+import { getS2BNumber, type QuoteLineItem } from '@/lib/pricing';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -145,6 +145,50 @@ function getSuggestions(targetMonths: number, plan: PlanKey): Suggestion[] {
   results.sort((a, b) => a.total - b.total);
   if (results.length > 0) results[0].recommended = true;
   return results;
+}
+
+// 견적 라인 아이템 분해 — 임의 개월수를 표준기간(12/6/4/1)으로 최저가 분해해 물품별로 나눔.
+// 각 라인에 S2B 물품번호 부착(딜추가와 동일). 소수학급/미등록 조합은 s2b_number='' (라인은 표시).
+// S2B_MAP 키: 학교 플랜은 '플랜' 접미사 없음('학교(소)'), 그 외는 'id+플랜'.
+function buildQuoteItems(planId: PlanKey, planLabel: string, months: number, qty: number): QuoteLineItem[] {
+  const s2bKey = planId.startsWith('학교') ? planId : `${planId}플랜`;
+  const single = (): QuoteLineItem[] => {
+    const { price } = getUnitPrice(months, planId);
+    return [{ plan: planLabel, duration: months, qty, unit_price: price, amount: price * qty, s2b_number: getS2BNumber(s2bKey, months) }];
+  };
+  // 소수학급: 월단가(분해 없음) — 단일 라인
+  if (planId === '소수학급') return single();
+
+  const periods = [12, 6, 4, 1];
+  const dp = Array.from({ length: months + 1 }, () => ({ cost: Infinity, combo: [] as number[] }));
+  dp[0] = { cost: 0, combo: [] };
+  for (let i = 1; i <= months; i++) {
+    for (const p of periods) {
+      if (p > i) continue;
+      const { price } = getUnitPrice(p, planId);
+      if (!price) continue;
+      const c = dp[i - p].cost + price;
+      if (c < dp[i].cost) dp[i] = { cost: c, combo: [...dp[i - p].combo, p] };
+    }
+  }
+  if (dp[months].cost === Infinity) return single();  // 분해 불가 → 단일 라인 폴백
+
+  const grouped: Record<number, number> = {};
+  for (const m of dp[months].combo) grouped[m] = (grouped[m] ?? 0) + 1;
+  return Object.entries(grouped)
+    .sort((a, b) => Number(b[0]) - Number(a[0]))
+    .map(([p, c]) => {
+      const period = Number(p), count = Number(c);
+      const { price } = getUnitPrice(period, planId);
+      return {
+        plan: planLabel,
+        duration: period,
+        qty: qty * count,
+        unit_price: price,
+        amount: price * qty * count,
+        s2b_number: getS2BNumber(s2bKey, period),
+      };
+    });
 }
 
 function fmt(n: number) { return n.toLocaleString('ko-KR') + '원'; }
@@ -707,17 +751,10 @@ export default function OrderTest() {
       // 중요: items JSONB와 license_qty를 명시적으로 저장 — 딜편집 다이얼로그가 재구성 로직에
       // 의존하지 않도록 (재구성은 qty/40 나누기로 학생수 오해석 위험)
       // s2b_number: 견적서 PDF에 학교장터 물품번호를 노출하기 위해 명시적으로 채움 (이전 빈 문자열로 저장돼 PDF 누락 회귀)
-      // S2B_MAP 정규 키는 activePlan.id 기준 — 학교 플랜은 '플랜' 접미사 없음('학교(소)' 등),
-      // 그 외(학급/학년/소수학급)는 'id+플랜'. 라벨 문자열 가공은 학교 플랜에서 키 불일치 발생.
-      const s2bPlanKey = activePlan.id.startsWith('학교') ? activePlan.id : `${activePlan.id}플랜`;
-      const webItems = selectedProduct.code === '01' ? [{
-        plan: planLabel,
-        duration: info.months,
-        qty: info.qty,                 // 이용권 수 (license_qty 의미)
-        unit_price: unitPrice,
-        amount: unitPrice * info.qty,
-        s2b_number: getS2BNumber(s2bPlanKey, info.months),
-      }] : [];
+      // 표준기간으로 분해된 물품별 라인(각 S2B 물품번호 포함) — 딜추가와 동일하게 견적서에 분리 표시
+      const webItems = selectedProduct.code === '01'
+        ? buildQuoteItems(info.planId, planLabel, info.months, info.qty)
+        : [];
       const saveRes = await fetch(`${SUPABASE_URL}/rest/v1/deal_quotes`, {
         method: 'POST',
         headers: { ...restHeaders, Prefer: 'return=representation' },  // 생성된 id 회수 (PDF 첨부 slot_key용)
@@ -866,16 +903,10 @@ export default function OrderTest() {
       // 1) 견적서 PDF 생성
       const { generateQuotePdfBlob } = await import('@/lib/generateQuotePdf');
       const planNameForS2b = `${activePlan.id === '소수학급' ? '소수학급' : activePlan.id}플랜`;
-      // S2B 물품번호 포함 라인 (저장 시 webItems와 동일 로직) — 학교 플랜은 접미사 없는 키 사용
-      const s2bPlanKey = activePlan.id.startsWith('학교') ? activePlan.id : `${activePlan.id}플랜`;
-      const emailItems = selectedProduct.code === '01' ? [{
-        plan: planLabel,
-        duration: info.months,
-        qty: info.qty,
-        unit_price: unitPrice,
-        amount: unitPrice * info.qty,
-        s2b_number: getS2BNumber(s2bPlanKey, info.months),
-      }] : [];
+      // 저장 시 webItems와 동일하게 표준기간 분해 + 물품별 S2B
+      const emailItems = selectedProduct.code === '01'
+        ? buildQuoteItems(info.planId, planLabel, info.months, info.qty)
+        : [];
       const { blob, fileName } = await generateQuotePdfBlob({
         quoteNumber: qNum,
         quoteDate:   today,
