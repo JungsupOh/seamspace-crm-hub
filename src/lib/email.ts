@@ -361,9 +361,8 @@ export async function sendTrialLicenseEmailJP(params: {
   userLimit: number;
   serviceExpireAt?: string;  // YYYY-MM-DD
 }): Promise<void> {
-  const expireLine = params.serviceExpireAt
-    ? `${params.serviceExpireAt} まで有効`
-    : `発行日から ${params.durationDays} 日間有効`;
+  // 有効期間は発行日ではなく「コード登録（有効化）」時点から N か月 — 固定の満了日表記は避ける
+  const months = Math.max(1, Math.round(params.durationDays / 30));
 
   const html = layoutJP(`
     <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">${params.contactName} 様、ありがとうございました</h2>
@@ -374,8 +373,11 @@ export async function sendTrialLicenseEmailJP(params: {
 
     <p style="margin:0 0 4px;font-size:13px;color:#71717a;">トライアルコード</p>
     ${codeBox(params.couponCode)}
-    <p style="margin:0 0 20px;font-size:12px;color:#a1a1aa;text-align:center;">
-      ${expireLine} ・ 最大 ${params.userLimit} ユーザーまでご利用可能
+    <p style="margin:0 0 8px;font-size:12px;color:#a1a1aa;text-align:center;">
+      最大 ${params.userLimit} ユーザーまでご利用可能
+    </p>
+    <p style="margin:0 0 20px;font-size:12px;color:#0f172a;text-align:center;background:#eef2ff;border-radius:6px;padding:8px 12px;">
+      ⏱ <strong>${months}か月</strong>の無料トライアルは<strong>コードを登録した時点</strong>から開始します（本メール受信日からではありません）。
     </p>
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">ご利用方法</p>
@@ -408,7 +410,8 @@ export async function sendTrialLicenseEmailJP(params: {
     `${params.campaignName} のご登録ありがとうございました。`,
     ``,
     `トライアルコード: ${params.couponCode}`,
-    `${expireLine} ・ 最大 ${params.userLimit} ユーザーまでご利用可能`,
+    `最大 ${params.userLimit} ユーザーまでご利用可能`,
+    `${months}か月の無料トライアルはコードを登録した時点から開始します（本メール受信日からではありません）。`,
     ``,
     `ご利用開始の手順は、添付の Quick Guide (PDF) をご参照ください。`,
     `アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。`,
@@ -510,9 +513,8 @@ export async function sendTrialLicenseEmailEN(params: {
   userLimit: number;
   serviceExpireAt?: string;  // YYYY-MM-DD
 }): Promise<void> {
-  const expireLine = params.serviceExpireAt
-    ? `Valid until ${params.serviceExpireAt}`
-    : `Valid for ${params.durationDays} days from issue date`;
+  // 유효기간은 발급일이 아니라 '코드 등록(활성화)' 시점부터 N개월 — 고정 만료일 표기 금지
+  const months = Math.max(1, Math.round(params.durationDays / 30));
 
   const html = layoutEN(`
     <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">Thank you, ${params.contactName}!</h2>
@@ -523,8 +525,11 @@ export async function sendTrialLicenseEmailEN(params: {
 
     <p style="margin:0 0 4px;font-size:13px;color:#71717a;">Trial code</p>
     ${codeBox(params.couponCode)}
-    <p style="margin:0 0 20px;font-size:12px;color:#a1a1aa;text-align:center;">
-      ${expireLine} ・ Up to ${params.userLimit} users
+    <p style="margin:0 0 8px;font-size:12px;color:#a1a1aa;text-align:center;">
+      Up to ${params.userLimit} users
+    </p>
+    <p style="margin:0 0 20px;font-size:12px;color:#0f172a;text-align:center;background:#eef2ff;border-radius:6px;padding:8px 12px;">
+      ⏱ Your <strong>${months}-month</strong> free trial starts <strong>when you register the code</strong> — not from the day you receive this email.
     </p>
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">How to get started</p>
@@ -557,7 +562,8 @@ export async function sendTrialLicenseEmailEN(params: {
     `We appreciate your registration for ${params.campaignName}.`,
     ``,
     `Trial code: ${params.couponCode}`,
-    `${expireLine} ・ Up to ${params.userLimit} users`,
+    `Up to ${params.userLimit} users`,
+    `Your ${months}-month free trial starts when you register the code (not from the day you receive this email).`,
     ``,
     `Please refer to the attached Quick Guide (PDF) to get started.`,
     `It walks you through account sign-up and entering your trial code, step by step with screenshots.`,
