@@ -6,6 +6,11 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatPhone(value: string): string {
+  // 국제번호(+로 시작, 예: +1 516-815-6314)는 한국식 3-4-4 포맷을 적용하지 않고
+  // 입력 형태 보존 (숫자/공백/하이픈/괄호/+ 만 허용). 미국 등 해외 번호 망가짐 방지.
+  if ((value ?? '').trimStart().startsWith('+')) {
+    return value.replace(/[^\d+()\-\s]/g, '');
+  }
   // 050[5-9]로 시작하는 안심번호는 12자리 4-4-4 split
   // 그 외 (010 등 일반 휴대전화)는 11자리 3-4-4 split
   const digits = value.replace(/\D/g, '');

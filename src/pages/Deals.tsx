@@ -43,6 +43,9 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 function normalizePhone(raw: string): string {
   if (!raw) return '';
   const d = raw.replace(/\D/g, '');
+  // 국제번호(+로 시작, 예: +1 516-815-6314)는 한국식 포맷 적용 없이 숫자만으로 정규화
+  // → 저장/매칭 일관성 (해외 연락처 인식)
+  if (raw.trim().startsWith('+')) return d;
   if (d.startsWith('82') && d.length >= 11) {
     const local = '0' + d.slice(2);
     if (local.length === 11) return `${local.slice(0, 3)}-${local.slice(3, 7)}-${local.slice(7)}`;
