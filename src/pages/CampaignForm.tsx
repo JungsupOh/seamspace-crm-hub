@@ -384,10 +384,10 @@ export default function CampaignForm() {
   if (submitted) {
     const contactEmail = isIntl ? 'contact@tebahsoft.com' : 'sales@tebahsoft.com';
     const sameCodeNote = t('알림톡으로 동일한 코드가 발송됩니다.', '同じコードがメールでも送信されます。', 'The same code has also been sent to your email.');
-    // 빠른 시작용 Quick Guide PDF (언어별). 한국어는 가이드 없음.
+    // 빠른 시작용 Quick Guide PDF (언어별 — 한/영/일 모두 제공)
     const guideUrl = isEN ? '/docs/Quick%20Guide_How%20To%20Start%20(En).pdf'
       : isJP ? '/docs/Quick%20Guide_HowToStart(JP).pdf'
-      : null;
+      : '/docs/Quick%20Guide_How%20To%20Start%20(KR).pdf';
     return (
       <div className="min-h-screen flex items-center justify-center bg-muted/20 p-4">
         <div className="max-w-md w-full bg-card rounded-xl p-8 text-center shadow-lg ring-1 ring-border">
