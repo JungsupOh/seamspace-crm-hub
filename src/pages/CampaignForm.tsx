@@ -384,6 +384,10 @@ export default function CampaignForm() {
   if (submitted) {
     const contactEmail = isIntl ? 'contact@tebahsoft.com' : 'sales@tebahsoft.com';
     const sameCodeNote = t('알림톡으로 동일한 코드가 발송됩니다.', '同じコードがメールでも送信されます。', 'The same code has also been sent to your email.');
+    // 빠른 시작용 Quick Guide PDF (언어별). 한국어는 가이드 없음.
+    const guideUrl = isEN ? '/docs/Quick%20Guide_How%20To%20Start%20(En).pdf'
+      : isJP ? '/docs/Quick%20Guide_HowToStart(JP).pdf'
+      : null;
     return (
       <div className="min-h-screen flex items-center justify-center bg-muted/20 p-4">
         <div className="max-w-md w-full bg-card rounded-xl p-8 text-center shadow-lg ring-1 ring-border">
@@ -453,6 +457,16 @@ export default function CampaignForm() {
               <p className="font-mono font-bold text-base text-teal-900 dark:text-teal-100">{issuedCouponCode}</p>
               <p className="text-[10px] text-muted-foreground mt-1">{sameCodeNote}</p>
             </div>
+          )}
+          {guideUrl && (
+            <a
+              href={guideUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full mb-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold px-4 py-2.5 hover:opacity-90 transition-opacity"
+            >
+              📘 {t('퀵 가이드 다운로드 — 바로 시작하기', 'クイックガイドをダウンロード — 今すぐ始める', 'Download the Quick Guide — get started now')}
+            </a>
           )}
           <p className="text-xs text-muted-foreground">
             {t('문의', 'お問い合わせ', 'Contact')}: {contactEmail}
