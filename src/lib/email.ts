@@ -360,6 +360,7 @@ export async function sendTrialLicenseEmailJP(params: {
   durationDays: number;
   userLimit: number;
   serviceExpireAt?: string;  // YYYY-MM-DD
+  cc?: string;               // 추가 cc (sales@ 기본 cc에 더해짐)
 }): Promise<void> {
   // 有効期間は発行日ではなく「コード登録（有効化）」時点から N か月 — 固定の満了日表記は避ける
   const months = Math.max(1, Math.round(params.durationDays / 30));
@@ -455,7 +456,8 @@ export async function sendTrialLicenseEmailJP(params: {
       text,
       reply_to: 'contact@tebahsoft.com',
       attachments,
-      // cc는 default(sales@tebahsoft.com) 그대로 — 본사 가시성
+      // cc: 기본 sales@ + 캠페인 추가 cc(있을 때). 없으면 default(sales@) 유지
+      cc: params.cc?.trim() ? [DEFAULT_CC, params.cc.trim()] : undefined,
     },
   );
 }
@@ -512,6 +514,7 @@ export async function sendTrialLicenseEmailEN(params: {
   durationDays: number;
   userLimit: number;
   serviceExpireAt?: string;  // YYYY-MM-DD
+  cc?: string;               // 추가 cc (sales@ 기본 cc에 더해짐)
 }): Promise<void> {
   // 유효기간은 발급일이 아니라 '코드 등록(활성화)' 시점부터 N개월 — 고정 만료일 표기 금지
   const months = Math.max(1, Math.round(params.durationDays / 30));
@@ -606,7 +609,8 @@ export async function sendTrialLicenseEmailEN(params: {
       text,
       reply_to: 'contact@tebahsoft.com',
       attachments,
-      // cc는 default(sales@tebahsoft.com) 그대로 — 본사 가시성
+      // cc: 기본 sales@ + 캠페인 추가 cc(있을 때). 없으면 default(sales@) 유지
+      cc: params.cc?.trim() ? [DEFAULT_CC, params.cc.trim()] : undefined,
     },
   );
 }

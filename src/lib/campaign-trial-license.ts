@@ -25,6 +25,7 @@ export interface TrialLicenseSettings {
   auto_issue: boolean;           // 리드 등록 시 자동 발송 여부
   service_expire_at?: string;    // YYYY-MM-DD, 비우면 발급일+duration로 자동
   delivery_channel?: TrialDeliveryChannel;  // 'alimtalk' (한국, 기본) | 'email' (해외)
+  cc_email?: string;             // 이메일 발송 시 추가 cc (sales@ 기본 cc에 더해짐). 캠페인별 옵션
 }
 
 export const PLAN_LABEL: Record<TrialPlanId, string> = {
@@ -174,6 +175,7 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
             durationDays: duration_months * 30,
             userLimit:    userCount,
             serviceExpireAt: expireAt,
+            cc:           settings.cc_email,
           });
           emailSent = true;
         } catch (e) { console.warn('[trial-license] 재발송(이메일) 실패', e); }
@@ -239,6 +241,7 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
           durationDays: duration_months * 30,  // 표시 일수 (실제 만기는 service_expire_at)
           userLimit:    userCount,
           serviceExpireAt: expireAt,
+          cc:           settings.cc_email,
         });
         emailSent = true;
         console.log(`[trial-license] ${params.locale === 'en' ? '영어' : '일본어'} 이메일 발송 성공 → ${params.lead.email}`);

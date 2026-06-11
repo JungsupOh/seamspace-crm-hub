@@ -518,6 +518,7 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
         user_count: PLAN_USER_COUNT[trial.plan] ?? trial.user_count,
         duration_months: Number(trial.duration_months) || 1,
         service_expire_at: trial.service_expire_at?.trim() || undefined,
+        cc_email: trial.cc_email?.trim() || undefined,
         // ja면 발송 채널은 email 강제
         delivery_channel: formCfg.locale === 'ja' ? 'email' : (trial.delivery_channel ?? 'alimtalk'),
       } : null;
@@ -906,6 +907,19 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                   </div>
                   {formCfg.locale !== 'ko' && (
                     <p className="text-[10px] text-amber-700">해외({formCfg.locale}) 캠페인은 이메일로 자동 고정됩니다.</p>
+                  )}
+                  {/* 추가 CC — 이메일 발송 캠페인 옵션 (기본 sales@에 더해짐) */}
+                  {(formCfg.locale !== 'ko' || trial.delivery_channel === 'email') && (
+                    <div className="space-y-1 pt-1">
+                      <Label className="text-[10px]">추가 CC <span className="text-muted-foreground">— 이메일 발송 시 (기본 sales@에 추가)</span></Label>
+                      <Input
+                        type="email"
+                        value={trial.cc_email ?? ''}
+                        onChange={e => setTrial(t => ({ ...t, cc_email: e.target.value }))}
+                        placeholder="예: partner@example.com (비우면 sales@만)"
+                        className="h-7 text-xs"
+                      />
+                    </div>
                   )}
                 </div>
               </div>
@@ -1706,15 +1720,18 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     try {
       if (channel === 'email') {
         if (!p.email) { toast.error('이메일 채널인데 이메일 주소가 없습니다'); return; }
-        const { sendTrialLicenseEmailJP } = await import('@/lib/email');
-        await sendTrialLicenseEmailJP({
+        const locale = campaign.form_settings?.locale;
+        const { sendTrialLicenseEmailJP, sendTrialLicenseEmailEN } = await import('@/lib/email');
+        const sendFn = locale === 'en' ? sendTrialLicenseEmailEN : sendTrialLicenseEmailJP;
+        await sendFn({
           to: p.email,
           contactName: p.name,
           orgName: p.school_name ?? undefined,
-          campaignName: campaign.name,
+          campaignName: campaign.title?.trim() || campaign.name,  // 사용자 노출 폼 제목 우선
           couponCode: p.coupon_code,
           durationDays: Number(p.duration ?? '1') * 30,
           userLimit: Number(p.user_count ?? '40'),
+          cc: campaign.trial_license_settings?.cc_email,
         });
         toast.success(`${p.name}님에게 이메일 재발송 완료 (코드 ${p.coupon_code})`);
       } else {
