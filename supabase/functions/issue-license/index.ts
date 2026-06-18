@@ -214,9 +214,10 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── 신규 발급 차단 게이트 ────────────────────────
-    // quoteNumber 있는데 위 path 1/2 모두 빈 결과 = 결제 미확인
-    // → allowNewIssue=true가 명시된 경우(어드민 수동발급)에만 신규 생성 허용
-    if (quoteNumber && !allowNewIssue) {
+    // quoteNumber 있는데 결제 미확인(order_payments/deal_licenses 없음 + deals.payment_date/입금완료 없음)
+    // → allowNewIssue=true(어드민 수동발급)일 때만 신규 생성 허용
+    // paymentConfirmed: 수동 입금완료(계좌이체) 딜의 payment_date/입금완료 단계 인정
+    if (quoteNumber && !allowNewIssue && !paymentConfirmed) {
       console.warn(`[issue-license] 결제 미확인으로 신규 발급 거부: quoteNumber=${quoteNumber}`);
       return new Response(
         JSON.stringify({
