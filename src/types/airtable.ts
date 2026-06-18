@@ -67,7 +67,8 @@ export interface DealFields {
   Lead_Source?: string;
   Order_Date?: string;
   Contract_Date?: string;
-  Payment_Date?: string;
+  Charge_Date?: string;    // 결제일 (카드 charge 일자) — 입금일(Payment_Date)과 분리
+  Payment_Date?: string;   // 입금일 (실제 정산 입금일, 회계 기준)
   Receipt_Date?: string;
 
   // 기타

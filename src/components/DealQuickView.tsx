@@ -109,11 +109,12 @@ export function DealQuickView({ open, onOpenChange, deal }: Props) {
           )}
 
           {/* 일자 정보 */}
-          {(f.Order_Date || f.Contract_Date || f.Payment_Date) && (
+          {(f.Order_Date || f.Contract_Date || f.Charge_Date || f.Payment_Date) && (
             <Section title="진행 일자">
               <div className="grid grid-cols-3 gap-2 text-sm">
                 {f.Order_Date && <Field label="주문일" value={f.Order_Date} />}
                 {f.Contract_Date && <Field label="계약일" value={f.Contract_Date} />}
+                {f.Charge_Date && <Field label="결제일" value={f.Charge_Date} />}
                 {f.Payment_Date && <Field label="입금일" value={f.Payment_Date} />}
               </div>
             </Section>

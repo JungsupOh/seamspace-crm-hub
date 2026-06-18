@@ -246,7 +246,8 @@ Deno.serve(async (req: Request) => {
               lead_source:         "Shop",
               order_date:          today,
               contract_date:       today,
-              payment_date:        today,
+              charge_date:         today,   // 결제일(카드 charge) — 입금일과 분리
+              payment_date:        today,   // 입금일 기본값(정산 입금일로 수동 정정 가능)
               created_date:        today,
               notes:               `Shop 주문 ${orderId} 자동 발급\n쿠폰: ${couponCodeIssued}`,
             }),
