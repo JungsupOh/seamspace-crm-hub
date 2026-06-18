@@ -80,16 +80,22 @@ Deno.serve(async (req: Request) => {
     // ── 중복 발급 방지: 이미 발급된 경우 기존 코드 반환 ──
     // 우선순위: 1) deal_licenses (canonical) 2) order_payments (legacy fallback)
     let dealLookupId: string | null = null;
+    // 수동 입금완료(계좌이체) 결제 확인 — order_payments/deal_licenses가 없어도
+    // 어드민이 deals.payment_date/deal_stage='입금완료'로 표시했으면 결제로 인정.
+    let paymentConfirmed = false;
     if (quoteNumber) {
       // 1) deal_licenses via deals.quote_number
       const dealRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(quoteNumber)}&select=id&limit=1`,
+        `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(quoteNumber)}&select=id,payment_date,deal_stage&limit=1`,
         { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
       );
       if (dealRes.ok) {
-        const deals: { id: string }[] = await dealRes.json();
+        const deals: { id: string; payment_date?: string | null; deal_stage?: string | null }[] = await dealRes.json();
         if (deals.length > 0) {
           dealLookupId = deals[0].id;
+          paymentConfirmed = !!deals[0].payment_date
+            || deals[0].deal_stage === "입금완료"
+            || deals[0].deal_stage === "이용권 발송완료";
           const licRes = await fetch(
             `${SUPABASE_URL}/rest/v1/deal_licenses?deal_id=eq.${dealLookupId}&select=coupon_code&order=created_at.asc`,
             { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
