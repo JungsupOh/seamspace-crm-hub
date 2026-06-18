@@ -2392,9 +2392,6 @@ function DealForm({
           <Field label="계약일 (주문일)">
             <DateInput value={n('Contract_Date')} onChange={v => up('Contract_Date', v)} className="h-8 text-sm" />
           </Field>
-          <Field label="결제일">
-            <DateInput value={n('Charge_Date')} onChange={v => up('Charge_Date', v)} className="h-8 text-sm" />
-          </Field>
           <Field label="입금일">
             <DateInput value={n('Payment_Date')} onChange={v => {
               const next = { ...f, Payment_Date: v || undefined };
@@ -4338,13 +4335,12 @@ export default function Deals() {
                   </Section>
 
                   {/* 세무 */}
-                  {(f.Lead_Source || f.Order_Date || f.Contract_Date || f.Charge_Date || f.Payment_Date || f.Receipt_Date) && (
+                  {(f.Lead_Source || f.Order_Date || f.Contract_Date || f.Payment_Date || f.Receipt_Date) && (
                     <Section icon={Receipt} title="세무">
                       <div className="grid grid-cols-2 gap-2">
                         {[
                           { l: '구매처',      v: f.Lead_Source },
                           { l: '계약일(주문일)', v: f.Contract_Date || f.Order_Date },
-                          { l: '결제일',      v: f.Charge_Date },
                           { l: '입금일',      v: f.Payment_Date },
                           { l: '영수증발급일', v: f.Receipt_Date },
                         ].filter(r => r.v).map(({ l, v }) => (

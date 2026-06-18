@@ -214,8 +214,7 @@ Deno.serve(async (req: Request) => {
           },
           body: JSON.stringify({
             license_send_date: todayDate,
-            charge_date:       todayDate,   // 결제일(카드 charge) — 입금일(payment_date)과 분리
-            payment_date:      todayDate,   // 입금일 기본값(정산 입금일로 수동 정정 가능)
+            receipt_date:      todayDate,   // 영수증발급일 = 카드결제일(자동). 입금일(payment_date)=카드사 정산일은 수동 입력
             deal_stage:        "이용권 발송완료",
           }),
         });

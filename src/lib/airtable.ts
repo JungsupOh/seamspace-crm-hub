@@ -77,7 +77,6 @@ const DEALS_FIELD_TO_COL: Record<string, string> = {
   Lead_Source: 'lead_source',
   Order_Date: 'order_date',
   Contract_Date: 'contract_date',
-  Charge_Date: 'charge_date',
   Payment_Date: 'payment_date',
   Receipt_Date: 'receipt_date',
   Expected_Close_Date: 'expected_close_date',
