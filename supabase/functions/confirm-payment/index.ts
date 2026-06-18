@@ -214,6 +214,7 @@ Deno.serve(async (req: Request) => {
           },
           body: JSON.stringify({
             license_send_date: todayDate,
+            contract_date:     todayDate,   // 웹 카드 셀프결제 — 계약일도 결제일로 설정
             receipt_date:      todayDate,   // 영수증발급일 = 카드결제일(자동). 입금일(payment_date)=카드사 정산일은 수동 입력
             deal_stage:        "이용권 발송완료",
           }),

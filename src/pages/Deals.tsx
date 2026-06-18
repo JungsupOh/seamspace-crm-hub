@@ -2389,20 +2389,23 @@ function DealForm({
               )}
             </Field>
           </div>
-          <Field label="계약일 (주문일)">
-            <DateInput value={n('Contract_Date')} onChange={v => up('Contract_Date', v)} className="h-8 text-sm" />
-          </Field>
-          <Field label="입금일">
-            <DateInput value={n('Payment_Date')} onChange={v => {
-              const next = { ...f, Payment_Date: v || undefined };
-              setF(next);
-              if (!f.Deal_Stage || ['Lead', 'Proposal', 'Contract', 'Closed_Won', '체험권', '견적', '계약체결/구매', '템플릿 회신대기', '이용권 발송완료', '결제예정', '입금대기', '입금완료'].includes(f.Deal_Stage ?? '')) {
-                const stage = autoStage(pendingFiles, storedFiles, pendingLicenseFiles, storedLicenseFiles, next);
-                setF(p => ({ ...p, Deal_Stage: stage }));
-              }
-            }} className="h-8 text-sm" />
-          </Field>
-          <div className="col-span-2">
+          {/* 계약일 · 입금일 · 영수증발급일 — 한 줄 3열 */}
+          <div className="col-span-2 grid grid-cols-3 gap-2">
+            <Field label="계약일 (주문일)">
+              <DateInput value={n('Contract_Date')} onChange={v => up('Contract_Date', v)} className="h-8 text-sm" />
+            </Field>
+            <Field label="입금일">
+              <DateInput value={n('Payment_Date')} onChange={v => {
+                const next = { ...f, Payment_Date: v || undefined };
+                // 계좌이체 등 입금일 입력 시 계약일이 비어있으면 동일 날짜로 자동 설정 (이미 있으면 보존 — 연락 계약 건)
+                if (v && !f.Contract_Date) next.Contract_Date = v;
+                setF(next);
+                if (!f.Deal_Stage || ['Lead', 'Proposal', 'Contract', 'Closed_Won', '체험권', '견적', '계약체결/구매', '템플릿 회신대기', '이용권 발송완료', '결제예정', '입금대기', '입금완료'].includes(f.Deal_Stage ?? '')) {
+                  const stage = autoStage(pendingFiles, storedFiles, pendingLicenseFiles, storedLicenseFiles, next);
+                  setF(p => ({ ...p, Deal_Stage: stage }));
+                }
+              }} className="h-8 text-sm" />
+            </Field>
             <Field label="영수증발급일">
               <DateInput value={n('Receipt_Date')} onChange={v => up('Receipt_Date', v)} className="h-8 text-sm" />
             </Field>
