@@ -19,9 +19,12 @@ declare global { interface Window { TossPayments?: any } }
 
 interface DealQuoteRow {
   quote_number: string;
+  // 연락처: 견적행은 웹=buyer_*, CRM=비어있음 → 아래에서 통합(email/name/phone)으로 정규화
   contact_email: string | null;
   contact_phone: string | null;
-  contact_name: string | null;
+  buyer_email: string | null;
+  buyer_name: string | null;
+  buyer_phone: string | null;
   org_name: string | null;
   plan: string | null;
   duration: number | string | null;
@@ -30,6 +33,10 @@ interface DealQuoteRow {
   final_value: number | null;
   supply_price: number | null;
   tax_amount: number | null;
+  // 정규화된 연락처 (견적행 우선, 비면 연결 딜에서 보강)
+  email: string | null;
+  name: string | null;
+  phone: string | null;
 }
 
 export default function OrderPay() {
@@ -43,18 +50,41 @@ export default function OrderPay() {
   const [submitting, setSubmitting] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
 
-  // 1) 견적서 조회
+  // 1) 견적서 조회 (deal_quotes에 contact_name 컬럼 없음 — buyer_* 사용. CRM 견적은 연결 딜에서 보강)
   useEffect(() => {
     if (!quoteNumber) { setLoading(false); return; }
-    fetch(
-      `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=eq.${encodeURIComponent(quoteNumber)}&select=quote_number,contact_email,contact_phone,contact_name,org_name,plan,duration,qty,unit_price,final_value,supply_price,tax_amount`,
-      { headers: HEADERS },
-    )
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows: DealQuoteRow[]) => {
-        if (Array.isArray(rows) && rows.length > 0) setQuote(rows[0]);
-      })
-      .finally(() => setLoading(false));
+    (async () => {
+      try {
+        const r = await fetch(
+          `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=eq.${encodeURIComponent(quoteNumber)}&select=quote_number,deal_id,contact_email,contact_phone,buyer_email,buyer_name,buyer_phone,org_name,plan,duration,qty,unit_price,final_value,supply_price,tax_amount&limit=1`,
+          { headers: HEADERS },
+        );
+        const rows: (DealQuoteRow & { deal_id?: string })[] = r.ok ? await r.json() : [];
+        if (!Array.isArray(rows) || rows.length === 0) return;
+        const q = rows[0];
+        let email = q.contact_email || q.buyer_email || null;
+        let name = q.buyer_name || null;
+        let phone = q.contact_phone || q.buyer_phone || null;
+        // 견적행에 연락처가 비어있으면(주로 CRM 견적) 연결 딜에서 보강
+        if ((!email || !name || !phone) && q.deal_id) {
+          try {
+            const dr = await fetch(
+              `${SUPABASE_URL}/rest/v1/deals?id=eq.${encodeURIComponent(q.deal_id)}&select=contact_email,contact_name,contact_phone&limit=1`,
+              { headers: HEADERS },
+            );
+            const drows = dr.ok ? await dr.json() as { contact_email?: string; contact_name?: string; contact_phone?: string }[] : [];
+            if (drows[0]) {
+              email = email || drows[0].contact_email || null;
+              name = name || drows[0].contact_name || null;
+              phone = phone || drows[0].contact_phone || null;
+            }
+          } catch { /* ignore */ }
+        }
+        setQuote({ ...q, email, name, phone });
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [quoteNumber]);
 
   // sessionStorage 인증 캐시 (재진입 시 다시 입력 안 받음)
@@ -69,7 +99,7 @@ export default function OrderPay() {
     if (!quote) return;
     setAuthError(null);
     const input = emailInput.trim().toLowerCase();
-    const target = (quote.contact_email || '').trim().toLowerCase();
+    const target = (quote.email || '').trim().toLowerCase();
     if (!input) {
       setAuthError('이메일을 입력해주세요.');
       return;
@@ -110,9 +140,9 @@ export default function OrderPay() {
 
       // OrderComplete가 읽을 세션 정보
       sessionStorage.setItem('toss_order_session', JSON.stringify({
-        customerName: quote.contact_name || '',
-        customerPhone: (quote.contact_phone || '').replace(/\D/g, ''),
-        customerEmail: quote.contact_email || undefined,
+        customerName: quote.name || '',
+        customerPhone: (quote.phone || '').replace(/\D/g, ''),
+        customerEmail: quote.email || undefined,
         orgName: quote.org_name || undefined,
         plan: quote.plan || undefined,
         qty: Number(quote.qty || 1),
@@ -124,9 +154,9 @@ export default function OrderPay() {
         amount: quote.final_value,
         orderId,
         orderName,
-        customerName: quote.contact_name || '',
-        customerMobilePhone: (quote.contact_phone || '').replace(/\D/g, ''),
-        customerEmail: quote.contact_email || undefined,
+        customerName: quote.name || '',
+        customerMobilePhone: (quote.phone || '').replace(/\D/g, ''),
+        customerEmail: quote.email || undefined,
         successUrl: `${window.location.origin}/order/complete`,
         failUrl: `${window.location.origin}/order/fail`,
       });
@@ -219,7 +249,7 @@ export default function OrderPay() {
 
               <div className="rounded-lg bg-muted/30 p-3 space-y-1.5 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">인수자</span><span>{quote.org_name || '-'}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">담당자</span><span>{quote.contact_name || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">담당자</span><span>{quote.name || '-'}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">상품</span><span className="text-right">{planLabel}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">기간 / 수량</span><span>{quote.duration}개월 × {quote.qty}</span></div>
                 {quote.supply_price !== null && (
