@@ -1490,6 +1490,13 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     setSending(true);
     setSendProgress({ done: 0, total: targets.length });
 
+    // 캠페인 체험이용권 설정에서 기간/인원 로드 (없으면 안전 기본값)
+    const trialCfg = campaign.trial_license_settings;
+    const durMonths = String(Number(trialCfg?.duration_months) || 1);
+    const userCount = String(
+      trialCfg?.user_count ?? (trialCfg?.plan ? PLAN_USER_COUNT[trialCfg.plan] : 40) ?? 40
+    );
+
     let successCount = 0;
     let partialCount = 0; // 알림톡은 갔으나 DB 일부 누락
     for (let i = 0; i < targets.length; i++) {
@@ -1500,15 +1507,15 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
       try {
         // 1. 쿠폰 생성
         const description = `${campaign.name} ${lead.school_name ?? ''} ${lead.name} 체험이용권`.trim();
-        code = await apiCreateCoupon(description, '1', '40');
+        code = await apiCreateCoupon(description, durMonths, userCount);
 
         // 2. 알림톡 발송 — 이 단계까지 통과하면 사용자에게 메시지가 이미 전송됨
         await apiSendCoupon({
           first_name: lead.name,
           phone: lead.phone,
           coupon_code: code,
-          user_limit: '40',
-          duration: '1',
+          user_limit: userCount,
+          duration: durMonths,
           send_type: 'trial',
         });
       } catch (e) {
@@ -1532,8 +1539,8 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
           contact_name:  lead.name,
           contact_phone: lead.phone,
           org_name:      lead.school_name,
-          duration:      '1',
-          user_count:    '40',
+          duration:      durMonths,
+          user_count:    userCount,
           status:        '대기',
         }));
         licenseSaved = true;
