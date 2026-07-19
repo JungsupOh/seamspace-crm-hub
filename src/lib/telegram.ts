@@ -32,14 +32,47 @@ export function notifyNewDeal(dealName: string, orgName: string, contactName: st
   );
 }
 
-// ── 파트너 딜 등록 알림 ──────────────────────────────
-export function notifyPartnerDeal(partnerName: string, schoolName: string, buyerName: string, amount?: number): void {
-  const amountStr = amount ? `\n💰 결제금액: ${amount.toLocaleString()}원` : '';
+// ── 파트너 딜 등록/수정 알림 ─────────────────────────
+// 관리자용이므로 본문은 항상 한국어. 금액만 파트너 통화 표기를 따른다.
+export function notifyPartnerDeal(
+  partnerName: string,
+  schoolName: string,
+  buyerName: string,
+  amount?: number,
+  opts?: { currency?: string; country?: string; edited?: boolean },
+): void {
+  const cur = opts?.currency ?? 'KRW';
+  const amountStr = amount
+    ? `\n💰 결제금액: ${cur === 'KRW' ? `${amount.toLocaleString()}원` : `${amount.toLocaleString()} ${cur}`}`
+    : '';
+  const partnerLine = `🏢 파트너: ${partnerName}${opts?.country && opts.country !== 'KR' ? ` (${opts.country})` : ''}`;
   sendTelegramNotification(
-    `🤝 <b>파트너 딜 등록</b>\n\n` +
-    `🏢 파트너: ${partnerName}\n` +
+    `🤝 <b>파트너 딜 ${opts?.edited ? '수정' : '등록'}</b>\n\n` +
+    `${partnerLine}\n` +
     `🏫 ${schoolName || '(미입력)'}\n` +
     `👤 ${buyerName || '(미입력)'}${amountStr}`
+  );
+}
+
+// ── 파트너 이용권 이메일 발송 실패 알림 ─────────────────
+// 발급 자체는 엣지 함수(partner-issue-license)가 통보한다.
+// 이메일은 클라이언트에서 발송되므로 실패했을 때만 별도로 알려 후속 조치가 가능하게 한다.
+export function notifyPartnerLicenseEmailFailed(params: {
+  partnerName?: string;
+  orgName?: string;
+  contactName?: string;
+  contactEmail: string;
+  couponCode: string;
+  reason?: string;
+}): void {
+  sendTelegramNotification(
+    `⚠️ <b>파트너 이용권 이메일 발송 실패</b>\n\n` +
+    `🤝 ${params.partnerName || '(파트너 미상)'}\n` +
+    `🏫 ${params.orgName || '(미입력)'}\n` +
+    `👤 ${params.contactName || '(미입력)'} / ${params.contactEmail}\n` +
+    `🎟 ${params.couponCode}\n` +
+    `❗ 코드는 발급되었으나 메일이 나가지 않았습니다. 재발송이 필요합니다.` +
+    (params.reason ? `\n📄 ${params.reason}` : '')
   );
 }
 

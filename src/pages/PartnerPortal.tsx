@@ -192,10 +192,10 @@ export default function PartnerPortal() {
 
   const getRange = (): { from: string; to: string; label: string } => {
     switch (periodFilter) {
-      case 'this_month': { const ym = `${yyyy}-${pad(mm + 1)}`; return { from: `${ym}-01`, to: `${ym}-31`, label: t({ ko: `${ym} 실적`, en: `${ym} Results` }) }; }
-      case 'last_month': { const d = new Date(yyyy, mm - 1, 1); const ym = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; return { from: `${ym}-01`, to: `${ym}-31`, label: t({ ko: `${ym} 실적`, en: `${ym} Results` }) }; }
-      case 'this_year': return { from: `${yyyy}-01-01`, to: `${yyyy}-12-31`, label: t({ ko: `${yyyy}년 실적`, en: `${yyyy} Results` }) };
-      default: return { from: '2000-01-01', to: '2099-12-31', label: t({ ko: '전체 실적', en: 'All Results' }) };
+      case 'this_month': { const ym = `${yyyy}-${pad(mm + 1)}`; return { from: `${ym}-01`, to: `${ym}-31`, label: t({ ko: `${ym} 실적`, ja: `${ym} 実績`, en: `${ym} Results` }) }; }
+      case 'last_month': { const d = new Date(yyyy, mm - 1, 1); const ym = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; return { from: `${ym}-01`, to: `${ym}-31`, label: t({ ko: `${ym} 실적`, ja: `${ym} 実績`, en: `${ym} Results` }) }; }
+      case 'this_year': return { from: `${yyyy}-01-01`, to: `${yyyy}-12-31`, label: t({ ko: `${yyyy}년 실적`, ja: `${yyyy}年 実績`, en: `${yyyy} Results` }) };
+      default: return { from: '2000-01-01', to: '2099-12-31', label: t({ ko: '전체 실적', ja: '全体実績', en: 'All Results' }) };
     }
   };
   const { from: pFrom, to: pTo, label: pLabel } = getRange();
@@ -313,7 +313,7 @@ export default function PartnerPortal() {
     // 구매자 최소 1명 이름 필수
     const validBuyers = buyers.filter(b => b.buyer_name.trim());
     if (validBuyers.length === 0) {
-      toast.error(t({ ko: '구매자를 최소 1명 입력해주세요', en: 'Please enter at least one buyer' }));
+      toast.error(t({ ko: '구매자를 최소 1명 입력해주세요', ja: '購入者を最低1名入力してください', en: 'Please enter at least one buyer' }));
       return;
     }
     setAdding(true);
@@ -356,7 +356,9 @@ export default function PartnerPortal() {
         setDeals(prev => prev.map(d => d.id === editingDealId ? { ...d, ...dealFields } as PartnerDeal : d));
         setDealBuyersMap(prev => ({ ...prev, [editingDealId]: newBuyers }));
         setAddDialogOpen(false);
-        toast.success(t({ ko: '수정되었습니다', en: 'Updated' }));
+        toast.success(t({ ko: '수정되었습니다', ja: '修正されました', en: 'Updated' }));
+        notifyPartnerDeal(partner.name, addForm.school_name ?? '', firstBuyer.buyer_name ?? '', totalAmount,
+          { currency: partnerCurrency, country: partnerCountry, edited: true });
       } else {
         // ── 추가 ──
         const created = await createPartnerDeal({
@@ -368,10 +370,11 @@ export default function PartnerPortal() {
         setDeals(prev => [...prev, created]);
         setDealBuyersMap(prev => ({ ...prev, [created.id]: createdBuyers }));
         setAddDialogOpen(false);
-        toast.success(t({ ko: '딜이 추가되었습니다', en: 'Deal added' }));
-        notifyPartnerDeal(partner.name, addForm.school_name ?? '', firstBuyer.buyer_name ?? '', totalAmount);
+        toast.success(t({ ko: '딜이 추가되었습니다', ja: '案件が追加されました', en: 'Deal added' }));
+        notifyPartnerDeal(partner.name, addForm.school_name ?? '', firstBuyer.buyer_name ?? '', totalAmount,
+          { currency: partnerCurrency, country: partnerCountry });
       }
-    } catch { toast.error(editingDealId ? t({ ko: '수정 실패', en: 'Update failed' }) : t({ ko: '추가 실패', en: 'Add failed' })); }
+    } catch { toast.error(editingDealId ? t({ ko: '수정 실패', ja: '修正に失敗しました', en: 'Update failed' }) : t({ ko: '추가 실패', ja: '追加に失敗しました', en: 'Add failed' })); }
     finally { setAdding(false); }
   };
 
@@ -386,8 +389,8 @@ export default function PartnerPortal() {
       await deletePartnerDeal(deleteDealTargetId);
       setDeals(prev => prev.filter(d => d.id !== deleteDealTargetId));
       setDealBuyersMap(prev => { const n = { ...prev }; delete n[deleteDealTargetId]; return n; });
-      toast.success(t({ ko: '삭제되었습니다', en: 'Deleted' }));
-    } catch { toast.error(t({ ko: '삭제 실패', en: 'Delete failed' })); }
+      toast.success(t({ ko: '삭제되었습니다', ja: '削除されました', en: 'Deleted' }));
+    } catch { toast.error(t({ ko: '삭제 실패', ja: '削除に失敗しました', en: 'Delete failed' })); }
     setDeleteDealConfirmOpen(false);
     setDeleteDealTargetId(null);
   };
@@ -420,7 +423,7 @@ export default function PartnerPortal() {
   const handleIssue = async () => {
     if (!partner) return;
     if (!issueForm.contactEmail.trim()) {
-      toast.error(t({ ko: '이메일을 입력하세요', en: 'Please enter an email' }));
+      toast.error(t({ ko: '이메일을 입력하세요', ja: 'メールアドレスを入力してください', en: 'Please enter an email' }));
       return;
     }
     setIssuing(true);
@@ -441,28 +444,28 @@ export default function PartnerPortal() {
       setIssuedCode(res.coupon_code);
       toast.success(
         res.email_sent
-          ? t({ ko: `이용권 발급 완료 · 이메일 발송됨 (${res.coupon_code})`, en: `License issued & emailed (${res.coupon_code})` })
-          : t({ ko: `이용권 발급됨 · 이메일 발송 실패 (${res.coupon_code})`, en: `License issued, email failed (${res.coupon_code})` }),
+          ? t({ ko: `이용권 발급 완료 · 이메일 발송됨 (${res.coupon_code})`, ja: `ライセンス発行完了・メール送信済み (${res.coupon_code})`, en: `License issued & emailed (${res.coupon_code})` })
+          : t({ ko: `이용권 발급됨 · 이메일 발송 실패 (${res.coupon_code})`, ja: `ライセンス発行済み・メール送信失敗 (${res.coupon_code})`, en: `License issued, email failed (${res.coupon_code})` }),
       );
       getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
     } catch (e) {
-      toast.error(`${t({ ko: '발급 실패', en: 'Issue failed' })}: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`${t({ ko: '발급 실패', ja: '発行に失敗しました', en: 'Issue failed' })}: ${e instanceof Error ? e.message : String(e)}`);
     } finally { setIssuing(false); }
   };
 
   const handleResend = async (lic: PartnerLicense) => {
     try {
       await resendLicenseEmail(lic, partner?.name, partnerLocale);
-      toast.success(t({ ko: '재발송 완료', en: 'Resent' }));
+      toast.success(t({ ko: '재발송 완료', ja: '再送信完了', en: 'Resent' }));
       if (partner?.id) getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
     } catch (e) {
-      toast.error(`${t({ ko: '재발송 실패', en: 'Resend failed' })}: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`${t({ ko: '재발송 실패', ja: '再送信に失敗しました', en: 'Resend failed' })}: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
   const copyCode = (code: string) => {
     navigator.clipboard?.writeText(code).then(
-      () => toast.success(t({ ko: '복사됨', en: 'Copied' })),
+      () => toast.success(t({ ko: '복사됨', ja: 'コピーしました', en: 'Copied' })),
       () => {},
     );
   };
@@ -470,7 +473,7 @@ export default function PartnerPortal() {
   if (!userProfile?.partner_id) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
-        <p className="text-muted-foreground">{t({ ko: '파트너 계정이 연결되어 있지 않습니다. 관리자에게 문의하세요.', en: 'No partner account linked. Please contact the administrator.' })}</p>
+        <p className="text-muted-foreground">{t({ ko: '파트너 계정이 연결되어 있지 않습니다. 관리자에게 문의하세요.', ja: 'パートナーアカウントが連携されていません。管理者にお問い合わせください。', en: 'No partner account linked. Please contact the administrator.' })}</p>
       </div>
     );
   }
@@ -479,17 +482,17 @@ export default function PartnerPortal() {
     <div className="space-y-4">
       {/* 헤더 */}
       <div>
-        <h1 className="text-2xl font-semibold">{partner?.name ?? t({ ko: '파트너', en: 'Partner' })} {t({ ko: '포털', en: 'Portal' })}</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">{t({ ko: '수수료율', en: 'Commission' })} {commissionRate}% · {t({ ko: '전체', en: 'Total' })} {deals.length}{t({ ko: '건', en: '' })}</p>
+        <h1 className="text-2xl font-semibold">{partner?.name ?? t({ ko: '파트너', ja: 'パートナー', en: 'Partner' })} {t({ ko: '포털', ja: 'ポータル', en: 'Portal' })}</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">{t({ ko: '수수료율', ja: '手数料率', en: 'Commission' })} {commissionRate}% · {t({ ko: '전체', ja: '合計', en: 'Total' })} {deals.length}{t({ ko: '건', ja: '件', en: '' })}</p>
       </div>
 
       {/* 기간 필터 */}
       <div className="flex items-center gap-1.5">
         {([
-          { id: 'this_month', label: t({ ko: '이번달', en: 'This month' }) },
-          { id: 'last_month', label: t({ ko: '지난달', en: 'Last month' }) },
-          { id: 'this_year', label: t({ ko: '올해', en: 'This year' }) },
-          { id: 'all', label: t({ ko: '전체', en: 'All' }) },
+          { id: 'this_month', label: t({ ko: '이번달', ja: '今月', en: 'This month' }) },
+          { id: 'last_month', label: t({ ko: '지난달', ja: '先月', en: 'Last month' }) },
+          { id: 'this_year', label: t({ ko: '올해', ja: '今年', en: 'This year' }) },
+          { id: 'all', label: t({ ko: '전체', ja: '全体', en: 'All' }) },
         ] as const).map(({ id, label }) => (
           <button key={id} onClick={() => setPeriodFilter(id)}
             className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors
@@ -505,15 +508,15 @@ export default function PartnerPortal() {
         <div className="grid grid-cols-3 gap-4">
           <div>
             <p className="text-2xl font-bold tabular-nums">{totalPayment.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">{curUnit}</span></p>
-            <p className="text-xs text-muted-foreground mt-0.5">{t({ ko: '매출 (결제금액)', en: 'Revenue (paid)' })}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{t({ ko: '매출 (결제금액)', ja: '売上（決済金額）', en: 'Revenue (paid)' })}</p>
           </div>
           <div>
             <p className="text-2xl font-bold tabular-nums text-amber-600">{totalCommission.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">{curUnit}</span></p>
-            <p className="text-xs text-muted-foreground mt-0.5">{t({ ko: '수수료', en: 'Commission' })}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{t({ ko: '수수료', ja: '手数料', en: 'Commission' })}</p>
           </div>
           <div>
             <p className="text-2xl font-bold tabular-nums text-teal-700">{totalSettlement.toLocaleString()}<span className="text-sm font-normal text-muted-foreground ml-1">{curUnit}</span></p>
-            <p className="text-xs text-muted-foreground mt-0.5">{t({ ko: '정산금액', en: 'Settlement' })}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{t({ ko: '정산금액', ja: '精算金額', en: 'Settlement' })}</p>
           </div>
         </div>
       </div>
@@ -522,11 +525,11 @@ export default function PartnerPortal() {
       <div className="flex justify-end gap-2">
         {canIssueLicenses && (
           <Button size="sm" variant="outline" onClick={() => openIssueDialog()}>
-            <Ticket className="h-4 w-4 mr-1.5" />{t({ ko: '이용권 발급', en: 'Issue License' })}
+            <Ticket className="h-4 w-4 mr-1.5" />{t({ ko: '이용권 발급', ja: 'ライセンス発行', en: 'Issue License' })}
           </Button>
         )}
         <Button size="sm" onClick={handleOpenAddDialog} disabled={adding}>
-          <Plus className="h-4 w-4 mr-1.5" />{t({ ko: '딜 추가', en: 'Add Deal' })}
+          <Plus className="h-4 w-4 mr-1.5" />{t({ ko: '딜 추가', ja: '案件追加', en: 'Add Deal' })}
         </Button>
       </div>
 
@@ -537,31 +540,31 @@ export default function PartnerPortal() {
             <thead>
               <tr className="border-b border-border bg-muted/60">
                 <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground w-8">#</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '계약일', en: 'Date' })}</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '학교명', en: 'School / Org' })}</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '구매자', en: 'Buyer' })}</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '연락처', en: 'Contact' })}</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '플랜', en: 'Plan' })}</th>
-                <th className="px-3 py-3 text-center text-xs font-medium text-muted-foreground">{t({ ko: '수량', en: 'Qty' })}</th>
-                <th className="px-3 py-3 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '결제금액', en: 'Amount' })}</th>
-                <th className="px-3 py-3 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '수수료', en: 'Commission' })}</th>
-                <th className="px-3 py-3 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '정산금액', en: 'Settlement' })}</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '이용권발급', en: 'License' })}</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '입금일', en: 'Deposit' })}</th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '비고', en: 'Notes' })}</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '계약일', ja: '契約日', en: 'Date' })}</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '학교명', ja: '学校名', en: 'School / Org' })}</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '구매자', ja: '購入者', en: 'Buyer' })}</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '연락처', ja: '連絡先', en: 'Contact' })}</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '플랜', ja: 'プラン', en: 'Plan' })}</th>
+                <th className="px-3 py-3 text-center text-xs font-medium text-muted-foreground">{t({ ko: '수량', ja: '数量', en: 'Qty' })}</th>
+                <th className="px-3 py-3 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '결제금액', ja: '決済金額', en: 'Amount' })}</th>
+                <th className="px-3 py-3 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '수수료', ja: '手数料', en: 'Commission' })}</th>
+                <th className="px-3 py-3 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '정산금액', ja: '精算金額', en: 'Settlement' })}</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '이용권발급', ja: 'ライセンス発行', en: 'License' })}</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '입금일', ja: '入金日', en: 'Deposit' })}</th>
+                <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '비고', ja: '備考', en: 'Notes' })}</th>
                 <th className="px-3 py-3 w-16"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr><td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">{t({ ko: '로딩 중...', en: 'Loading...' })}</td></tr>
+                <tr><td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">{t({ ko: '로딩 중...', ja: '読み込み中...', en: 'Loading...' })}</td></tr>
               ) : filteredDeals.length === 0 ? (
-                <tr><td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">{t({ ko: '등록된 딜이 없습니다.', en: 'No deals yet.' })}</td></tr>
+                <tr><td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">{t({ ko: '등록된 딜이 없습니다.', ja: '登録された案件がありません。', en: 'No deals yet.' })}</td></tr>
               ) : filteredDeals.map((d, idx) => {
                 const dbBuyers = dealBuyersMap[d.id] ?? [];
                 const buyerCount = dbBuyers.length || 1;
                 const buyerDisplay = dbBuyers.length > 1
-                  ? t({ ko: `${d.buyer_name} 외 ${dbBuyers.length - 1}명`, en: `${d.buyer_name} +${dbBuyers.length - 1}` })
+                  ? t({ ko: `${d.buyer_name} 외 ${dbBuyers.length - 1}명`, ja: `${d.buyer_name} 他${dbBuyers.length - 1}名`, en: `${d.buyer_name} +${dbBuyers.length - 1}` })
                   : d.buyer_name || '-';
                 const phoneDisplay = dbBuyers.length > 1
                   ? `${d.buyer_phone ?? ''} ...`
@@ -590,12 +593,12 @@ export default function PartnerPortal() {
                     <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1">
                         {canIssueLicenses && (
-                          <button onClick={() => openIssueDialog(d)} title={t({ ko: '이용권 발급', en: 'Issue License' })}
+                          <button onClick={() => openIssueDialog(d)} title={t({ ko: '이용권 발급', ja: 'ライセンス発行', en: 'Issue License' })}
                             className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Ticket className="h-3.5 w-3.5" /></button>
                         )}
-                        <button onClick={() => handleOpenEditDialog(d)} title={t({ ko: '상세보기 / 수정', en: 'View / Edit' })}
+                        <button onClick={() => handleOpenEditDialog(d)} title={t({ ko: '상세보기 / 수정', ja: '詳細 / 修正', en: 'View / Edit' })}
                           className="p-1 rounded hover:bg-muted text-muted-foreground"><Pencil className="h-3.5 w-3.5" /></button>
-                        <button onClick={() => handleDelete(d.id)} title={t({ ko: '삭제', en: 'Delete' })}
+                        <button onClick={() => handleDelete(d.id)} title={t({ ko: '삭제', ja: '削除', en: 'Delete' })}
                           className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
                     </td>
@@ -612,43 +615,43 @@ export default function PartnerPortal() {
         <div className="surface-card ring-container overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-muted/40">
             <Ticket className="h-4 w-4 text-primary" />
-            <span className="text-sm font-semibold">{t({ ko: '발급된 이용권', en: 'Issued Licenses' })} ({licenses.length})</span>
+            <span className="text-sm font-semibold">{t({ ko: '발급된 이용권', ja: '発行済みライセンス', en: 'Issued Licenses' })} ({licenses.length})</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/40">
-                  <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '발급일', en: 'Date' })}</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">{t({ ko: '고객', en: 'Customer' })}</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">{t({ ko: '학교/기관', en: 'School / Org' })}</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">{t({ ko: '플랜', en: 'Plan' })}</th>
-                  <th className="px-3 py-2.5 text-center text-xs font-medium text-muted-foreground">{t({ ko: '기간·인원', en: 'Term · Users' })}</th>
-                  <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">{t({ ko: '이용권코드', en: 'Code' })}</th>
-                  <th className="px-3 py-2.5 text-center text-xs font-medium text-muted-foreground">{t({ ko: '이메일', en: 'Email' })}</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '발급일', ja: '発行日', en: 'Date' })}</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">{t({ ko: '고객', ja: '顧客', en: 'Customer' })}</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">{t({ ko: '학교/기관', ja: '学校・機関', en: 'School / Org' })}</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">{t({ ko: '플랜', ja: 'プラン', en: 'Plan' })}</th>
+                  <th className="px-3 py-2.5 text-center text-xs font-medium text-muted-foreground">{t({ ko: '기간·인원', ja: '期間・人数', en: 'Term · Users' })}</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">{t({ ko: '이용권코드', ja: 'ライセンスコード', en: 'Code' })}</th>
+                  <th className="px-3 py-2.5 text-center text-xs font-medium text-muted-foreground">{t({ ko: '이메일', ja: 'メール', en: 'Email' })}</th>
                   <th className="px-3 py-2.5 w-16"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {licenses.length === 0 ? (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground text-xs">{t({ ko: '발급된 이용권이 없습니다.', en: 'No licenses issued yet.' })}</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground text-xs">{t({ ko: '발급된 이용권이 없습니다.', ja: '発行されたライセンスがありません。', en: 'No licenses issued yet.' })}</td></tr>
                 ) : licenses.map(lic => (
                   <tr key={lic.id} className="hover:bg-muted/30">
                     <td className="px-3 py-2.5 text-xs whitespace-nowrap">{lic.created_at?.slice(0, 10)}</td>
                     <td className="px-3 py-2.5 text-xs font-medium">{lic.contact_name || '-'}<div className="text-[10px] text-muted-foreground">{lic.contact_email}</div></td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground">{lic.org_name || '-'}</td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground">{lic.plan || '-'}</td>
-                    <td className="px-3 py-2.5 text-xs text-center text-muted-foreground whitespace-nowrap">{lic.duration}{t({ ko: '개월', en: 'mo' })} · {lic.user_count}</td>
+                    <td className="px-3 py-2.5 text-xs text-center text-muted-foreground whitespace-nowrap">{lic.duration}{t({ ko: '개월', ja: 'か月', en: 'mo' })} · {lic.user_count}</td>
                     <td className="px-3 py-2.5 text-xs font-mono">{lic.coupon_code}</td>
                     <td className="px-3 py-2.5 text-center">
                       {lic.email_sent
-                        ? <span className="text-[10px] text-teal-700 bg-teal-50 rounded px-1.5 py-0.5">{t({ ko: '발송됨', en: 'Sent' })}</span>
-                        : <span className="text-[10px] text-amber-600 bg-amber-50 rounded px-1.5 py-0.5">{t({ ko: '미발송', en: 'Not sent' })}</span>}
+                        ? <span className="text-[10px] text-teal-700 bg-teal-50 rounded px-1.5 py-0.5">{t({ ko: '발송됨', ja: '送信済み', en: 'Sent' })}</span>
+                        : <span className="text-[10px] text-amber-600 bg-amber-50 rounded px-1.5 py-0.5">{t({ ko: '미발송', ja: '未送信', en: 'Not sent' })}</span>}
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex gap-1">
-                        <button onClick={() => copyCode(lic.coupon_code)} title={t({ ko: '코드 복사', en: 'Copy code' })}
+                        <button onClick={() => copyCode(lic.coupon_code)} title={t({ ko: '코드 복사', ja: 'コードをコピー', en: 'Copy code' })}
                           className="p-1 rounded hover:bg-muted text-muted-foreground"><Copy className="h-3.5 w-3.5" /></button>
-                        <button onClick={() => handleResend(lic)} title={t({ ko: '이메일 재발송', en: 'Resend email' })}
+                        <button onClick={() => handleResend(lic)} title={t({ ko: '이메일 재발송', ja: 'メール再送信', en: 'Resend email' })}
                           className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Send className="h-3.5 w-3.5" /></button>
                       </div>
                     </td>
@@ -664,23 +667,23 @@ export default function PartnerPortal() {
       <Dialog open={addDialogOpen} onOpenChange={open => { if (!open) { setAddDialogOpen(false); setEditingDealId(null); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] flex flex-col" onOpenAutoFocus={e => e.preventDefault()}>
           <DialogHeader>
-            <DialogTitle>{editingDealId ? t({ ko: '딜 상세 / 수정', en: 'Deal Details / Edit' }) : t({ ko: '새 딜 추가', en: 'New Deal' })}</DialogTitle>
+            <DialogTitle>{editingDealId ? t({ ko: '딜 상세 / 수정', ja: '案件詳細 / 修正', en: 'Deal Details / Edit' }) : t({ ko: '새 딜 추가', ja: '新規案件', en: 'New Deal' })}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2 overflow-y-auto flex-1">
             {/* 계약일 */}
             <div>
-              <Label className="text-xs">{t({ ko: '계약일', en: 'Contract date' })}</Label>
+              <Label className="text-xs">{t({ ko: '계약일', ja: '契約日', en: 'Contract date' })}</Label>
               <Input type="date" value={(addForm.contract_date as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, contract_date: e.target.value }))} className="h-8 text-sm" />
             </div>
 
             {/* 학교명 — 국내는 NEIS 검색, 해외는 자유입력 */}
             {isIntl ? (
               <div>
-                <Label className="text-xs">{t({ ko: '학교명', en: 'School / Organization' })}</Label>
+                <Label className="text-xs">{t({ ko: '학교명', ja: '学校・機関名', en: 'School / Organization' })}</Label>
                 <Input
                   value={(addForm.school_name as string) ?? ''}
                   onChange={e => setAddForm(p => ({ ...p, school_name: e.target.value }))}
-                  placeholder={t({ ko: '학교/기관명', en: 'School or organization name' })}
+                  placeholder={t({ ko: '학교/기관명', ja: '学校・機関名', en: 'School or organization name' })}
                   className="h-8 text-sm"
                 />
               </div>
@@ -718,10 +721,10 @@ export default function PartnerPortal() {
               <div className="flex items-center justify-between mb-2">
                 <Label className="text-xs flex items-center gap-1">
                   <Package className="h-3.5 w-3.5" />
-                  {t({ ko: '품명', en: 'Items' })} ({items.length})
+                  {t({ ko: '품명', ja: '品名', en: 'Items' })} ({items.length})
                 </Label>
                 <button onClick={addItem} className="text-xs text-primary hover:underline flex items-center gap-0.5">
-                  <Plus className="h-3 w-3" />{t({ ko: '추가', en: 'Add' })}
+                  <Plus className="h-3 w-3" />{t({ ko: '추가', ja: '追加', en: 'Add' })}
                 </button>
               </div>
               <div className="space-y-2">
@@ -737,19 +740,19 @@ export default function PartnerPortal() {
                       /* 해외: 자유입력 플랜 + 수동 단가 */
                       <div className="grid grid-cols-[1.2fr_0.7fr_0.5fr_1fr] gap-2">
                         <div>
-                          <span className="text-[10px] text-muted-foreground">{t({ ko: '플랜', en: 'Plan' })}</span>
-                          <Input value={it.plan} onChange={e => updateItem(idx, 'plan', e.target.value)} placeholder={t({ ko: '플랜명', en: 'Plan name' })} className="h-7 text-xs" />
+                          <span className="text-[10px] text-muted-foreground">{t({ ko: '플랜', ja: 'プラン', en: 'Plan' })}</span>
+                          <Input value={it.plan} onChange={e => updateItem(idx, 'plan', e.target.value)} placeholder={t({ ko: '플랜명', ja: 'プラン名', en: 'Plan name' })} className="h-7 text-xs" />
                         </div>
                         <div>
-                          <span className="text-[10px] text-muted-foreground">{t({ ko: '이용개월', en: 'Months' })}</span>
+                          <span className="text-[10px] text-muted-foreground">{t({ ko: '이용개월', ja: '利用月数', en: 'Months' })}</span>
                           <Input type="number" min={1} value={it.duration} onChange={e => updateItem(idx, 'duration', parseInt(e.target.value) || 1)} className="h-7 text-xs text-center" />
                         </div>
                         <div>
-                          <span className="text-[10px] text-muted-foreground">{t({ ko: '수량', en: 'Qty' })}</span>
+                          <span className="text-[10px] text-muted-foreground">{t({ ko: '수량', ja: '数量', en: 'Qty' })}</span>
                           <Input type="number" min={1} value={it.qty} onChange={e => updateItem(idx, 'qty', parseInt(e.target.value) || 1)} className="h-7 text-xs text-center" />
                         </div>
                         <div>
-                          <span className="text-[10px] text-muted-foreground">{t({ ko: '단가', en: 'Unit price' })} ({curUnit})</span>
+                          <span className="text-[10px] text-muted-foreground">{t({ ko: '단가', ja: '単価', en: 'Unit price' })} ({curUnit})</span>
                           <Input type="number" min={0} value={it.unit_price} onChange={e => updateItem(idx, 'unit_price', parseFloat(e.target.value) || 0)} className="h-7 text-xs text-right" />
                         </div>
                       </div>
@@ -809,12 +812,12 @@ export default function PartnerPortal() {
               </div>
               {/* 합계 */}
               <div className="mt-2 flex items-center justify-between px-3 py-2 bg-primary/5 rounded-md border border-primary/20">
-                <span className="text-xs font-medium">{t({ ko: '결제금액 합계', en: 'Total amount' })}</span>
+                <span className="text-xs font-medium">{t({ ko: '결제금액 합계', ja: '決済金額合計', en: 'Total amount' })}</span>
                 <span className="text-sm font-bold tabular-nums">{formatMoney(itemsTotal, partnerCurrency)}</span>
               </div>
               {itemsTotal > 0 && (
                 <div className="text-xs text-muted-foreground bg-muted/50 rounded px-3 py-1.5 mt-1">
-                  {t({ ko: '수수료', en: 'Commission' })} {formatMoney(calcCommission(itemsTotal, commissionRate).commission, partnerCurrency)} / {t({ ko: '정산', en: 'Settlement' })} {formatMoney(calcCommission(itemsTotal, commissionRate).settlement, partnerCurrency)}
+                  {t({ ko: '수수료', ja: '手数料', en: 'Commission' })} {formatMoney(calcCommission(itemsTotal, commissionRate).commission, partnerCurrency)} / {t({ ko: '정산', ja: '精算', en: 'Settlement' })} {formatMoney(calcCommission(itemsTotal, commissionRate).settlement, partnerCurrency)}
                 </div>
               )}
             </div>
@@ -824,10 +827,10 @@ export default function PartnerPortal() {
               <div className="flex items-center justify-between mb-2">
                 <Label className="text-xs flex items-center gap-1">
                   <Users className="h-3.5 w-3.5" />
-                  {t({ ko: '구매자', en: 'Buyers' })} ({buyers.length})
+                  {t({ ko: '구매자', ja: '購入者', en: 'Buyers' })} ({buyers.length})
                 </Label>
                 <button onClick={addBuyer} className="text-xs text-primary hover:underline flex items-center gap-0.5">
-                  <Plus className="h-3 w-3" />{t({ ko: '추가', en: 'Add' })}
+                  <Plus className="h-3 w-3" />{t({ ko: '추가', ja: '追加', en: 'Add' })}
                 </button>
               </div>
               <div className="space-y-2">
@@ -841,25 +844,25 @@ export default function PartnerPortal() {
                     )}
                     <div className="grid grid-cols-[1fr_1fr_1fr] gap-2 mb-2">
                       <div>
-                        <span className="text-[10px] text-muted-foreground">{t({ ko: '이름', en: 'Name' })} *</span>
-                        <Input value={b.buyer_name} onChange={e => updateBuyer(idx, 'buyer_name', e.target.value)} placeholder={t({ ko: '홍길동', en: 'Full name' })} className="h-7 text-xs" />
+                        <span className="text-[10px] text-muted-foreground">{t({ ko: '이름', ja: '氏名', en: 'Name' })} *</span>
+                        <Input value={b.buyer_name} onChange={e => updateBuyer(idx, 'buyer_name', e.target.value)} placeholder={t({ ko: '홍길동', ja: '山田太郎', en: 'Full name' })} className="h-7 text-xs" />
                       </div>
                       <div>
-                        <span className="text-[10px] text-muted-foreground">{t({ ko: '연락처', en: 'Phone' })}</span>
+                        <span className="text-[10px] text-muted-foreground">{t({ ko: '연락처', ja: '連絡先', en: 'Phone' })}</span>
                         <Input value={b.buyer_phone} onChange={e => updateBuyer(idx, 'buyer_phone', phoneFmt(e.target.value))} placeholder={phonePlaceholder} className="h-7 text-xs" />
                       </div>
                       <div>
-                        <span className="text-[10px] text-muted-foreground">{t({ ko: '이메일', en: 'Email' })}</span>
+                        <span className="text-[10px] text-muted-foreground">{t({ ko: '이메일', ja: 'メール', en: 'Email' })}</span>
                         <Input value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <span className="text-[10px] text-muted-foreground">{t({ ko: '학생 수', en: 'Students' })}</span>
+                        <span className="text-[10px] text-muted-foreground">{t({ ko: '학생 수', ja: '生徒数', en: 'Students' })}</span>
                         <AmountInput value={b.student_count} onValueChange={(n) => updateBuyer(idx, 'student_count', n)} className="h-7 text-xs" />
                       </div>
                       <div>
-                        <span className="text-[10px] text-muted-foreground">{t({ ko: '이용개월', en: 'Months' })}</span>
+                        <span className="text-[10px] text-muted-foreground">{t({ ko: '이용개월', ja: '利用月数', en: 'Months' })}</span>
                         <Input type="number" value={b.month_count} onChange={e => updateBuyer(idx, 'month_count', parseInt(e.target.value) || '')} placeholder="12" className="h-7 text-xs" />
                       </div>
                     </div>
@@ -870,15 +873,15 @@ export default function PartnerPortal() {
 
             {/* 비고 */}
             <div>
-              <Label className="text-xs">{t({ ko: '비고', en: 'Notes' })}</Label>
-              <Input value={(addForm.remarks as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, remarks: e.target.value }))} className="h-8 text-sm" placeholder={t({ ko: '특이사항 입력', en: 'Notes' })} />
+              <Label className="text-xs">{t({ ko: '비고', ja: '備考', en: 'Notes' })}</Label>
+              <Input value={(addForm.remarks as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, remarks: e.target.value }))} className="h-8 text-sm" placeholder={t({ ko: '특이사항 입력', ja: '特記事項を入力', en: 'Notes' })} />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-3 border-t">
-            <Button variant="outline" size="sm" onClick={() => { setAddDialogOpen(false); setEditingDealId(null); }}>{t({ ko: '취소', en: 'Cancel' })}</Button>
+            <Button variant="outline" size="sm" onClick={() => { setAddDialogOpen(false); setEditingDealId(null); }}>{t({ ko: '취소', ja: 'キャンセル', en: 'Cancel' })}</Button>
             <Button size="sm" onClick={handleDialogSubmit} disabled={adding}>
               {adding && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
-              {editingDealId ? t({ ko: '저장', en: 'Save' }) : t({ ko: '추가', en: 'Add' })}
+              {editingDealId ? t({ ko: '저장', ja: '保存', en: 'Save' }) : t({ ko: '추가', ja: '追加', en: 'Add' })}
             </Button>
           </div>
         </DialogContent>
@@ -888,65 +891,65 @@ export default function PartnerPortal() {
       <Dialog open={issueDialogOpen} onOpenChange={o => { if (!o) setIssueDialogOpen(false); }}>
         <DialogContent className="max-w-md" onOpenAutoFocus={e => e.preventDefault()}>
           <DialogHeader>
-            <DialogTitle>{t({ ko: '이용권 발급', en: 'Issue License' })}</DialogTitle>
+            <DialogTitle>{t({ ko: '이용권 발급', ja: 'ライセンス発行', en: 'Issue License' })}</DialogTitle>
           </DialogHeader>
           {issuedCode ? (
             <div className="py-4 text-center space-y-3">
-              <p className="text-sm text-muted-foreground">{t({ ko: '이용권이 발급되어 이메일로 전송되었습니다.', en: 'License issued and sent by email.' })}</p>
+              <p className="text-sm text-muted-foreground">{t({ ko: '이용권이 발급되어 이메일로 전송되었습니다.', ja: 'ライセンスが発行され、メールで送信されました。', en: 'License issued and sent by email.' })}</p>
               <div className="flex items-center justify-center gap-2">
                 <span className="text-lg font-mono font-bold tracking-wide bg-muted px-3 py-1.5 rounded">{issuedCode}</span>
                 <button onClick={() => copyCode(issuedCode)} className="p-1.5 rounded hover:bg-muted text-muted-foreground"><Copy className="h-4 w-4" /></button>
               </div>
               <div className="flex justify-center gap-2 pt-2">
-                <Button variant="outline" size="sm" onClick={() => setIssuedCode(null)}>{t({ ko: '추가 발급', en: 'Issue another' })}</Button>
-                <Button size="sm" onClick={() => setIssueDialogOpen(false)}>{t({ ko: '닫기', en: 'Close' })}</Button>
+                <Button variant="outline" size="sm" onClick={() => setIssuedCode(null)}>{t({ ko: '추가 발급', ja: '追加発行', en: 'Issue another' })}</Button>
+                <Button size="sm" onClick={() => setIssueDialogOpen(false)}>{t({ ko: '닫기', ja: '閉じる', en: 'Close' })}</Button>
               </div>
             </div>
           ) : (
             <div className="space-y-3 pt-1">
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <Label className="text-xs">{t({ ko: '고객명', en: 'Customer name' })}</Label>
+                  <Label className="text-xs">{t({ ko: '고객명', ja: '顧客名', en: 'Customer name' })}</Label>
                   <Input value={issueForm.customerName} onChange={e => setIssueForm(f => ({ ...f, customerName: e.target.value }))} className="h-8 text-sm" />
                 </div>
                 <div>
-                  <Label className="text-xs">{t({ ko: '학교/기관', en: 'School / Org' })}</Label>
+                  <Label className="text-xs">{t({ ko: '학교/기관', ja: '学校・機関', en: 'School / Org' })}</Label>
                   <Input value={issueForm.orgName} onChange={e => setIssueForm(f => ({ ...f, orgName: e.target.value }))} className="h-8 text-sm" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <Label className="text-xs">{t({ ko: '이메일 *', en: 'Email *' })}</Label>
+                  <Label className="text-xs">{t({ ko: '이메일 *', ja: 'メール *', en: 'Email *' })}</Label>
                   <Input type="email" value={issueForm.contactEmail} onChange={e => setIssueForm(f => ({ ...f, contactEmail: e.target.value }))} placeholder="email@example.com" className="h-8 text-sm" />
                 </div>
                 <div>
-                  <Label className="text-xs">{t({ ko: '연락처', en: 'Phone' })}</Label>
+                  <Label className="text-xs">{t({ ko: '연락처', ja: '連絡先', en: 'Phone' })}</Label>
                   <Input value={issueForm.contactPhone} onChange={e => setIssueForm(f => ({ ...f, contactPhone: phoneFmt(e.target.value) }))} placeholder={phonePlaceholder} className="h-8 text-sm" />
                 </div>
               </div>
               <div className="grid grid-cols-4 gap-2">
                 <div className="col-span-2">
-                  <Label className="text-xs">{t({ ko: '플랜', en: 'Plan' })}</Label>
-                  <Input value={issueForm.plan} onChange={e => setIssueForm(f => ({ ...f, plan: e.target.value }))} placeholder={t({ ko: '플랜명', en: 'Plan name' })} className="h-8 text-sm" />
+                  <Label className="text-xs">{t({ ko: '플랜', ja: 'プラン', en: 'Plan' })}</Label>
+                  <Input value={issueForm.plan} onChange={e => setIssueForm(f => ({ ...f, plan: e.target.value }))} placeholder={t({ ko: '플랜명', ja: 'プラン名', en: 'Plan name' })} className="h-8 text-sm" />
                 </div>
                 <div>
-                  <Label className="text-xs">{t({ ko: '개월', en: 'Months' })}</Label>
+                  <Label className="text-xs">{t({ ko: '개월', ja: 'か月', en: 'Months' })}</Label>
                   <Input type="number" min={1} value={issueForm.duration} onChange={e => setIssueForm(f => ({ ...f, duration: parseInt(e.target.value) || 1 }))} className="h-8 text-sm text-center" />
                 </div>
                 <div>
-                  <Label className="text-xs">{t({ ko: '인원', en: 'Users' })}</Label>
+                  <Label className="text-xs">{t({ ko: '인원', ja: '人数', en: 'Users' })}</Label>
                   <Input type="number" min={1} value={issueForm.userCount} onChange={e => setIssueForm(f => ({ ...f, userCount: parseInt(e.target.value) || 1 }))} className="h-8 text-sm text-center" />
                 </div>
               </div>
               <div>
-                <Label className="text-xs">{t({ ko: '판매금액', en: 'Amount' })} ({curUnit}) <span className="text-muted-foreground">— {t({ ko: '선택', en: 'optional' })}</span></Label>
+                <Label className="text-xs">{t({ ko: '판매금액', ja: '販売金額', en: 'Amount' })} ({curUnit}) <span className="text-muted-foreground">— {t({ ko: '선택', ja: '任意', en: 'optional' })}</span></Label>
                 <Input type="number" min={0} value={issueForm.amount} onChange={e => setIssueForm(f => ({ ...f, amount: e.target.value === '' ? '' : (parseFloat(e.target.value) || 0) }))} className="h-8 text-sm text-right" />
               </div>
               <div className="flex justify-end gap-2 pt-2 border-t">
-                <Button variant="outline" size="sm" onClick={() => setIssueDialogOpen(false)}>{t({ ko: '취소', en: 'Cancel' })}</Button>
+                <Button variant="outline" size="sm" onClick={() => setIssueDialogOpen(false)}>{t({ ko: '취소', ja: 'キャンセル', en: 'Cancel' })}</Button>
                 <Button size="sm" onClick={handleIssue} disabled={issuing}>
                   {issuing && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
-                  <Ticket className="h-3.5 w-3.5 mr-1" />{t({ ko: '발급 · 이메일 발송', en: 'Issue & Email' })}
+                  <Ticket className="h-3.5 w-3.5 mr-1" />{t({ ko: '발급 · 이메일 발송', ja: '発行・メール送信', en: 'Issue & Email' })}
                 </Button>
               </div>
             </div>
@@ -958,12 +961,12 @@ export default function PartnerPortal() {
       <AlertDialog open={deleteDealConfirmOpen} onOpenChange={setDeleteDealConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t({ ko: '딜 삭제', en: 'Delete Deal' })}</AlertDialogTitle>
-            <AlertDialogDescription>{t({ ko: '이 딜을 삭제하시겠습니까?', en: 'Delete this deal?' })}</AlertDialogDescription>
+            <AlertDialogTitle>{t({ ko: '딜 삭제', ja: '案件削除', en: 'Delete Deal' })}</AlertDialogTitle>
+            <AlertDialogDescription>{t({ ko: '이 딜을 삭제하시겠습니까?', ja: 'この案件を削除しますか？', en: 'Delete this deal?' })}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t({ ko: '취소', en: 'Cancel' })}</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDeleteDeal} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t({ ko: '삭제', en: 'Delete' })}</AlertDialogAction>
+            <AlertDialogCancel>{t({ ko: '취소', ja: 'キャンセル', en: 'Cancel' })}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteDeal} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t({ ko: '삭제', ja: '削除', en: 'Delete' })}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

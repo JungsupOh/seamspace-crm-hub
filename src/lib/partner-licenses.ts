@@ -6,6 +6,7 @@
 import { supabase } from '@/lib/supabase';
 import { sendPurchaseLicenseEmail } from '@/lib/email';
 import { makeT, type PartnerLocale } from '@/lib/partner-i18n';
+import { notifyPartnerLicenseEmailFailed } from '@/lib/telegram';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -126,6 +127,15 @@ export async function issueLicense(input: IssueLicenseInput): Promise<{ coupon_c
     }
   } catch (e) {
     console.warn('[issueLicense] 이메일 발송 실패 (코드는 발급됨):', e);
+    // 발급 통보는 엣지 함수가 이미 보냈으므로, 실패했을 때만 관리자에게 추가 통보
+    notifyPartnerLicenseEmailFailed({
+      partnerName:  input.partnerName,
+      orgName:      input.orgName,
+      contactName:  input.customerName,
+      contactEmail: input.contactEmail,
+      couponCode:   data.coupon_code,
+      reason:       e instanceof Error ? e.message : String(e),
+    });
   }
 
   return { coupon_code: data.coupon_code, license_id: data.license_id ?? null, email_sent: emailSent };
