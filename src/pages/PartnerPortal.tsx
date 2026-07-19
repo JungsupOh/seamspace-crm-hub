@@ -737,9 +737,11 @@ export default function PartnerPortal() {
                             const bLics = dealLicenses.filter(l => l.partner_deal_buyer_id === b.id);
                             return (
                               <div key={b.id ?? bi} className="flex items-start gap-3 rounded-md bg-background px-3 py-2">
-                                <div className="min-w-[180px]">
+                                {/* 구매자 = 이름/전화/이메일 (누구인가) */}
+                                <div className="min-w-[200px]">
                                   <div className="text-xs font-medium">{b.buyer_name || t({ ko: '(이름 없음)', ja: '(名前なし)', en: '(no name)' })}</div>
-                                  <div className="text-[10px] text-muted-foreground">{b.buyer_email || b.buyer_phone || '-'}</div>
+                                  <div className="text-[10px] text-muted-foreground">{b.buyer_phone || '-'}</div>
+                                  <div className="text-[10px] text-muted-foreground">{b.buyer_email || '-'}</div>
                                 </div>
                                 <div className="flex-1 space-y-1">
                                   {bLics.length === 0 ? (
@@ -751,7 +753,9 @@ export default function PartnerPortal() {
                                     return (
                                       <div key={lic.id} className="flex items-center gap-2">
                                         <span className={`font-mono text-[11px] ${revoked ? 'line-through text-muted-foreground' : ''}`}>{lic.coupon_code}</span>
-                                        <span className="text-[10px] text-muted-foreground">{lic.duration}{t({ ko: '개월', ja: 'か月', en: 'mo' })} · {lic.user_count}</span>
+                                        <span className="text-[10px] text-muted-foreground">
+                                          {t({ ko: '학생', ja: '生徒', en: 'Students' })} {lic.user_count ?? '-'} · {t({ ko: '기간', ja: '期間', en: 'Term' })} {lic.duration ?? '-'}{t({ ko: '개월', ja: 'か月', en: 'mo' })}
+                                        </span>
                                         {revoked ? (
                                           <span className="text-[10px] text-rose-700 bg-rose-50 rounded px-1.5 py-0.5">
                                             {t({ ko: '무효', ja: '無効', en: 'Revoked' })}{lic.revoke_reason ? ` · ${lic.revoke_reason}` : ''}
@@ -1007,16 +1011,9 @@ export default function PartnerPortal() {
                         <Input value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" />
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <span className="text-[10px] text-muted-foreground">{t({ ko: '학생 수', ja: '生徒数', en: 'Students' })}</span>
-                        <AmountInput value={b.student_count} onValueChange={(n) => updateBuyer(idx, 'student_count', n)} className="h-7 text-xs" />
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-muted-foreground">{t({ ko: '이용개월', ja: '利用月数', en: 'Months' })}</span>
-                        <Input type="number" value={b.month_count} onChange={e => updateBuyer(idx, 'month_count', parseInt(e.target.value) || '')} placeholder="12" className="h-7 text-xs" />
-                      </div>
-                    </div>
+                    {/* 학생 수·이용기간은 구매자가 아니라 '이용권'의 값이다.
+                        발급 화면에서 입력받고, 발급된 이용권에 표시한다.
+                        (구매자 = 누구인가 / 이용권 = 무엇을 샀는가) */}
 
                     {/* 이 구매자에게 발급된 이용권 — 저장된 구매자만 (신규는 저장 후 발급) */}
                     {canIssueLicenses && b.id && (() => {
@@ -1035,8 +1032,11 @@ export default function PartnerPortal() {
                           ) : bLics.map(lic => {
                             const revoked = lic.status === 'revoked';
                             return (
-                              <div key={lic.id} className="flex items-center gap-2">
+                              <div key={lic.id} className="flex items-center gap-2 flex-wrap">
                                 <span className={`font-mono text-[11px] ${revoked ? 'line-through text-muted-foreground' : ''}`}>{lic.coupon_code}</span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {t({ ko: '학생', ja: '生徒', en: 'Students' })} {lic.user_count ?? '-'} · {t({ ko: '기간', ja: '期間', en: 'Term' })} {lic.duration ?? '-'}{t({ ko: '개월', ja: 'か月', en: 'mo' })}
+                                </span>
                                 {revoked ? (
                                   <span className="text-[10px] text-rose-700 bg-rose-50 rounded px-1.5 py-0.5">{t({ ko: '무효', ja: '無効', en: 'Revoked' })}</span>
                                 ) : (
