@@ -20,7 +20,7 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password.trim()) {
-      toast.error('이메일과 비밀번호를 입력해 주세요.');
+      toast.error('Please enter your email and password.');
       return;
     }
     setLoading(true);
@@ -28,7 +28,7 @@ export default function Login() {
       await signIn(email.trim(), password);
       navigate('/', { replace: true });
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : '로그인에 실패했습니다.');
+      toast.error(err instanceof Error ? err.message : 'Sign-in failed.');
     } finally {
       setLoading(false);
     }
@@ -43,14 +43,14 @@ export default function Login() {
             Seamspace
             <span className="text-muted-foreground font-normal ml-1.5">GTM CRM</span>
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">계정에 로그인하세요</p>
+          <p className="text-sm text-muted-foreground mt-1">Sign in to your account</p>
         </div>
 
         {/* Login Card */}
         <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="email">이메일</Label>
+              <Label htmlFor="email">Email</Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -67,13 +67,13 @@ export default function Login() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="password">비밀번호</Label>
+              <Label htmlFor="password">Password</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
-                  placeholder="비밀번호를 입력하세요"
+                  placeholder="Enter your password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-9 pr-9"
@@ -92,7 +92,7 @@ export default function Login() {
             </div>
 
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? '로그인 중...' : '로그인'}
+              {loading ? 'Signing in...' : 'Sign in'}
             </Button>
           </form>
 
@@ -103,15 +103,15 @@ export default function Login() {
               onClick={() => setShowResetInfo((v) => !v)}
               className="text-sm text-muted-foreground hover:text-foreground underline-offset-4 hover:underline transition-colors"
             >
-              비밀번호 찾기
+              Forgot password?
             </button>
           </div>
 
           {showResetInfo && (
             <div className="mt-3 rounded-lg bg-muted/60 border border-border px-4 py-3 text-sm text-muted-foreground text-center">
-              비밀번호 초기화는 <span className="font-medium text-foreground">관리자에게 문의하세요.</span>
+              For a password reset, <span className="font-medium text-foreground">please contact your administrator.</span>
               <br />
-              <span className="text-xs">관리자가 임시 비밀번호를 발급해 드립니다.</span>
+              <span className="text-xs">They will issue you a temporary password.</span>
             </div>
           )}
         </div>

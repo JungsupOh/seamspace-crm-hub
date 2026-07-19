@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
-import type { PartnerLocale } from '@/lib/partner-i18n';
+import { makeT, type PartnerLocale } from '@/lib/partner-i18n';
 
 export type UserRole = 'admin' | 'sub_admin' | 'guest' | 'partner';
 export type UserStatus = 'invite_failed' | 'invited' | 'active' | 'inactive';
@@ -158,8 +158,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = async (email: string, password: string) => {
     const { error, data } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
+      // 로그인 전에는 사용자의 언어를 알 수 없으므로 로그인 화면 문구는 영어로 통일한다.
       if (error.message.includes('Invalid login credentials')) {
-        throw new Error('이메일 또는 비밀번호가 올바르지 않습니다.');
+        throw new Error('Incorrect email or password.');
       }
       throw new Error(error.message);
     }
@@ -168,7 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const profile = await fetchProfile(data.user.id);
       if (profile?.status === 'inactive') {
         await supabase.auth.signOut();
-        throw new Error('비활성화된 계정입니다. 관리자에게 문의하세요.');
+        throw new Error('This account is deactivated. Please contact your administrator.');
       }
     }
   };
@@ -187,7 +188,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: currentUser.email,
         password: currentPassword,
       });
-      if (verifyError) throw new Error('현재 비밀번호가 올바르지 않습니다.');
+      // 이 시점엔 로그인 상태라 파트너 언어를 알 수 있다 (비밀번호 변경 화면과 동일 언어)
+      if (verifyError) throw new Error(makeT((partnerOptions?.locale as PartnerLocale) ?? 'ko')({
+        ko: '현재 비밀번호가 올바르지 않습니다.',
+        ja: '現在のパスワードが正しくありません。',
+        en: 'Your current password is incorrect.',
+      }));
     }
 
     const { error } = await supabase.auth.updateUser({ password: newPassword });
