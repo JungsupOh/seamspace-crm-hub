@@ -180,6 +180,16 @@ export async function revokeLicense(lic: PartnerLicense, reason?: string): Promi
   });
 }
 
+/** 이용권을 특정 구매자에 귀속 (구매자 지정 이전에 발급된 건 정리용) */
+export async function setLicenseBuyer(licenseId: string, buyerId: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}?id=eq.${licenseId}`, {
+    method: 'PATCH',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    body: JSON.stringify({ partner_deal_buyer_id: buyerId }),
+  });
+  if (!res.ok) throw new Error(`구매자 연결 실패 (${res.status})`);
+}
+
 /** 발급된 이용권 이메일 재발송 */
 export async function resendLicenseEmail(lic: PartnerLicense, partnerName?: string, locale?: string, partnerEmail?: string): Promise<void> {
   const t = makeT((locale ?? 'ko') as PartnerLocale);

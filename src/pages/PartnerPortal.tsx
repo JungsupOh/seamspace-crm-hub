@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AmountInput } from '@/components/AmountInput';
 import { LocalizedDateInput } from '@/components/LocalizedDateInput';
 import { makeT, formatMoney, currencyUnit, formatIntlPhone } from '@/lib/partner-i18n';
-import { issueLicense, getPartnerLicenses, resendLicenseEmail, revokeLicense, type PartnerLicense } from '@/lib/partner-licenses';
+import { issueLicense, getPartnerLicenses, resendLicenseEmail, revokeLicense, setLicenseBuyer, type PartnerLicense } from '@/lib/partner-licenses';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -492,6 +492,22 @@ export default function PartnerPortal() {
           : t({ ko: `이용권 발급됨 · 이메일 발송 실패 (${res.coupon_code})`, ja: `ライセンス発行済み・メール送信失敗 (${res.coupon_code})`, en: `License issued, email failed (${res.coupon_code})` }),
       );
       getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
+
+      // 구매자를 기준으로 발급했으면 그 구매자 정보를 발급 내용과 일치시킨다.
+      // (구매자 이메일이 비어 있는데 이용권만 다른 주소로 나가 서로 어긋나던 문제)
+      const bId = issueForm.partnerDealBuyerId;
+      const dealId = issueForm.partnerDealId;
+      if (bId && dealId) {
+        const target = (dealBuyersMap[dealId] ?? []).find(b => b.id === bId);
+        const patch: Record<string, unknown> = {};
+        if (!target?.buyer_email && issueForm.contactEmail.trim()) patch.buyer_email = issueForm.contactEmail.trim();
+        if (!target?.buyer_phone && issueForm.contactPhone.trim()) patch.buyer_phone = issueForm.contactPhone.trim();
+        if (Object.keys(patch).length > 0) {
+          await updateDealBuyer(bId, patch).catch(() => {});
+          const refreshed = await getDealBuyers(dealId).catch(() => null);
+          if (refreshed) setDealBuyersMap(prev => ({ ...prev, [dealId]: refreshed }));
+        }
+      }
     } catch (e) {
       toast.error(`${t({ ko: '발급 실패', ja: '発行に失敗しました', en: 'Issue failed' })}: ${e instanceof Error ? e.message : String(e)}`);
     } finally { setIssuing(false); }
@@ -521,6 +537,17 @@ export default function PartnerPortal() {
     setIssuePromptDeal(deal);
     setIssuePromptBuyers(pending);
     setIssuePromptOpen(true);
+  };
+
+  /** 구매자 미연결 이용권을 특정 구매자에 귀속시킨다 (과거 발급분 정리용) */
+  const linkLicenseToBuyer = async (lic: PartnerLicense, buyerId: string) => {
+    try {
+      await setLicenseBuyer(lic.id, buyerId);
+      toast.success(t({ ko: '구매자에 연결했습니다', ja: '購入者に紐づけました', en: 'Linked to buyer' }));
+      if (partner?.id) getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
+    } catch (e) {
+      toast.error(`${t({ ko: '연결 실패', ja: '紐づけに失敗しました', en: 'Link failed' })}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
 
   const askRevoke = (lic: PartnerLicense) => {
@@ -1033,6 +1060,43 @@ export default function PartnerPortal() {
                     })()}
                   </div>
                 ))}
+
+                {/* 구매자에 연결되지 않은 이용권 — 구매자 지정 기능 이전에 발급된 건.
+                    여기 안 띄우면 팝업에서 아예 보이지 않아 코드가 사라진 것처럼 보인다. */}
+                {canIssueLicenses && editingDealId && (() => {
+                  const orphans = licenses.filter(l => l.partner_deal_id === editingDealId && !l.partner_deal_buyer_id);
+                  if (orphans.length === 0) return null;
+                  return (
+                    <div className="border border-amber-200 bg-amber-50/50 rounded-md p-2.5 space-y-1.5">
+                      <span className="text-[10px] text-amber-700 flex items-center gap-1">
+                        <Ticket className="h-3 w-3" />
+                        {t({ ko: '구매자에 연결되지 않은 이용권', ja: '購入者に紐づいていないライセンス', en: 'Licenses not linked to a buyer' })}
+                      </span>
+                      {orphans.map(lic => (
+                        <div key={lic.id} className="flex items-center gap-2 flex-wrap">
+                          <span className={`font-mono text-[11px] ${lic.status === 'revoked' ? 'line-through text-muted-foreground' : ''}`}>{lic.coupon_code}</span>
+                          <span className="text-[10px] text-muted-foreground">{lic.contact_email}</span>
+                          {lic.status !== 'revoked' && (
+                            <>
+                              <select
+                                value=""
+                                onChange={e => e.target.value && linkLicenseToBuyer(lic, e.target.value)}
+                                className="h-6 rounded border border-border bg-background px-1 text-[10px]">
+                                <option value="">{t({ ko: '구매자 연결...', ja: '購入者に紐づけ...', en: 'Link to buyer...' })}</option>
+                                {buyers.filter(b => b.id).map(b => (
+                                  <option key={b.id} value={b.id}>{b.buyer_name || b.buyer_email || b.id}</option>
+                                ))}
+                              </select>
+                              <button onClick={() => copyCode(lic.coupon_code)} className="p-0.5 rounded hover:bg-muted text-muted-foreground"><Copy className="h-3 w-3" /></button>
+                              <button onClick={() => handleResend(lic)} className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Send className="h-3 w-3" /></button>
+                              <button onClick={() => askRevoke(lic)} className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Ban className="h-3 w-3" /></button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
