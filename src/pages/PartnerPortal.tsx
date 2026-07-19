@@ -673,7 +673,10 @@ export default function PartnerPortal() {
             {/* 계약일 */}
             <div>
               <Label className="text-xs">{t({ ko: '계약일', ja: '契約日', en: 'Contract date' })}</Label>
-              <Input type="date" value={(addForm.contract_date as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, contract_date: e.target.value }))} className="h-8 text-sm" />
+              {/* type=date의 'yyyy/mm/dd' 안내 문구는 브라우저가 그린다.
+                  기본값은 브라우저 언어라 한국어 브라우저에서 열면 '연도. 월. 일.'로 보이므로,
+                  파트너 언어를 lang으로 지정해 표시 형식을 화면 언어와 맞춘다. */}
+              <Input type="date" lang={partnerLocale} value={(addForm.contract_date as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, contract_date: e.target.value }))} className="h-8 text-sm" />
             </div>
 
             {/* 학교명 — 국내는 NEIS 검색, 해외는 자유입력 */}
