@@ -56,6 +56,7 @@ export interface IssueLicenseInput {
   userCount: string;           // 인원
   amount?: number | null;
   partnerName?: string;        // 이메일 서명 표기용
+  partnerEmail?: string;       // 고객 메일의 문의처/회신처/참조 (파트너 직접 발급)
   locale?: string;             // 파트너 설정 언어 — 고객 메일/오류 메시지 언어
 }
 
@@ -121,6 +122,7 @@ export async function issueLicense(input: IssueLicenseInput): Promise<{ coupon_c
       durationMonths: Number(input.duration) || 12,
       userLimit:      Number(input.userCount) || 40,
       partnerName:    input.partnerName,
+      partnerEmail:   input.partnerEmail,
       locale:         input.locale,
     });
     emailSent = true;
@@ -179,7 +181,7 @@ export async function revokeLicense(lic: PartnerLicense, reason?: string): Promi
 }
 
 /** 발급된 이용권 이메일 재발송 */
-export async function resendLicenseEmail(lic: PartnerLicense, partnerName?: string, locale?: string): Promise<void> {
+export async function resendLicenseEmail(lic: PartnerLicense, partnerName?: string, locale?: string, partnerEmail?: string): Promise<void> {
   const t = makeT((locale ?? 'ko') as PartnerLocale);
   if (!lic.contact_email) throw new Error(t({
     ko: '발송할 이메일이 없습니다',
@@ -194,6 +196,7 @@ export async function resendLicenseEmail(lic: PartnerLicense, partnerName?: stri
     durationMonths: Number(lic.duration) || 12,
     userLimit:      Number(lic.user_count) || 40,
     partnerName,
+    partnerEmail,
     locale,
   });
   await fetch(`${BASE_URL}?id=eq.${lic.id}`, {

@@ -676,12 +676,20 @@ export async function sendPurchaseLicenseEmail(params: {
   durationMonths: number;
   userLimit: number;
   partnerName?: string;      // 발송 파트너명 (표기용)
+  partnerEmail?: string;     // 파트너가 직접 발급한 경우 문의처/회신처/참조
   cc?: string | null;        // 추가 cc (기본 sales@에 더해짐), null이면 cc 없음
   locale?: string;           // 'ko' | 'ja' | 그 외는 영어
 }): Promise<void> {
   const months = Math.max(1, Math.round(params.durationMonths));
   const locale = params.locale ?? 'en';
-  const signature = `${params.partnerName ? `${params.partnerName} · ` : ''}Tebahsoft Inc.`;
+
+  // 파트너가 직접 발급한 건은 고객의 창구가 파트너다 —
+  // 서명·문의처·회신처를 파트너로 두고, 파트너도 참조로 받아 문의에 대응할 수 있게 한다.
+  const viaPartner = !!params.partnerEmail?.trim();
+  const contactEmail = viaPartner ? params.partnerEmail!.trim() : 'contact@tebahsoft.com';
+  const signature = viaPartner
+    ? (params.partnerName || 'Seamspace Partner')
+    : `${params.partnerName ? `${params.partnerName} · ` : ''}Tebahsoft Inc.`;
 
   const guide = {
     ko: { path: '/docs/Quick%20Guide_How%20To%20Start%20(KR).pdf', filename: 'seamspace_QuickGuide_KR.pdf' },
@@ -757,7 +765,7 @@ export async function sendPurchaseLicenseEmail(params: {
 
     <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">${t.askLine}</p>
     <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
-      ${t.contactLabel}: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+      ${t.contactLabel}: <a href="mailto:${contactEmail}" style="color:#6366f1;text-decoration:none;">${contactEmail}</a>
     </p>
 
     <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
@@ -778,7 +786,7 @@ export async function sendPurchaseLicenseEmail(params: {
     ``,
     stripTags(t.howBody),
     ``,
-    `${t.contactLabel}: contact@tebahsoft.com`,
+    `${t.contactLabel}: ${contactEmail}`,
     signature,
   ].join('\n');
 
@@ -807,9 +815,14 @@ export async function sendPurchaseLicenseEmail(params: {
     html,
     {
       text,
-      reply_to: 'contact@tebahsoft.com',
+      reply_to: contactEmail,
       attachments,
-      cc: params.cc === null ? null : (params.cc?.trim() ? [DEFAULT_CC, params.cc.trim()] : undefined),
+      // 기본 sales@ + (파트너 발급이면) 파트너 + 추가 cc
+      cc: params.cc === null ? null : [
+        DEFAULT_CC,
+        ...(viaPartner ? [contactEmail] : []),
+        ...(params.cc?.trim() ? [params.cc.trim()] : []),
+      ],
     },
   );
 }

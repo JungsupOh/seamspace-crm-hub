@@ -482,6 +482,7 @@ export default function PartnerPortal() {
         userCount: String(issueForm.userCount),
         amount: issueForm.amount === '' ? null : Number(issueForm.amount),
         partnerName: partner.name,
+        partnerEmail: partner.contact_email ?? undefined,
         locale: partnerLocale,
       });
       setIssuedCode(res.coupon_code);
@@ -498,7 +499,7 @@ export default function PartnerPortal() {
 
   const handleResend = async (lic: PartnerLicense) => {
     try {
-      await resendLicenseEmail(lic, partner?.name, partnerLocale);
+      await resendLicenseEmail(lic, partner?.name, partnerLocale, partner?.contact_email ?? undefined);
       toast.success(t({ ko: '재발송 완료', ja: '再送信完了', en: 'Resent' }));
       if (partner?.id) getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
     } catch (e) {
