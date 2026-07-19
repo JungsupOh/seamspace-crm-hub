@@ -11,8 +11,7 @@ ALTER TABLE partners
   ADD COLUMN IF NOT EXISTS currency           TEXT    NOT NULL DEFAULT 'KRW',
   ADD COLUMN IF NOT EXISTS country            TEXT    NOT NULL DEFAULT 'KR';
 
--- 튀르키예 파트너 seed (이미 있으면 옵션만 갱신, 없으면 생성)
--- ※ 실제 파트너명이 다르면 아래 name을 맞춰 수정
-INSERT INTO partners (name, can_issue_licenses, locale, currency, country)
-VALUES ('Türkiye Partner', true, 'en', 'USD', 'TR')
-ON CONFLICT DO NOTHING;
+-- ※ 파트너 레코드는 SQL seed로 만들지 않는다.
+--    해외 파트너도 국내와 동일하게 관리자 화면(파트너 등록 → 초대)으로 생성하고,
+--    위 옵션 컬럼만 등록 폼에서 켜 준다. (seed INSERT는 partners에 name 유니크 제약이
+--    없어 재실행 시 동일 파트너가 중복 생성되는 문제가 있어 제거함)

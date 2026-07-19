@@ -73,7 +73,7 @@ const emptyIssueForm = (): IssueForm => ({
 });
 
 export default function PartnerPortal() {
-  const { userProfile, partnerLocale, partnerCurrency, canIssueLicenses } = useAuth();
+  const { userProfile, partnerLocale, partnerCurrency, partnerCountry, canIssueLicenses } = useAuth();
   const isIntl = partnerLocale !== 'ko';
   const t = makeT(partnerLocale);
   const curUnit = currencyUnit(partnerCurrency);
@@ -336,7 +336,7 @@ export default function PartnerPortal() {
         items: items.map(it => ({ plan: it.plan, duration: it.duration, qty: it.qty, unit_price: it.unit_price, amount: it.amount })),
         remarks: addForm.remarks || null,
         // 해외 파트너 딜 표시(통화/국가). 국내는 기본값(KRW/KR).
-        ...(isIntl ? { currency: partnerCurrency, country: 'TR' } : {}),
+        ...(isIntl ? { currency: partnerCurrency, country: partnerCountry } : {}),
       };
       const buyerRows = validBuyers.map(b => ({
         buyer_name: b.buyer_name || undefined,

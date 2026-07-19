@@ -34,6 +34,7 @@ import { PARTNER_PLAN_LIST, getUnitPrice, getS2BNumber, type QuoteLineItem } fro
 const PARTNER_DURATION_OPTIONS = [1, 4, 6, 12];
 import { supabase } from '@/lib/supabase';
 import { notifyPartnerDeal } from '@/lib/telegram';
+import { PARTNER_COUNTRIES, PARTNER_LOCALES, PARTNER_CURRENCIES, defaultsForCountry } from '@/lib/partner-i18n';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -62,11 +63,11 @@ interface Partner {
   commission_rate: number | null;
   notes: string | null;
   status: 'active' | 'inactive';
-  // 해외 파트너 옵션
+  // 해외 파트너 옵션 (목록은 @/lib/partner-i18n 참조)
   can_issue_licenses: boolean | null;
-  locale: string | null;      // 'ko' | 'en' | 'tr'
-  currency: string | null;    // 'KRW' | 'USD'
-  country: string | null;     // 'KR' | 'TR'
+  locale: string | null;      // PartnerLocale — 'ko' | 'ja' | 'en'
+  currency: string | null;    // PartnerCurrency — 'KRW' | 'JPY' | 'USD'
+  country: string | null;     // PARTNER_COUNTRIES의 code — 'KR' | 'JP' | ...
   created_at: string;
 }
 
@@ -374,6 +375,12 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
   const [deleteFileTargetId, setDeleteFileTargetId] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
   const [partnerUsers, setPartnerUsers] = useState<Array<{ id: string; email: string; name: string | null; status: string; last_sign_in_at?: string }>>([]);
+  // 담당자 초대 폼 — 파트너 대표 연락처(contact_email)와 분리해 여러 명 초대 가능
+  const [inviteOpen, setInviteOpen]   = useState(false);
+  const [inviteName, setInviteName]   = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [deleteUserConfirmOpen, setDeleteUserConfirmOpen] = useState(false);
+  const [deleteUserTarget, setDeleteUserTarget] = useState<{ id: string; email: string } | null>(null);
 
   const refBizReg  = useRef<HTMLInputElement>(null);
   const refBank    = useRef<HTMLInputElement>(null);
@@ -394,16 +401,45 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
   }, [initial?.id]);
 
   // 파트너에 연결된 사용자 목록 로드
+  const loadPartnerUsers = useCallback(async (partnerId: string) => {
+    const { data } = await supabase
+      .from('user_profiles').select('id,email,name,status').eq('partner_id', partnerId);
+    setPartnerUsers(data ?? []);
+  }, []);
+
   useEffect(() => {
     if (!initial?.id) { setPartnerUsers([]); return; }
-    supabase.from('user_profiles').select('id,email,name,status').eq('partner_id', initial.id)
-      .then(({ data }) => setPartnerUsers(data ?? []))
-      .catch(() => setPartnerUsers([]));
-  }, [initial?.id]);
+    loadPartnerUsers(initial.id).catch(() => setPartnerUsers([]));
+  }, [initial?.id, loadPartnerUsers]);
 
-  const handleInvitePartner = async () => {
-    const email = f.contact_email?.trim();
-    if (!email) { toast.error('담당자 이메일을 입력해주세요'); return; }
+  /** admin-auth 엣지 함수 호출 (service-role 권한 필요한 계정 작업 공용) */
+  const adminAuthFetch = async (action: string, params: Record<string, unknown> = {}) => {
+    const session = (await supabase.auth.getSession()).data.session;
+    if (!session) throw new Error('로그인이 필요합니다.');
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-auth`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: SUPABASE_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ action, ...params }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Edge Function 호출 실패');
+    return data;
+  };
+
+  /**
+   * 담당자 초대 / 재발송.
+   * 파트너당 계정 수 제한 없음 — user_profiles.partner_id는 다대일이라 여러 명 연결 가능.
+   * 이미 있는 계정이면 비밀번호를 이번 초대코드로 재설정한다.
+   * (재설정하지 않으면 메일에 적힌 코드가 실제 비밀번호와 달라 로그인이 안 됨)
+   */
+  const inviteAccount = async (rawEmail: string, rawName: string) => {
+    const email = rawEmail.trim();
+    const name  = rawName.trim();
+    if (!email) { toast.error('초대할 담당자 이메일을 입력해주세요'); return; }
     if (!initial?.id) { toast.error('파트너를 먼저 저장하세요'); return; }
     setInviting(true);
     try {
@@ -411,50 +447,37 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
       const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
       const code = Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 
-      const session = (await supabase.auth.getSession()).data.session;
-      if (!session) throw new Error('로그인이 필요합니다.');
-
-      const edgeFetch = async (action: string, params: Record<string, unknown> = {}) => {
-        const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-auth`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            apikey: SUPABASE_KEY,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ action, ...params }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Edge Function 호출 실패');
-        return data;
-      };
-
       // Edge Function으로 사용자 생성
       let userId: string | null = null;
+      let existed = false;
       try {
-        const { user } = await edgeFetch('createUser', {
+        const { user } = await adminAuthFetch('createUser', {
           email, password: code,
-          user_metadata: { name: f.contact_name || email.split('@')[0], role: 'partner', partner_id: initial.id },
+          user_metadata: { name: name || email.split('@')[0], role: 'partner', partner_id: initial.id },
         });
         userId = user?.id ?? null;
       } catch (e) {
         // 이미 존재하는 경우 목록에서 ID 조회
         if ((e as Error).message?.includes('already')) {
-          const { users } = await edgeFetch('listUsers');
+          const { users } = await adminAuthFetch('listUsers');
           userId = users?.find((u: { email?: string }) => u.email === email)?.id ?? null;
+          existed = true;
         } else {
           throw e;
         }
       }
       if (!userId) throw new Error('사용자 생성에 실패했습니다');
 
+      // 기존 계정이면 비밀번호를 이번 초대코드로 맞춰준다 (신규는 생성 시 이미 설정됨)
+      if (existed) await adminAuthFetch('updateUser', { userId, password: code });
+
       // Edge Function으로 user_profiles 업데이트 (RLS 우회)
-      await edgeFetch('updateProfile', {
+      await adminAuthFetch('updateProfile', {
         userId,
         updates: {
           role: 'partner',
           partner_id: initial.id,
-          name: f.contact_name || null,
+          name: name || null,
           status: 'invited',
           is_first_login: true,
         },
@@ -462,16 +485,31 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
 
       // 초대 이메일 발송
       await sendInviteEmail({
-        to: email, name: f.contact_name || '', inviteCode: code,
+        to: email, name, inviteCode: code,
         role: 'partner', invitedBy: '심스페이스',
       });
-      toast.success(`${email}으로 파트너 초대를 발송했습니다`);
-      // 새로고침
-      const { data } = await supabase.from('user_profiles').select('id,email,name,status').eq('partner_id', initial.id);
-      setPartnerUsers(data ?? []);
+      toast.success(existed ? `${email}으로 초대를 재발송했습니다` : `${email}으로 파트너 초대를 발송했습니다`);
+      setInviteOpen(false);
+      setInviteName('');
+      setInviteEmail('');
+      await loadPartnerUsers(initial.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '초대 실패');
     } finally { setInviting(false); }
+  };
+
+  const confirmDeleteUser = async () => {
+    const target = deleteUserTarget;
+    setDeleteUserConfirmOpen(false);
+    setDeleteUserTarget(null);
+    if (!target || !initial?.id) return;
+    try {
+      await adminAuthFetch('deleteUser', { userId: target.id });
+      toast.success(`${target.email} 계정을 삭제했습니다`);
+      await loadPartnerUsers(initial.id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '계정 삭제 실패');
+    }
   };
 
   const n   = (k: keyof PartnerFields) => (f[k] as string) ?? '';
@@ -676,22 +714,32 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${f.can_issue_licenses ? 'translate-x-4' : 'translate-x-0.5'}`} />
               </button>
             </div>
+            {/* 국가 — 선택하면 언어/통화가 그 국가 기본값으로 따라옴 (아래에서 개별 변경 가능) */}
+            <div>
+              <Label className="text-xs">국가</Label>
+              <select
+                value={f.country ?? 'KR'}
+                onChange={e => {
+                  const code = e.target.value;
+                  const d = defaultsForCountry(code);
+                  setF(prev => ({ ...prev, country: code, locale: d.locale, currency: d.currency }));
+                }}
+                className="mt-1 h-8 w-full rounded-md border border-border bg-background px-2 text-sm">
+                {PARTNER_COUNTRIES.map(c => (
+                  <option key={c.code} value={c.code}>{c.label} ({c.code})</option>
+                ))}
+              </select>
+            </div>
             {/* 언어 */}
             <div>
               <Label className="text-xs">포털 언어</Label>
               <div className="grid grid-cols-3 gap-2 mt-1">
-                {(['ko', 'en', 'tr'] as const).map(loc => (
-                  <button key={loc} type="button"
-                    onClick={() => setF(prev => ({
-                      ...prev,
-                      locale: loc,
-                      // 언어에 맞춰 통화/국가 기본값 보정 (수동 변경 가능)
-                      currency: loc === 'ko' ? 'KRW' : (prev.currency && prev.currency !== 'KRW' ? prev.currency : 'USD'),
-                      country: loc === 'ko' ? 'KR' : (prev.country && prev.country !== 'KR' ? prev.country : 'TR'),
-                    }))}
-                    className={`h-8 text-sm rounded-md border transition-colors uppercase
-                      ${(f.locale ?? 'ko') === loc ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
-                    {loc}
+                {PARTNER_LOCALES.map(({ code, label }) => (
+                  <button key={code} type="button"
+                    onClick={() => setF(prev => ({ ...prev, locale: code }))}
+                    className={`h-8 text-sm rounded-md border transition-colors
+                      ${(f.locale ?? 'ko') === code ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
+                    {label}
                   </button>
                 ))}
               </div>
@@ -699,8 +747,8 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
             {/* 통화 */}
             <div>
               <Label className="text-xs">통화</Label>
-              <div className="grid grid-cols-2 gap-2 mt-1">
-                {(['KRW', 'USD'] as const).map(cur => (
+              <div className="grid grid-cols-3 gap-2 mt-1">
+                {PARTNER_CURRENCIES.map(cur => (
                   <button key={cur} type="button"
                     onClick={() => setF(prev => ({ ...prev, currency: cur }))}
                     className={`h-8 text-sm rounded-md border transition-colors
@@ -734,27 +782,87 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">파트너 계정</span>
-                  {canEdit && (
-                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleInvitePartner} disabled={inviting || !n('contact_email')}>
-                      {inviting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <UserPlus className="h-3 w-3 mr-1" />}
+                  {canEdit && !inviteOpen && (
+                    <Button size="sm" variant="outline" className="h-7 text-xs"
+                      onClick={() => {
+                        // 대표 연락처를 기본값으로 채우되, 자유롭게 바꿔 다른 담당자를 추가할 수 있다
+                        setInviteName(n('contact_name'));
+                        setInviteEmail(n('contact_email'));
+                        setInviteOpen(true);
+                      }}>
+                      <UserPlus className="h-3 w-3 mr-1" />
                       담당자 초대
                     </Button>
                   )}
                 </div>
+
+                {/* 초대 폼 — 누르는 즉시 발송되지 않고, 이름/이메일 확인 후 발송 */}
+                {canEdit && inviteOpen && (
+                  <div className="space-y-2 rounded-md border border-border p-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs">담당자 이름</Label>
+                        <Input value={inviteName} onChange={e => setInviteName(e.target.value)}
+                          className="mt-1 h-8 text-sm" placeholder="예: 홍길동" />
+                      </div>
+                      <div>
+                        <Label className="text-xs">이메일 *</Label>
+                        <Input value={inviteEmail} onChange={e => setInviteEmail(e.target.value)}
+                          className="mt-1 h-8 text-sm" placeholder="login@example.com" />
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      초대 코드가 이메일로 발송되며, 첫 로그인 시 비밀번호를 새로 설정합니다.
+                    </p>
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="ghost" className="h-7 text-xs"
+                        onClick={() => { setInviteOpen(false); setInviteName(''); setInviteEmail(''); }}
+                        disabled={inviting}>
+                        취소
+                      </Button>
+                      <Button size="sm" className="h-7 text-xs"
+                        onClick={() => inviteAccount(inviteEmail, inviteName)}
+                        disabled={inviting || !inviteEmail.trim()}>
+                        {inviting && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                        초대 발송
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 {partnerUsers.length > 0 ? (
                   <div className="space-y-1">
                     {partnerUsers.map(u => (
-                      <div key={u.id} className="flex items-center justify-between px-3 py-1.5 rounded-md bg-muted/30 text-xs">
-                        <div>
+                      <div key={u.id} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-md bg-muted/30 text-xs">
+                        <div className="min-w-0">
                           <span className="font-medium">{u.name || u.email}</span>
                           <span className="text-muted-foreground ml-2">{u.email}</span>
                         </div>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium
-                          ${u.status === 'active' ? 'bg-teal-100 text-teal-700'
-                            : u.status === 'invited' ? 'bg-blue-100 text-blue-700'
-                            : 'bg-slate-100 text-slate-500'}`}>
-                          {u.status === 'active' ? '활성' : u.status === 'invited' ? '초대됨' : u.status}
-                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium
+                            ${u.status === 'active' ? 'bg-teal-100 text-teal-700'
+                              : u.status === 'invited' ? 'bg-blue-100 text-blue-700'
+                              : 'bg-slate-100 text-slate-500'}`}>
+                            {u.status === 'active' ? '활성' : u.status === 'invited' ? '초대됨' : u.status}
+                          </span>
+                          {canEdit && (
+                            <>
+                              <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[11px]"
+                                title="초대 코드를 새로 발급해 다시 보냅니다 (기존 비밀번호는 무효화됩니다)"
+                                onClick={() => inviteAccount(u.email, u.name ?? '')}
+                                disabled={inviting}>
+                                재발송
+                              </Button>
+                              <Button size="sm" variant="ghost"
+                                className="h-6 px-1.5 text-[11px] text-destructive hover:text-destructive"
+                                title="로그인 계정을 삭제합니다"
+                                onClick={() => { setDeleteUserTarget({ id: u.id, email: u.email }); setDeleteUserConfirmOpen(true); }}
+                                disabled={inviting}>
+                                삭제
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -908,6 +1016,23 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
           <AlertDialogFooter>
             <AlertDialogCancel>취소</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDeleteFile} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">삭제</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 파트너 계정 삭제 확인 */}
+      <AlertDialog open={deleteUserConfirmOpen} onOpenChange={setDeleteUserConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>파트너 계정 삭제</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{deleteUserTarget?.email}" 로그인 계정을 삭제합니다. 해당 담당자는 더 이상 포털에 로그인할 수 없습니다.
+              되돌릴 수 없으며, 다시 쓰려면 새로 초대해야 합니다. (파트너 정보와 딜 기록은 그대로 유지됩니다)
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteUser} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">삭제</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
