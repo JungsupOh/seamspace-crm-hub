@@ -16,6 +16,7 @@ import { searchSchools, type SchoolInfo } from '@/lib/neis';
 import { PARTNER_PLAN_LIST, DURATION_OPTIONS, getUnitPrice } from '@/lib/pricing';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AmountInput } from '@/components/AmountInput';
+import { LocalizedDateInput } from '@/components/LocalizedDateInput';
 import { makeT, formatMoney, currencyUnit, formatIntlPhone } from '@/lib/partner-i18n';
 import { issueLicense, getPartnerLicenses, resendLicenseEmail, type PartnerLicense } from '@/lib/partner-licenses';
 
@@ -673,10 +674,14 @@ export default function PartnerPortal() {
             {/* 계약일 */}
             <div>
               <Label className="text-xs">{t({ ko: '계약일', ja: '契約日', en: 'Contract date' })}</Label>
-              {/* type=date의 'yyyy/mm/dd' 안내 문구는 브라우저가 그린다.
-                  기본값은 브라우저 언어라 한국어 브라우저에서 열면 '연도. 월. 일.'로 보이므로,
-                  파트너 언어를 lang으로 지정해 표시 형식을 화면 언어와 맞춘다. */}
-              <Input type="date" lang={partnerLocale} value={(addForm.contract_date as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, contract_date: e.target.value }))} className="h-8 text-sm" />
+              {/* 네이티브 type=date는 달력 표기가 브라우저 UI 언어를 따르고 lang으로 못 바꾼다.
+                  → 파트너 언어를 따르는 자체 달력 사용 (값은 동일하게 'YYYY-MM-DD') */}
+              <LocalizedDateInput
+                value={(addForm.contract_date as string) ?? ''}
+                onChange={v => setAddForm(p => ({ ...p, contract_date: v }))}
+                locale={partnerLocale}
+                className="mt-1"
+              />
             </div>
 
             {/* 학교명 — 국내는 NEIS 검색, 해외는 자유입력 */}
