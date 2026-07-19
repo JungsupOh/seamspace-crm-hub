@@ -99,16 +99,16 @@ Deno.serve(async (req: Request) => {
     if (!contactEmail) return json({ error: '이메일(발송 대상)이 필요합니다' }, 400);
 
     // ── 4) 쿠폰 생성 (create-coupon, service-role) ──
-    // 쿠폰 관리자 화면의 DESCRIPT 표기는 국내 발급과 같은 규칙을 따른다.
-    //   국내: [기관] [학교(중복 제외)] [수신자] 구매이용권
-    //   해외: 앞에 파트너명을 붙여 어느 파트너가 발급했는지 바로 구분되게 한다.
-    // 기간/인원은 DURATION·USER LIMIT 컬럼에 따로 있으므로 설명에 넣지 않는다.
+    // 쿠폰 관리자 화면의 DESCRIPT 표기.
+    // 형식: [파트너명] {학교/기관} {구매자명} Purchase
+    //   - 대괄호로 파트너를 묶어 해외 파트너 발급 건임이 한눈에 구분되게 한다
+    //     (국내 발급은 '[기관] [학교] [수신자] 구매이용권' 형식)
+    //   - 기간/인원은 DURATION·USER LIMIT 컬럼에 따로 있으므로 설명에 넣지 않는다
     const descParts = [
-      partner.name,
       orgName && orgName !== partner.name ? orgName : null,
       customerName || null,
     ].filter(Boolean);
-    const description = `${descParts.join(' ')} 구매이용권`.trim();
+    const description = `[${partner.name}] ${descParts.join(' ')} Purchase`.replace(/\s+/g, ' ').trim();
     const couponRes = await fetch(`${SUPABASE_URL}/functions/v1/create-coupon`, {
       method: 'POST',
       headers: {
