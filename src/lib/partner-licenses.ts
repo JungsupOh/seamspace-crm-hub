@@ -6,7 +6,7 @@
 import { supabase } from '@/lib/supabase';
 import { sendPurchaseLicenseEmail } from '@/lib/email';
 import { makeT, type PartnerLocale } from '@/lib/partner-i18n';
-import { notifyPartnerLicenseEmailFailed } from '@/lib/telegram';
+import { notifyPartnerLicenseEmailFailed, notifyPartnerLicenseRevoked } from '@/lib/telegram';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -37,6 +37,9 @@ export interface PartnerLicense {
   service_expire_at?: string | null;
   issued_by?: string | null;
   created_at: string;
+  revoked_at?: string | null;
+  revoked_by?: string | null;
+  revoke_reason?: string | null;
 }
 
 export interface IssueLicenseInput {
@@ -139,6 +142,37 @@ export async function issueLicense(input: IssueLicenseInput): Promise<{ coupon_c
   }
 
   return { coupon_code: data.coupon_code, license_id: data.license_id ?? null, email_sent: emailSent };
+}
+
+/**
+ * 이용권 무효화.
+ *
+ * ⚠️ 현재는 CRM 원장에만 무효 표시가 된다. mDiary 쪽에 쿠폰 무효화 API가 아직 없어
+ * 실제 코드 사용 차단은 불가하다(백엔드팀 요청 대기 중). API가 생기면 이 함수에서
+ * 해당 엔드포인트를 호출하는 단계만 추가하면 된다.
+ * 원장 행은 지우지 않는다 — 정산 근거와 발급 이력을 보존해야 하기 때문.
+ */
+export async function revokeLicense(lic: PartnerLicense, reason?: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const res = await fetch(`${BASE_URL}?id=eq.${lic.id}`, {
+    method: 'PATCH',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      status: 'revoked',
+      revoked_at: new Date().toISOString(),
+      revoked_by: user?.id ?? null,
+      revoke_reason: reason || null,
+    }),
+  });
+  if (!res.ok) throw new Error(`무효화 실패 (${res.status})`);
+
+  notifyPartnerLicenseRevoked({
+    orgName:      lic.org_name ?? undefined,
+    contactName:  lic.contact_name ?? undefined,
+    contactEmail: lic.contact_email ?? '',
+    couponCode:   lic.coupon_code,
+    reason,
+  });
 }
 
 /** 발급된 이용권 이메일 재발송 */

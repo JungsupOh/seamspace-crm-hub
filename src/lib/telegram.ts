@@ -78,6 +78,25 @@ export function notifyPartnerLicenseEmailFailed(params: {
   );
 }
 
+// ── 파트너 이용권 무효화 알림 ───────────────────────────
+// 실제 코드 차단은 mDiary 무효화 API 연동 전까지 불가하므로, 관리자가 수동 조치할 수 있도록 통보한다.
+export function notifyPartnerLicenseRevoked(params: {
+  orgName?: string;
+  contactName?: string;
+  contactEmail: string;
+  couponCode: string;
+  reason?: string;
+}): void {
+  sendTelegramNotification(
+    `🚫 <b>파트너 이용권 무효화</b>\n\n` +
+    `🏫 ${params.orgName || '(미입력)'}\n` +
+    `👤 ${params.contactName || '(미입력)'} / ${params.contactEmail}\n` +
+    `🎟 ${params.couponCode}` +
+    (params.reason ? `\n📄 사유: ${params.reason}` : '') +
+    `\n\n❗ CRM 원장에만 무효 표시됨 — mDiary 쪽 차단은 별도 조치가 필요합니다.`
+  );
+}
+
 // ── 캠페인 리드 유입 알림 ──────────────────────────────
 export function notifyCampaignLead(params: {
   campaignName: string;
