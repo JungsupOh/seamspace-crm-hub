@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Plus, Pencil, Trash2, Loader2, Search, X, Users, Package, Ticket, Copy, Send, Ban, ChevronDown, ChevronUp } from 'lucide-react';
-import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, createDealBuyers, getDealBuyers, deleteDealBuyers } from '@/lib/partner-deals';
+import { getPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, createDealBuyers, getDealBuyers, deleteDealBuyers, deleteDealBuyersByIds, updateDealBuyer } from '@/lib/partner-deals';
 import { notifyPartnerDeal } from '@/lib/telegram';
 import type { PartnerDeal, PartnerDealBuyer } from '@/lib/partner-deals';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
@@ -32,6 +32,7 @@ interface PartnerInfo {
 }
 
 interface BuyerInput {
+  id?: string;            // 기존 구매자면 유지 — 이용권 연결(partner_deal_buyer_id) 보존용
   buyer_name: string;
   buyer_phone: string;
   buyer_email: string;
@@ -113,6 +114,10 @@ export default function PartnerPortal() {
     if (n.has(id)) n.delete(id); else n.add(id);
     return n;
   });
+  // 딜 저장 직후 "이용권을 발급할까요?" 질의
+  const [issuePromptOpen, setIssuePromptOpen] = useState(false);
+  const [issuePromptDeal, setIssuePromptDeal] = useState<PartnerDeal | null>(null);
+  const [issuePromptBuyers, setIssuePromptBuyers] = useState<PartnerDealBuyer[]>([]);
   const [revokeConfirmOpen, setRevokeConfirmOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<PartnerLicense | null>(null);
   const [revokeReason, setRevokeReason] = useState('');
@@ -267,6 +272,7 @@ export default function PartnerPortal() {
     const dbBuyers = dealBuyersMap[deal.id] ?? [];
     const formBuyers: BuyerInput[] = dbBuyers.length > 0
       ? dbBuyers.map(b => ({
+          id: b.id,
           buyer_name: b.buyer_name ?? '',
           buyer_phone: b.buyer_phone ?? '',
           buyer_email: b.buyer_email ?? '',
@@ -365,13 +371,26 @@ export default function PartnerPortal() {
       if (editingDealId) {
         // ── 수정 ──
         await updatePartnerDeal(editingDealId, dealFields);
-        // 구매자는 전량 교체 (삭제 후 재생성)
-        await deleteDealBuyers(editingDealId);
-        const newBuyers = await createDealBuyers(editingDealId, buyerRows);
+        // 구매자는 id를 유지한 채 갱신한다.
+        // 전량 삭제 후 재생성하면 id가 바뀌어 그 구매자에게 발급된 이용권 연결이 끊긴다.
+        const keptIds = validBuyers.map(b => b.id).filter(Boolean) as string[];
+        const removedIds = (dealBuyersMap[editingDealId] ?? [])
+          .map(b => b.id)
+          .filter(id => !keptIds.includes(id));
+        await deleteDealBuyersByIds(removedIds);
+        // validBuyers와 buyerRows는 같은 순서 — 인덱스로 짝지어 기존/신규를 가른다
+        await Promise.all(
+          validBuyers.map((b, i) => (b.id ? updateDealBuyer(b.id, buyerRows[i]) : null)).filter(Boolean),
+        );
+        const addedRows = buyerRows.filter((_, i) => !validBuyers[i].id);
+        if (addedRows.length > 0) await createDealBuyers(editingDealId, addedRows);
+        const refreshed = await getDealBuyers(editingDealId);
         setDeals(prev => prev.map(d => d.id === editingDealId ? { ...d, ...dealFields } as PartnerDeal : d));
-        setDealBuyersMap(prev => ({ ...prev, [editingDealId]: newBuyers }));
+        setDealBuyersMap(prev => ({ ...prev, [editingDealId]: refreshed }));
         setAddDialogOpen(false);
         toast.success(t({ ko: '수정되었습니다', ja: '修正されました', en: 'Updated' }));
+        const editedDeal = deals.find(dd => dd.id === editingDealId);
+        if (editedDeal) maybeAskIssue(editedDeal, refreshed);
         notifyPartnerDeal(partner.name, addForm.school_name ?? '', firstBuyer.buyer_name ?? '', totalAmount,
           { currency: partnerCurrency, country: partnerCountry, edited: true });
       } else {
@@ -386,6 +405,7 @@ export default function PartnerPortal() {
         setDealBuyersMap(prev => ({ ...prev, [created.id]: createdBuyers }));
         setAddDialogOpen(false);
         toast.success(t({ ko: '딜이 추가되었습니다', ja: '案件が追加されました', en: 'Deal added' }));
+        maybeAskIssue(created, createdBuyers);
         notifyPartnerDeal(partner.name, addForm.school_name ?? '', firstBuyer.buyer_name ?? '', totalAmount,
           { currency: partnerCurrency, country: partnerCountry });
       }
@@ -486,6 +506,22 @@ export default function PartnerPortal() {
     }
   };
 
+  /**
+   * 딜 저장 후, 아직 이용권이 없는 구매자가 있으면 발급 여부를 묻는다.
+   * 자동 발급은 하지 않는다 — 이메일이 실제로 나가는 되돌릴 수 없는 동작이라
+   * 딜만 먼저 등록해두려던 경우에 사고가 된다.
+   */
+  const maybeAskIssue = (deal: PartnerDeal, dealBuyers: PartnerDealBuyer[]) => {
+    if (!canIssueLicenses) return;
+    const pending = dealBuyers.filter(b => !licenses.some(
+      l => l.partner_deal_buyer_id === b.id && l.status !== 'revoked',
+    ));
+    if (pending.length === 0) return;
+    setIssuePromptDeal(deal);
+    setIssuePromptBuyers(pending);
+    setIssuePromptOpen(true);
+  };
+
   const askRevoke = (lic: PartnerLicense) => {
     setRevokeTarget(lic);
     setRevokeReason('');
@@ -565,12 +601,9 @@ export default function PartnerPortal() {
       </div>
 
       {/* 딜 추가 버튼 */}
+      {/* 이용권 발급은 항상 '구매자'에서 시작한다 (딜 펼치기 또는 딜 수정 화면).
+          여기 별도 발급 버튼을 두면 구매자와 무관한 이용권이 생겨 헷갈리므로 제거. */}
       <div className="flex justify-end gap-2">
-        {canIssueLicenses && (
-          <Button size="sm" variant="outline" onClick={() => openIssueDialog()}>
-            <Ticket className="h-4 w-4 mr-1.5" />{t({ ko: '이용권 발급', ja: 'ライセンス発行', en: 'Issue License' })}
-          </Button>
-        )}
         <Button size="sm" onClick={handleOpenAddDialog} disabled={adding}>
           <Plus className="h-4 w-4 mr-1.5" />{t({ ko: '딜 추가', ja: '案件追加', en: 'Add Deal' })}
         </Button>
@@ -682,10 +715,9 @@ export default function PartnerPortal() {
                                 </div>
                                 <div className="flex-1 space-y-1">
                                   {bLics.length === 0 ? (
-                                    <button onClick={() => openIssueDialog(d, b)}
-                                      className="inline-flex items-center gap-1 rounded border border-dashed border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:border-primary/50 hover:text-primary">
-                                      <Ticket className="h-3 w-3" />{t({ ko: '이용권 발급', ja: 'ライセンス発行', en: 'Issue license' })}
-                                    </button>
+                                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openIssueDialog(d, b)}>
+                                      <Ticket className="h-3.5 w-3.5 mr-1" />{t({ ko: '이용권 발급', ja: 'ライセンス発行', en: 'Issue license' })}
+                                    </Button>
                                   ) : bLics.map(lic => {
                                     const revoked = lic.status === 'revoked';
                                     return (
@@ -713,8 +745,9 @@ export default function PartnerPortal() {
                                     );
                                   })}
                                   {bLics.length > 0 && (
-                                    <button onClick={() => openIssueDialog(d, b)}
-                                      className="text-[10px] text-muted-foreground hover:text-primary">+ {t({ ko: '추가 발급', ja: '追加発行', en: 'Issue more' })}</button>
+                                    <Button size="sm" variant="outline" className="h-6 text-[11px] px-2" onClick={() => openIssueDialog(d, b)}>
+                                      <Plus className="h-3 w-3 mr-0.5" />{t({ ko: '추가 발급', ja: '追加発行', en: 'Issue more' })}
+                                    </Button>
                                   )}
                                 </div>
                               </div>
@@ -956,6 +989,47 @@ export default function PartnerPortal() {
                         <Input type="number" value={b.month_count} onChange={e => updateBuyer(idx, 'month_count', parseInt(e.target.value) || '')} placeholder="12" className="h-7 text-xs" />
                       </div>
                     </div>
+
+                    {/* 이 구매자에게 발급된 이용권 — 저장된 구매자만 (신규는 저장 후 발급) */}
+                    {canIssueLicenses && b.id && (() => {
+                      const bLics = licenses.filter(l => l.partner_deal_buyer_id === b.id);
+                      const deal = deals.find(dd => dd.id === editingDealId);
+                      return (
+                        <div className="mt-2 pt-2 border-t border-border/60 space-y-1">
+                          <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                            <Ticket className="h-3 w-3" />{t({ ko: '이용권', ja: 'ライセンス', en: 'License' })}
+                          </span>
+                          {bLics.length === 0 ? (
+                            <Button size="sm" variant="outline" className="h-6 text-[11px] px-2"
+                              onClick={() => deal && openIssueDialog(deal, { ...b, id: b.id } as unknown as PartnerDealBuyer)}>
+                              <Ticket className="h-3 w-3 mr-1" />{t({ ko: '이용권 발급', ja: 'ライセンス発行', en: 'Issue license' })}
+                            </Button>
+                          ) : bLics.map(lic => {
+                            const revoked = lic.status === 'revoked';
+                            return (
+                              <div key={lic.id} className="flex items-center gap-2">
+                                <span className={`font-mono text-[11px] ${revoked ? 'line-through text-muted-foreground' : ''}`}>{lic.coupon_code}</span>
+                                {revoked ? (
+                                  <span className="text-[10px] text-rose-700 bg-rose-50 rounded px-1.5 py-0.5">{t({ ko: '무효', ja: '無効', en: 'Revoked' })}</span>
+                                ) : (
+                                  <>
+                                    <span className={`text-[10px] rounded px-1.5 py-0.5 ${lic.email_sent ? 'text-teal-700 bg-teal-50' : 'text-amber-600 bg-amber-50'}`}>
+                                      {lic.email_sent ? t({ ko: '발송됨', ja: '送信済み', en: 'Sent' }) : t({ ko: '미발송', ja: '未送信', en: 'Not sent' })}
+                                    </span>
+                                    <button onClick={() => copyCode(lic.coupon_code)} title={t({ ko: '코드 복사', ja: 'コードをコピー', en: 'Copy code' })}
+                                      className="p-0.5 rounded hover:bg-muted text-muted-foreground"><Copy className="h-3 w-3" /></button>
+                                    <button onClick={() => handleResend(lic)} title={t({ ko: '이메일 재발송', ja: 'メール再送信', en: 'Resend email' })}
+                                      className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Send className="h-3 w-3" /></button>
+                                    <button onClick={() => askRevoke(lic)} title={t({ ko: '무효화', ja: '無効化', en: 'Revoke' })}
+                                      className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Ban className="h-3 w-3" /></button>
+                                  </>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
@@ -1055,6 +1129,35 @@ export default function PartnerPortal() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* 딜 저장 후 이용권 발급 질의 */}
+      <AlertDialog open={issuePromptOpen} onOpenChange={setIssuePromptOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t({ ko: '이용권을 발급할까요?', ja: 'ライセンスを発行しますか？', en: 'Issue licenses now?' })}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t({
+                ko: `아직 이용권이 없는 구매자가 ${issuePromptBuyers.length}명 있습니다. 지금 발급하면 고객 이메일로 이용권이 발송됩니다. 나중에 딜을 펼쳐서 발급할 수도 있습니다.`,
+                ja: `ライセンス未発行の購入者が ${issuePromptBuyers.length} 名います。今すぐ発行すると顧客のメールに送信されます。後で案件を展開して発行することもできます。`,
+                en: `${issuePromptBuyers.length} buyer(s) have no license yet. Issuing now emails the license to the customer. You can also do it later by expanding the deal.`,
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t({ ko: '나중에', ja: '後で', en: 'Later' })}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              const deal = issuePromptDeal;
+              const first = issuePromptBuyers[0];
+              if (deal) {
+                setExpandedDeals(prev => new Set(prev).add(deal.id));  // 남은 구매자도 바로 보이도록
+                if (first) openIssueDialog(deal, first);
+              }
+            }}>
+              {t({ ko: '발급하기', ja: '発行する', en: 'Issue' })}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 이용권 무효화 확인 */}
       <AlertDialog open={revokeConfirmOpen} onOpenChange={setRevokeConfirmOpen}>

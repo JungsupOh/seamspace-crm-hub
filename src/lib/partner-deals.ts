@@ -165,6 +165,34 @@ export async function createDealBuyers(
   return res.json();
 }
 
+/**
+ * 구매자 저장 — 기존 행은 id를 유지한 채 수정한다.
+ * 전량 삭제 후 재생성하면 구매자 id가 바뀌어, 그 구매자에 연결된 이용권
+ * (partner_licenses.partner_deal_buyer_id)이 ON DELETE SET NULL로 끊긴다.
+ */
+export async function updateDealBuyer(
+  id: string,
+  fields: Partial<Omit<PartnerDealBuyer, 'id' | 'partner_deal_id' | 'created_at' | 'updated_at'>>
+): Promise<void> {
+  const res = await fetch(`${BUYERS_URL}?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    body: JSON.stringify({ ...fields, updated_at: new Date().toISOString() }),
+  });
+  if (!res.ok) throw new Error(`구매자 수정 실패: ${res.status}`);
+}
+
+/** 폼에서 빠진 구매자만 삭제 (남은 구매자의 이용권 연결은 보존) */
+export async function deleteDealBuyersByIds(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const list = ids.map(encodeURIComponent).join(',');
+  const res = await fetch(`${BUYERS_URL}?id=in.(${list})`, {
+    method: 'DELETE',
+    headers: HEADERS,
+  });
+  if (!res.ok) throw new Error(`구매자 삭제 실패: ${res.status}`);
+}
+
 export async function deleteDealBuyers(dealId: string): Promise<void> {
   const res = await fetch(`${BUYERS_URL}?partner_deal_id=eq.${dealId}`, {
     method: 'DELETE',
