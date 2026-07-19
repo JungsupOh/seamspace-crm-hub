@@ -354,9 +354,11 @@ interface PartnerSheetProps {
   onClose: () => void;
   initial: Partner | null;
   onSaved: () => void;
+  /** 신규 등록 직후 부모가 그 파트너를 선택 상태로 잡아 편집 모드로 전환시킨다 */
+  onCreated?: (p: Partner) => void;
 }
 
-function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
+function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerSheetProps) {
   const qc = useQueryClient();
   const { canEdit } = useAuth();
   const [f, setF]         = useState<Partial<PartnerFields>>(EMPTY);
@@ -381,6 +383,8 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
   const [inviteEmail, setInviteEmail] = useState('');
   const [deleteUserConfirmOpen, setDeleteUserConfirmOpen] = useState(false);
   const [deleteUserTarget, setDeleteUserTarget] = useState<{ id: string; email: string } | null>(null);
+  // 신규 등록 직후 "담당자를 초대할까요?" 확인
+  const [inviteAfterCreateOpen, setInviteAfterCreateOpen] = useState(false);
 
   const refBizReg  = useRef<HTMLInputElement>(null);
   const refBank    = useRef<HTMLInputElement>(null);
@@ -586,13 +590,22 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
       if (initial?.id) {
         await updatePartner(initial.id, f);
         toast.success('저장됨');
+        qc.invalidateQueries({ queryKey: ['partners'] });
+        onSaved();
+        onClose();
       } else {
-        await createPartner(f);
+        // 신규 등록: 시트를 닫지 않고 편집 모드로 전환 → 담당자 초대를 이어서 진행
+        const created = await createPartner(f);
         toast.success('파트너 등록됨');
+        qc.invalidateQueries({ queryKey: ['partners'] });
+        onSaved();
+        onCreated?.(created);
+        if (f.contact_email?.trim()) {
+          setInviteAfterCreateOpen(true);
+        } else {
+          onClose();
+        }
       }
-      qc.invalidateQueries({ queryKey: ['partners'] });
-      onSaved();
-      onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '저장 실패');
     } finally {
@@ -1019,6 +1032,25 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
           <AlertDialogFooter>
             <AlertDialogCancel>취소</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDeleteFile} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">삭제</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 신규 등록 직후 담당자 초대 확인 */}
+      <AlertDialog open={inviteAfterCreateOpen} onOpenChange={setInviteAfterCreateOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>담당자를 초대할까요?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{n('contact_email')}" 으로 파트너 포털 초대 코드를 발송합니다.
+              나중에 파트너를 다시 열어 초대할 수도 있습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>나중에</AlertDialogCancel>
+            <AlertDialogAction onClick={() => inviteAccount(n('contact_email'), n('contact_name'))}>
+              초대 발송
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -2072,6 +2104,7 @@ export default function Partners() {
               open={sheetOpen}
               onClose={handleClose}
               initial={selected}
+              onCreated={p => setSelected(p)}
               onSaved={() => {
                 qc.invalidateQueries({ queryKey: ['partners'] });
                 // 상세 파트너 정보 새로고침
@@ -2219,6 +2252,7 @@ export default function Partners() {
             open={sheetOpen}
             onClose={handleClose}
             initial={selected}
+            onCreated={p => setSelected(p)}
             onSaved={() => qc.invalidateQueries({ queryKey: ['partners'] })}
           />
         </PartnerSheetErrorBoundary>

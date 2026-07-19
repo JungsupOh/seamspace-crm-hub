@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/contexts/AuthContext';
+import { makeT } from '@/lib/partner-i18n';
 
 type UserRole = 'admin' | 'sub_admin' | 'guest' | 'partner';
 
@@ -33,7 +34,9 @@ const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
-  const { userProfile, signOut } = useAuth();
+  const { userProfile, signOut, partnerLocale } = useAuth();
+  // 파트너 전용 헤더는 파트너 설정 언어를 따른다 (관리자/게스트는 기본값 'ko').
+  const t = makeT(partnerLocale);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -69,7 +72,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                       {userProfile.name || userProfile.email.split('@')[0]}
                     </span>
                     <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${ROLE_BADGE_CLASSES.partner}`}>
-                      파트너
+                      {t({ ko: '파트너', ja: 'パートナー', en: 'Partner' })}
                     </span>
                   </Button>
                 </DropdownMenuTrigger>
@@ -80,11 +83,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => navigate('/change-password')} className="gap-2 cursor-pointer">
-                    <KeyRound className="h-4 w-4" />비밀번호 변경
+                    <KeyRound className="h-4 w-4" />{t({ ko: '비밀번호 변경', ja: 'パスワード変更', en: 'Change password' })}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleSignOut} className="gap-2 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10">
-                    <LogOut className="h-4 w-4" />로그아웃
+                    <LogOut className="h-4 w-4" />{t({ ko: '로그아웃', ja: 'ログアウト', en: 'Sign out' })}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

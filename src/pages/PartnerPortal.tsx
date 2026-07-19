@@ -436,6 +436,7 @@ export default function PartnerPortal() {
         userCount: String(issueForm.userCount),
         amount: issueForm.amount === '' ? null : Number(issueForm.amount),
         partnerName: partner.name,
+        locale: partnerLocale,
       });
       setIssuedCode(res.coupon_code);
       toast.success(
@@ -451,7 +452,7 @@ export default function PartnerPortal() {
 
   const handleResend = async (lic: PartnerLicense) => {
     try {
-      await resendLicenseEmail(lic, partner?.name);
+      await resendLicenseEmail(lic, partner?.name, partnerLocale);
       toast.success(t({ ko: '재발송 완료', en: 'Resent' }));
       if (partner?.id) getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
     } catch (e) {

@@ -665,7 +665,10 @@ export async function sendTrialLicenseEmailEN(params: {
 
 // ── 해외 파트너 유료 이용권 발급 이메일 (영어) ──────────
 // 파트너가 유료 판매한 이용권 코드 안내. trial/free 문구 없음(유료 카피).
-export async function sendPurchaseLicenseEmailEN(params: {
+// 파트너가 발급한 유료 이용권을 고객에게 안내.
+// locale은 발급 파트너의 설정 언어 — 고객이 그 나라 사람이므로 파트너 언어를 따른다.
+// 첨부 Quick Guide PDF도 언어별로 교체된다.
+export async function sendPurchaseLicenseEmail(params: {
   to: string;
   contactName: string;
   orgName?: string;
@@ -674,61 +677,115 @@ export async function sendPurchaseLicenseEmailEN(params: {
   userLimit: number;
   partnerName?: string;      // 발송 파트너명 (표기용)
   cc?: string | null;        // 추가 cc (기본 sales@에 더해짐), null이면 cc 없음
+  locale?: string;           // 'ko' | 'ja' | 그 외는 영어
 }): Promise<void> {
   const months = Math.max(1, Math.round(params.durationMonths));
+  const locale = params.locale ?? 'en';
+  const signature = `${params.partnerName ? `${params.partnerName} · ` : ''}Tebahsoft Inc.`;
 
-  const html = layoutEN(`
-    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">Thank you, ${params.contactName}!</h2>
+  const guide = {
+    ko: { path: '/docs/Quick%20Guide_How%20To%20Start%20(KR).pdf', filename: 'seamspace_QuickGuide_KR.pdf' },
+    ja: { path: '/docs/Quick%20Guide_HowToStart(JP).pdf',          filename: 'seamspace_QuickGuide_JP.pdf' },
+    en: { path: '/docs/Quick%20Guide_How%20To%20Start%20(En).pdf', filename: 'seamspace_QuickGuide_EN.pdf' },
+  };
+
+  const copy = {
+    ko: {
+      subject:   `심스페이스 이용권 코드${params.orgName ? ` - ${params.orgName}` : ''}`,
+      greeting:  `${params.contactName}님, 감사합니다!`,
+      intro:     `심스페이스를 구매해 주셔서 감사합니다.<br/>아래 이용권 코드를 확인해 주세요.`,
+      codeLabel: '이용권 코드',
+      users:     `최대 ${params.userLimit}명 이용 가능`,
+      period:    `⏱ <strong>${months}개월</strong> 이용 기간은 <strong>코드를 등록한 시점</strong>부터 시작됩니다 — 메일을 받은 날이 아닙니다.`,
+      howTitle:  '시작하는 방법',
+      howBody:   `첨부된 <strong>Quick Guide (PDF)</strong>를 참고해 주세요.<br/>회원가입부터 이용권 코드 입력까지 화면 그림과 함께 안내되어 있습니다.`,
+      askLine:   '궁금한 점이 있으시면 언제든 문의해 주세요.',
+      contactLabel: '문의',
+      regards:   '감사합니다.',
+    },
+    ja: {
+      subject:   `Seamspace ライセンスコード${params.orgName ? ` - ${params.orgName}` : ''}`,
+      greeting:  `${params.contactName} 様、ありがとうございます!`,
+      intro:     `seamspace をご購入いただきありがとうございます。<br/>下記のライセンスコードをご確認ください。`,
+      codeLabel: 'ライセンスコード',
+      users:     `最大 ${params.userLimit} 名までご利用いただけます`,
+      period:    `⏱ <strong>${months}か月</strong>のご利用期間は<strong>コードを登録した時点</strong>から開始します — 本メールの受信日からではありません。`,
+      howTitle:  'ご利用開始の手順',
+      howBody:   `添付の <strong>Quick Guide (PDF)</strong> をご参照ください。<br/>アカウント登録からライセンスコードの入力まで、画面付きで説明しています。`,
+      askLine:   'ご不明な点がございましたら、お気軽にお問い合わせください。',
+      contactLabel: 'お問い合わせ',
+      regards:   'どうぞよろしくお願いいたします。',
+    },
+    en: {
+      subject:   `Seamspace License Code${params.orgName ? ` - ${params.orgName}` : ''}`,
+      greeting:  `Thank you, ${params.contactName}!`,
+      intro:     `Thank you for your purchase of seamspace.<br/>Your license code is ready below.`,
+      codeLabel: 'License code',
+      users:     `Up to ${params.userLimit} users`,
+      period:    `⏱ Your <strong>${months}-month</strong> license period starts <strong>when you register the code</strong> — not from the day you receive this email.`,
+      howTitle:  'How to get started',
+      howBody:   `Please refer to the attached <strong>Quick Guide (PDF)</strong> to get started.<br/>It walks you through account sign-up and entering your license code, step by step with screenshots.`,
+      askLine:   `If you have any questions, please don't hesitate to reach out.`,
+      contactLabel: 'Contact',
+      regards:   'Best regards,',
+    },
+  };
+
+  const t = copy[locale as keyof typeof copy] ?? copy.en;
+  const g = guide[locale as keyof typeof guide] ?? guide.en;
+  const wrap = locale === 'ko' ? layout : layoutEN;
+
+  const html = wrap(`
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">${t.greeting}</h2>
     <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
-      Thank you for your purchase of seamspace.<br/>
-      Your license code is ready below.
+      ${t.intro}
     </p>
 
-    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">License code</p>
+    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">${t.codeLabel}</p>
     ${codeBox(params.couponCode)}
     <p style="margin:0 0 8px;font-size:12px;color:#a1a1aa;text-align:center;">
-      Up to ${params.userLimit} users
+      ${t.users}
     </p>
     <p style="margin:0 0 20px;font-size:12px;color:#0f172a;text-align:center;background:#eef2ff;border-radius:6px;padding:8px 12px;">
-      ⏱ Your <strong>${months}-month</strong> license period starts <strong>when you register the code</strong> — not from the day you receive this email.
+      ${t.period}
     </p>
 
-    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">How to get started</p>
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">${t.howTitle}</p>
     <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
-      Please refer to the attached <strong>Quick Guide (PDF)</strong> to get started.<br/>
-      It walks you through account sign-up and entering your license code, step by step with screenshots.
+      ${t.howBody}
     </p>
 
-    <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">If you have any questions, please don't hesitate to reach out.</p>
+    <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">${t.askLine}</p>
     <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
-      Contact: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+      ${t.contactLabel}: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
     </p>
 
     <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
-      Best regards,<br/>
-      ${params.partnerName ? `${params.partnerName} · ` : ''}Tebahsoft Inc.
+      ${t.regards}<br/>
+      ${signature}
     </p>
   `);
 
+  const stripTags = (s: string) => s.replace(/<br\s*\/?>/g, '\n').replace(/<[^>]+>/g, '');
   const text = [
-    `Thank you, ${params.contactName}!`,
+    t.greeting,
     ``,
-    `Thank you for your purchase of seamspace. Your license code is ready below.`,
+    stripTags(t.intro),
     ``,
-    `License code: ${params.couponCode}`,
-    `Up to ${params.userLimit} users`,
-    `Your ${months}-month license period starts when you register the code (not from the day you receive this email).`,
+    `${t.codeLabel}: ${params.couponCode}`,
+    t.users,
+    stripTags(t.period),
     ``,
-    `Please refer to the attached Quick Guide (PDF) to get started.`,
+    stripTags(t.howBody),
     ``,
-    `Contact: contact@tebahsoft.com`,
-    `${params.partnerName ? params.partnerName + ' · ' : ''}Tebahsoft Inc.`,
+    `${t.contactLabel}: contact@tebahsoft.com`,
+    signature,
   ].join('\n');
 
-  // Quick Guide PDF 첨부 (public/docs/Quick Guide_How To Start (En).pdf)
+  // Quick Guide PDF 첨부 (언어별)
   let attachments: Array<{ filename: string; content: string }> | undefined;
   try {
-    const r = await fetch('/docs/Quick%20Guide_How%20To%20Start%20(En).pdf');
+    const r = await fetch(g.path);
     if (r.ok) {
       const blob = await r.blob();
       const buf = await blob.arrayBuffer();
@@ -738,15 +795,15 @@ export async function sendPurchaseLicenseEmailEN(params: {
       for (let i = 0; i < bytes.length; i += chunkSize) {
         binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
       }
-      attachments = [{ filename: 'seamspace_QuickGuide_EN.pdf', content: btoa(binary) }];
+      attachments = [{ filename: g.filename, content: btoa(binary) }];
     }
   } catch (e) {
-    console.warn('[sendPurchaseLicenseEmailEN] Quick Guide PDF 첨부 실패 (메일은 진행)', e);
+    console.warn('[sendPurchaseLicenseEmail] Quick Guide PDF 첨부 실패 (메일은 진행)', e);
   }
 
   await sendEmail(
     params.to,
-    `Seamspace License Code${params.orgName ? ` - ${params.orgName}` : ''}`,
+    t.subject,
     html,
     {
       text,

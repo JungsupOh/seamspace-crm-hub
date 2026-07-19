@@ -4,7 +4,8 @@
 // 조회: partner_licenses 원장 (파트너 포털/관리자 열람)
 
 import { supabase } from '@/lib/supabase';
-import { sendPurchaseLicenseEmailEN } from '@/lib/email';
+import { sendPurchaseLicenseEmail } from '@/lib/email';
+import { makeT, type PartnerLocale } from '@/lib/partner-i18n';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -49,6 +50,7 @@ export interface IssueLicenseInput {
   userCount: string;           // 인원
   amount?: number | null;
   partnerName?: string;        // 이메일 서명 표기용
+  locale?: string;             // 파트너 설정 언어 — 고객 메일/오류 메시지 언어
 }
 
 export async function getPartnerLicenses(partnerId: string): Promise<PartnerLicense[]> {
@@ -62,9 +64,15 @@ export async function getPartnerLicenses(partnerId: string): Promise<PartnerLice
 
 /** 이용권 발급: 엣지 함수 호출 → 쿠폰 획득 → 유료 이메일 발송 → email_sent 갱신 */
 export async function issueLicense(input: IssueLicenseInput): Promise<{ coupon_code: string; license_id: string | null; email_sent: boolean }> {
+  // 오류 메시지도 파트너 언어로 — 포털이 e.message를 그대로 토스트에 붙이기 때문
+  const t = makeT((input.locale ?? 'ko') as PartnerLocale);
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
-  if (!token) throw new Error('로그인 세션이 없습니다. 다시 로그인해 주세요.');
+  if (!token) throw new Error(t({
+    ko: '로그인 세션이 없습니다. 다시 로그인해 주세요.',
+    ja: 'ログインセッションがありません。再度ログインしてください。',
+    en: 'Your session has expired. Please sign in again.',
+  }));
 
   const res = await fetch(`${SUPABASE_URL}/functions/v1/partner-issue-license`, {
     method: 'POST',
@@ -88,13 +96,17 @@ export async function issueLicense(input: IssueLicenseInput): Promise<{ coupon_c
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.coupon_code) {
-    throw new Error(data.error || `이용권 발급 실패 (${res.status})`);
+    throw new Error(data.error || t({
+      ko: `이용권 발급 실패 (${res.status})`,
+      ja: `ライセンス発行に失敗しました (${res.status})`,
+      en: `Failed to issue license (${res.status})`,
+    }));
   }
 
   // 유료 영어 이메일 발송 (실패해도 코드는 이미 발급됨)
   let emailSent = false;
   try {
-    await sendPurchaseLicenseEmailEN({
+    await sendPurchaseLicenseEmail({
       to:             input.contactEmail,
       contactName:    input.customerName || input.contactEmail,
       orgName:        input.orgName,
@@ -102,6 +114,7 @@ export async function issueLicense(input: IssueLicenseInput): Promise<{ coupon_c
       durationMonths: Number(input.duration) || 12,
       userLimit:      Number(input.userCount) || 40,
       partnerName:    input.partnerName,
+      locale:         input.locale,
     });
     emailSent = true;
     if (data.license_id) {
@@ -119,9 +132,14 @@ export async function issueLicense(input: IssueLicenseInput): Promise<{ coupon_c
 }
 
 /** 발급된 이용권 이메일 재발송 */
-export async function resendLicenseEmail(lic: PartnerLicense, partnerName?: string): Promise<void> {
-  if (!lic.contact_email) throw new Error('발송할 이메일이 없습니다');
-  await sendPurchaseLicenseEmailEN({
+export async function resendLicenseEmail(lic: PartnerLicense, partnerName?: string, locale?: string): Promise<void> {
+  const t = makeT((locale ?? 'ko') as PartnerLocale);
+  if (!lic.contact_email) throw new Error(t({
+    ko: '발송할 이메일이 없습니다',
+    ja: '送信先のメールアドレスがありません',
+    en: 'No email address to send to',
+  }));
+  await sendPurchaseLicenseEmail({
     to:             lic.contact_email,
     contactName:    lic.contact_name || lic.contact_email,
     orgName:        lic.org_name ?? undefined,
@@ -129,6 +147,7 @@ export async function resendLicenseEmail(lic: PartnerLicense, partnerName?: stri
     durationMonths: Number(lic.duration) || 12,
     userLimit:      Number(lic.user_count) || 40,
     partnerName,
+    locale,
   });
   await fetch(`${BASE_URL}?id=eq.${lic.id}`, {
     method: 'PATCH',
