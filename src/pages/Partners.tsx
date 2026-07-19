@@ -17,6 +17,8 @@ import { useDeals, useCreateDeal, useContacts } from '@/hooks/use-airtable';
 import type { AirtableRecord, DealFields, ContactFields } from '@/types/airtable';
 import { airtable } from '@/lib/airtable';
 import { getPartnerDeals, getAllPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals, createDealBuyers, getDealBuyers, deleteDealBuyers } from '@/lib/partner-deals';
+import { getPartnerLicenses, type PartnerLicense } from '@/lib/partner-licenses';
+import { formatMoney } from '@/lib/partner-i18n';
 import type { PartnerDeal, PartnerDealBuyer } from '@/lib/partner-deals';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
@@ -60,6 +62,11 @@ interface Partner {
   commission_rate: number | null;
   notes: string | null;
   status: 'active' | 'inactive';
+  // 해외 파트너 옵션
+  can_issue_licenses: boolean | null;
+  locale: string | null;      // 'ko' | 'en' | 'tr'
+  currency: string | null;    // 'KRW' | 'USD'
+  country: string | null;     // 'KR' | 'TR'
   created_at: string;
 }
 
@@ -286,6 +293,51 @@ class PartnerSheetErrorBoundary extends Component<{ children: ReactNode }, EBSta
   }
 }
 
+// ── 관리자용: 파트너 발급 이용권 열람 (정산 근거) ──────
+function AdminPartnerLicenses({ partnerId, currency }: { partnerId: string; currency: string }) {
+  const [lics, setLics] = useState<PartnerLicense[]>([]);
+  useEffect(() => {
+    getPartnerLicenses(partnerId).then(setLics).catch(() => setLics([]));
+  }, [partnerId]);
+  const totalAmount = lics.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">발급된 이용권 ({lics.length})</h3>
+        {totalAmount > 0 && <span className="text-xs text-muted-foreground">합계 {formatMoney(totalAmount, currency)}</span>}
+      </div>
+      {lics.length === 0 ? (
+        <p className="text-xs text-muted-foreground/60">발급 내역이 없습니다.</p>
+      ) : (
+        <div className="rounded-md border border-border overflow-hidden overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead><tr className="bg-muted/40 text-muted-foreground">
+              <th className="px-2 py-1.5 text-left whitespace-nowrap">발급일</th>
+              <th className="px-2 py-1.5 text-left">고객</th>
+              <th className="px-2 py-1.5 text-left">코드</th>
+              <th className="px-2 py-1.5 text-center whitespace-nowrap">기간·인원</th>
+              <th className="px-2 py-1.5 text-right">금액</th>
+              <th className="px-2 py-1.5 text-center">이메일</th>
+            </tr></thead>
+            <tbody className="divide-y divide-border">
+              {lics.map(l => (
+                <tr key={l.id}>
+                  <td className="px-2 py-1.5 whitespace-nowrap">{l.created_at?.slice(0, 10)}</td>
+                  <td className="px-2 py-1.5">{l.contact_name || l.contact_email || '-'}</td>
+                  <td className="px-2 py-1.5 font-mono">{l.coupon_code}</td>
+                  <td className="px-2 py-1.5 text-center whitespace-nowrap">{l.duration}개월·{l.user_count}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums">{l.amount != null ? formatMoney(Number(l.amount), l.currency || currency) : '-'}</td>
+                  <td className="px-2 py-1.5 text-center">{l.email_sent ? '✓' : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ── 파트너 Sheet ─────────────────────────────────
 const EMPTY: Partial<PartnerFields> = {
   name: '', business_number: null, representative: null,
@@ -293,6 +345,7 @@ const EMPTY: Partial<PartnerFields> = {
   bank_account: null, account_holder: null,
   contact_name: null, contact_phone: null, contact_email: null,
   commission_rate: 15, notes: null, status: 'active',
+  can_issue_licenses: false, locale: 'ko', currency: 'KRW', country: 'KR',
 };
 
 interface PartnerSheetProps {
@@ -608,6 +661,57 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
             </div>
           </section>
 
+          {/* 포털 옵션 (해외 파트너) */}
+          <section className="space-y-3">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">포털 옵션</h3>
+            {/* 이용권 발급 권한 */}
+            <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+              <div>
+                <p className="text-xs font-medium">이용권 발급 허용</p>
+                <p className="text-[11px] text-muted-foreground">파트너가 포털에서 직접 이용권을 발급/발송할 수 있습니다.</p>
+              </div>
+              <button type="button" role="switch" aria-checked={!!f.can_issue_licenses}
+                onClick={() => setF(prev => ({ ...prev, can_issue_licenses: !prev.can_issue_licenses }))}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${f.can_issue_licenses ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${f.can_issue_licenses ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+            {/* 언어 */}
+            <div>
+              <Label className="text-xs">포털 언어</Label>
+              <div className="grid grid-cols-3 gap-2 mt-1">
+                {(['ko', 'en', 'tr'] as const).map(loc => (
+                  <button key={loc} type="button"
+                    onClick={() => setF(prev => ({
+                      ...prev,
+                      locale: loc,
+                      // 언어에 맞춰 통화/국가 기본값 보정 (수동 변경 가능)
+                      currency: loc === 'ko' ? 'KRW' : (prev.currency && prev.currency !== 'KRW' ? prev.currency : 'USD'),
+                      country: loc === 'ko' ? 'KR' : (prev.country && prev.country !== 'KR' ? prev.country : 'TR'),
+                    }))}
+                    className={`h-8 text-sm rounded-md border transition-colors uppercase
+                      ${(f.locale ?? 'ko') === loc ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
+                    {loc}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* 통화 */}
+            <div>
+              <Label className="text-xs">통화</Label>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                {(['KRW', 'USD'] as const).map(cur => (
+                  <button key={cur} type="button"
+                    onClick={() => setF(prev => ({ ...prev, currency: cur }))}
+                    className={`h-8 text-sm rounded-md border transition-colors
+                      ${(f.currency ?? 'KRW') === cur ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
+                    {cur}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+
           {/* 담당자 연락처 & 초대 */}
           <section className="space-y-3">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">담당자 연락처</h3>
@@ -670,6 +774,11 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
               crmDeals={partnerDeals}
               allCrmDeals={allDeals ?? []}
             />
+          )}
+
+          {/* 발급된 이용권 (발급 권한 파트너) */}
+          {isEdit && f.can_issue_licenses && (
+            <AdminPartnerLicenses partnerId={initial!.id} currency={f.currency ?? 'USD'} />
           )}
 
           {/* 계약 서류 */}

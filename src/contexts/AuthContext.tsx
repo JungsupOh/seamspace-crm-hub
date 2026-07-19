@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import type { PartnerLocale } from '@/lib/partner-i18n';
 
 export type UserRole = 'admin' | 'sub_admin' | 'guest' | 'partner';
 export type UserStatus = 'invite_failed' | 'invited' | 'active' | 'inactive';
@@ -32,6 +33,11 @@ interface AuthContextValue {
   isGuest: boolean;
   isPartner: boolean;
   canEdit: boolean;
+  // 파트너 옵션 (partners 테이블) — 파트너 포털 언어/통화/발급권한 게이팅용
+  canIssueLicenses: boolean;
+  partnerLocale: PartnerLocale;
+  partnerCurrency: string;
+  partnerCountry: string;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -42,6 +48,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [partnerOptions, setPartnerOptions] = useState<{ can_issue_licenses: boolean; locale: string; currency: string; country: string } | null>(null);
   // 이미 로드된 유저 ID 추적 — 탭 전환 시 토큰 갱신 이벤트에서 profileLoading 블로킹 방지
   const loadedUserIdRef = useRef<string | null>(null);
 
@@ -134,6 +141,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [fetchProfile]);
 
+  // 파트너 옵션 로드 (partner 계정일 때만) — 언어/통화/발급권한 게이팅용
+  useEffect(() => {
+    const pid = userProfile?.partner_id;
+    if (!pid) { setPartnerOptions(null); return; }
+    let cancelled = false;
+    supabase
+      .from('partners')
+      .select('can_issue_licenses, locale, currency, country')
+      .eq('id', pid)
+      .single()
+      .then(({ data }) => { if (!cancelled && data) setPartnerOptions(data as typeof partnerOptions); });
+    return () => { cancelled = true; };
+  }, [userProfile?.partner_id]);
+
   const signIn = async (email: string, password: string) => {
     const { error, data } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
@@ -192,6 +213,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isGuest = userProfile?.role === 'guest';
   const isPartner = userProfile?.role === 'partner';
   const canEdit = isAdmin || isSubAdmin;
+  const canIssueLicenses = !!partnerOptions?.can_issue_licenses;
+  const partnerLocale = (partnerOptions?.locale as PartnerLocale) ?? 'ko';
+  const partnerCurrency = partnerOptions?.currency ?? 'KRW';
+  const partnerCountry = partnerOptions?.country ?? 'KR';
 
   return (
     <AuthContext.Provider
@@ -210,6 +235,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isGuest,
         isPartner,
         canEdit,
+        canIssueLicenses,
+        partnerLocale,
+        partnerCurrency,
+        partnerCountry,
       }}
     >
       {children}

@@ -615,6 +615,100 @@ export async function sendTrialLicenseEmailEN(params: {
   );
 }
 
+// ── 해외 파트너 유료 이용권 발급 이메일 (영어) ──────────
+// 파트너가 유료 판매한 이용권 코드 안내. trial/free 문구 없음(유료 카피).
+export async function sendPurchaseLicenseEmailEN(params: {
+  to: string;
+  contactName: string;
+  orgName?: string;
+  couponCode: string;
+  durationMonths: number;
+  userLimit: number;
+  partnerName?: string;      // 발송 파트너명 (표기용)
+  cc?: string | null;        // 추가 cc (기본 sales@에 더해짐), null이면 cc 없음
+}): Promise<void> {
+  const months = Math.max(1, Math.round(params.durationMonths));
+
+  const html = layoutEN(`
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">Thank you, ${params.contactName}!</h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
+      Thank you for your purchase of seamspace.<br/>
+      Your license code is ready below.
+    </p>
+
+    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">License code</p>
+    ${codeBox(params.couponCode)}
+    <p style="margin:0 0 8px;font-size:12px;color:#a1a1aa;text-align:center;">
+      Up to ${params.userLimit} users
+    </p>
+    <p style="margin:0 0 20px;font-size:12px;color:#0f172a;text-align:center;background:#eef2ff;border-radius:6px;padding:8px 12px;">
+      ⏱ Your <strong>${months}-month</strong> license period starts <strong>when you register the code</strong> — not from the day you receive this email.
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">How to get started</p>
+    <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
+      Please refer to the attached <strong>Quick Guide (PDF)</strong> to get started.<br/>
+      It walks you through account sign-up and entering your license code, step by step with screenshots.
+    </p>
+
+    <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">If you have any questions, please don't hesitate to reach out.</p>
+    <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
+      Contact: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+    </p>
+
+    <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
+      Best regards,<br/>
+      ${params.partnerName ? `${params.partnerName} · ` : ''}Tebahsoft Inc.
+    </p>
+  `);
+
+  const text = [
+    `Thank you, ${params.contactName}!`,
+    ``,
+    `Thank you for your purchase of seamspace. Your license code is ready below.`,
+    ``,
+    `License code: ${params.couponCode}`,
+    `Up to ${params.userLimit} users`,
+    `Your ${months}-month license period starts when you register the code (not from the day you receive this email).`,
+    ``,
+    `Please refer to the attached Quick Guide (PDF) to get started.`,
+    ``,
+    `Contact: contact@tebahsoft.com`,
+    `${params.partnerName ? params.partnerName + ' · ' : ''}Tebahsoft Inc.`,
+  ].join('\n');
+
+  // Quick Guide PDF 첨부 (public/docs/Quick Guide_How To Start (En).pdf)
+  let attachments: Array<{ filename: string; content: string }> | undefined;
+  try {
+    const r = await fetch('/docs/Quick%20Guide_How%20To%20Start%20(En).pdf');
+    if (r.ok) {
+      const blob = await r.blob();
+      const buf = await blob.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
+      }
+      attachments = [{ filename: 'seamspace_QuickGuide_EN.pdf', content: btoa(binary) }];
+    }
+  } catch (e) {
+    console.warn('[sendPurchaseLicenseEmailEN] Quick Guide PDF 첨부 실패 (메일은 진행)', e);
+  }
+
+  await sendEmail(
+    params.to,
+    `Seamspace License Code${params.orgName ? ` - ${params.orgName}` : ''}`,
+    html,
+    {
+      text,
+      reply_to: 'contact@tebahsoft.com',
+      attachments,
+      cc: params.cc === null ? null : (params.cc?.trim() ? [DEFAULT_CC, params.cc.trim()] : undefined),
+    },
+  );
+}
+
 // ── APK 배포 안내 이메일 (심스페이스 Android 앱) ────────
 // 사용자 노출은 '심스페이스'만 사용 (mDiary 표기 금지)
 // 문의처는 info@tebahsoft.com (APK 배포 전용 채널)
