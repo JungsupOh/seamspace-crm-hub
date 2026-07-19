@@ -4,8 +4,8 @@ const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? '';
 const FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL') ?? 'noreply@seamspace.site';
 
 // 발송 실패 시 텔레그램 알림
-const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? '8680036281:AAG465JPrhfYBuYCpDyuNkfUr0UgaOutn2c';
-const CHAT_ID = Deno.env.get('TELEGRAM_CHAT_ID') ?? '-1003754735570';
+const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? '';
+const CHAT_ID = Deno.env.get('TELEGRAM_CHAT_ID') ?? '';
 async function notifyFailure(to: string, subject: string, error: string) {
   try {
     await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {

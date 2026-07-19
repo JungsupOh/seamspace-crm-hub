@@ -1,10 +1,16 @@
 // Telegram 채널 알림 (Edge Function 공용)
 // 클라이언트(브라우저) 호출이 sessionStorage/redirect 영향으로 누락되는 이슈 회피용 — 서버사이드에서 발송.
 
-const BOT_TOKEN = "8680036281:AAG465JPrhfYBuYCpDyuNkfUr0UgaOutn2c";
-const CHAT_ID = "-1003754735570";
+// 토큰/채널은 Supabase 시크릿에서만 읽는다 (소스에 하드코딩 금지).
+// 설정: npx supabase secrets set TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=...
+const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
+const CHAT_ID = Deno.env.get("TELEGRAM_CHAT_ID") ?? "";
 
 export async function sendTelegram(text: string): Promise<void> {
+  if (!BOT_TOKEN || !CHAT_ID) {
+    console.warn("[telegram] TELEGRAM_BOT_TOKEN/CHAT_ID 시크릿 미설정 — 알림 생략");
+    return;
+  }
   try {
     const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       method: "POST",

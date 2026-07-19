@@ -1,19 +1,21 @@
 // ── Telegram 채널 알림 ──────────────────────────────
+// 봇 토큰은 프론트엔드에 두지 않는다 — 번들은 누구나 열어볼 수 있으므로
+// 토큰이 있으면 봇 자체가 탈취된다. 발송은 notify-telegram 엣지 함수가 대신하고,
+// 토큰/채널 ID는 Supabase 시크릿(TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID)에만 존재한다.
 
-const BOT_TOKEN = '8680036281:AAG465JPrhfYBuYCpDyuNkfUr0UgaOutn2c';
-const CHAT_ID = '-1003754735570';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 export async function sendTelegramNotification(text: string): Promise<void> {
   try {
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    await fetch(`${SUPABASE_URL}/functions/v1/notify-telegram`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: CHAT_ID,
-        text,
-        parse_mode: 'HTML',
-        disable_web_page_preview: true,
-      }),
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+      },
+      body: JSON.stringify({ text }),
     });
   } catch {
     // 알림 실패는 무시 (핵심 기능 차단하지 않도록)
