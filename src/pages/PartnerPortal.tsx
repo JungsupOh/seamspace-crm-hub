@@ -68,6 +68,9 @@ interface IssueForm {
   userCount: number;
   amount: number | '';
 }
+/** 무효화되지 않은 이용권 수 */
+const activeCount = (list: PartnerLicense[]) => list.filter(l => l.status !== 'revoked').length;
+
 const emptyIssueForm = (): IssueForm => ({
   partnerDealId: '', customerName: '', contactEmail: '', contactPhone: '',
   orgName: '', plan: '', duration: 12, userCount: 40, amount: '',
@@ -102,6 +105,7 @@ export default function PartnerPortal() {
   const [issuing, setIssuing] = useState(false);
   const [issueForm, setIssueForm] = useState<IssueForm>(emptyIssueForm());
   const [issuedCode, setIssuedCode] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'deals' | 'licenses'>('deals');
   const [revokeConfirmOpen, setRevokeConfirmOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<PartnerLicense | null>(null);
   const [revokeReason, setRevokeReason] = useState('');
@@ -560,7 +564,24 @@ export default function PartnerPortal() {
         </Button>
       </div>
 
+      {/* 딜 / 이용권 탭 — 이용권은 한 딜에 여러 장일 수 있어 별도 탭으로 붙인다 */}
+      {canIssueLicenses && (
+        <div className="flex border-b border-border">
+          <button onClick={() => setActiveTab('deals')}
+            className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5
+              ${activeTab === 'deals' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+            <Package className="h-3.5 w-3.5" />{t({ ko: '딜', ja: '案件', en: 'Deals' })} ({filteredDeals.length})
+          </button>
+          <button onClick={() => setActiveTab('licenses')}
+            className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors flex items-center gap-1.5
+              ${activeTab === 'licenses' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+            <Ticket className="h-3.5 w-3.5" />{t({ ko: '발급된 이용권', ja: '発行済みライセンス', en: 'Issued Licenses' })} ({licenses.length})
+          </button>
+        </div>
+      )}
+
       {/* 딜 테이블 */}
+      {activeTab === 'deals' && (
       <div className="surface-card ring-container overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -615,44 +636,27 @@ export default function PartnerPortal() {
                     <td className="px-3 py-2.5 text-xs text-right tabular-nums font-medium">{(d.payment_amount ?? 0) > 0 ? d.payment_amount!.toLocaleString() : '-'}</td>
                     <td className="px-3 py-2.5 text-xs text-right tabular-nums text-amber-600">{(d.commission_amount ?? 0) > 0 ? d.commission_amount!.toLocaleString() : '-'}</td>
                     <td className="px-3 py-2.5 text-xs text-right tabular-nums text-teal-700">{(d.settlement_amount ?? 0) > 0 ? d.settlement_amount!.toLocaleString() : '-'}</td>
-                    {/* 이용권 — 딜과 같은 행에서 코드 확인/재발송/무효화까지 처리 */}
+                    {/* 이용권 — 여러 장일 수 있어 여기선 건수만, 상세는 이용권 탭에서 */}
                     <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
-                      {dealLicenses.length === 0 ? (
-                        canIssueLicenses ? (
-                          <button onClick={() => openIssueDialog(d)}
-                            className="inline-flex items-center gap-1 rounded border border-dashed border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:border-primary/50 hover:text-primary">
-                            <Ticket className="h-3 w-3" />{t({ ko: '발급', ja: '発行', en: 'Issue' })}
-                          </button>
-                        ) : <span className="text-xs text-muted-foreground">{d.license_issue_date || '-'}</span>
+                      {!canIssueLicenses ? (
+                        <span className="text-xs text-muted-foreground">{d.license_issue_date || '-'}</span>
+                      ) : dealLicenses.length === 0 ? (
+                        <button onClick={() => openIssueDialog(d)}
+                          className="inline-flex items-center gap-1 rounded border border-dashed border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:border-primary/50 hover:text-primary">
+                          <Ticket className="h-3 w-3" />{t({ ko: '발급', ja: '発行', en: 'Issue' })}
+                        </button>
                       ) : (
-                        <div className="space-y-1">
-                          {dealLicenses.map(lic => {
-                            const revoked = lic.status === 'revoked';
-                            return (
-                              <div key={lic.id} className="flex items-center gap-1">
-                                <span className={`font-mono text-[11px] ${revoked ? 'line-through text-muted-foreground' : ''}`}>{lic.coupon_code}</span>
-                                {revoked ? (
-                                  <span className="text-[10px] text-rose-700 bg-rose-50 rounded px-1">{t({ ko: '무효', ja: '無効', en: 'Revoked' })}</span>
-                                ) : (
-                                  <>
-                                    <span className={`text-[10px] rounded px-1 ${lic.email_sent ? 'text-teal-700 bg-teal-50' : 'text-amber-600 bg-amber-50'}`}>
-                                      {lic.email_sent ? t({ ko: '발송', ja: '送信', en: 'Sent' }) : t({ ko: '미발송', ja: '未送信', en: 'Unsent' })}
-                                    </span>
-                                    <button onClick={() => copyCode(lic.coupon_code)} title={t({ ko: '코드 복사', ja: 'コードをコピー', en: 'Copy code' })}
-                                      className="p-0.5 rounded hover:bg-muted text-muted-foreground"><Copy className="h-3 w-3" /></button>
-                                    <button onClick={() => handleResend(lic)} title={t({ ko: '이메일 재발송', ja: 'メール再送信', en: 'Resend email' })}
-                                      className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Send className="h-3 w-3" /></button>
-                                    <button onClick={() => askRevoke(lic)} title={t({ ko: '무효화', ja: '無効化', en: 'Revoke' })}
-                                      className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Ban className="h-3 w-3" /></button>
-                                  </>
-                                )}
-                              </div>
-                            );
-                          })}
-                          {canIssueLicenses && (
-                            <button onClick={() => openIssueDialog(d)}
-                              className="text-[10px] text-muted-foreground hover:text-primary">+ {t({ ko: '추가 발급', ja: '追加発行', en: 'Issue more' })}</button>
-                          )}
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => setActiveTab('licenses')}
+                            title={t({ ko: '이용권 탭에서 보기', ja: 'ライセンスタブで見る', en: 'View in Licenses tab' })}
+                            className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/20">
+                            <Ticket className="h-3 w-3" />{dealLicenses.length}
+                            {activeCount(dealLicenses) < dealLicenses.length && (
+                              <span className="text-rose-600">({dealLicenses.length - activeCount(dealLicenses)}{t({ ko: ' 무효', ja: ' 無効', en: ' rvk' })})</span>
+                            )}
+                          </button>
+                          <button onClick={() => openIssueDialog(d)} title={t({ ko: '추가 발급', ja: '追加発行', en: 'Issue more' })}
+                            className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Plus className="h-3 w-3" /></button>
                         </div>
                       )}
                     </td>
@@ -669,6 +673,79 @@ export default function PartnerPortal() {
           </table>
         </div>
       </div>
+      )}
+
+      {/* 발급된 이용권 탭 */}
+      {canIssueLicenses && activeTab === 'licenses' && (
+        <div className="surface-card ring-container overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/60">
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '발급일', ja: '発行日', en: 'Date' })}</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '연결 딜', ja: '関連案件', en: 'Deal' })}</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '고객', ja: '顧客', en: 'Customer' })}</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '학교/기관', ja: '学校・機関', en: 'School / Org' })}</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '플랜', ja: 'プラン', en: 'Plan' })}</th>
+                  <th className="px-3 py-3 text-center text-xs font-medium text-muted-foreground whitespace-nowrap">{t({ ko: '기간·인원', ja: '期間・人数', en: 'Term · Users' })}</th>
+                  <th className="px-3 py-3 text-left text-xs font-medium text-muted-foreground">{t({ ko: '이용권코드', ja: 'ライセンスコード', en: 'Code' })}</th>
+                  <th className="px-3 py-3 text-center text-xs font-medium text-muted-foreground">{t({ ko: '상태', ja: '状態', en: 'Status' })}</th>
+                  <th className="px-3 py-3 w-24"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {licenses.length === 0 ? (
+                  <tr><td colSpan={9} className="px-4 py-12 text-center text-muted-foreground text-xs">{t({ ko: '발급된 이용권이 없습니다.', ja: '発行されたライセンスがありません。', en: 'No licenses issued yet.' })}</td></tr>
+                ) : licenses.map(lic => {
+                  const revoked = lic.status === 'revoked';
+                  const deal = deals.find(d => d.id === lic.partner_deal_id);
+                  return (
+                    <tr key={lic.id} className={`hover:bg-muted/30 ${revoked ? 'opacity-60' : ''}`}>
+                      <td className="px-3 py-2.5 text-xs whitespace-nowrap">{lic.created_at?.slice(0, 10)}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                        {deal ? (
+                          <button onClick={() => handleOpenEditDialog(deal)} className="hover:text-primary hover:underline">
+                            {deal.school_name || t({ ko: '(학교명 없음)', ja: '(学校名なし)', en: '(no school)' })}
+                          </button>
+                        ) : '-'}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs font-medium">{lic.contact_name || '-'}<div className="text-[10px] text-muted-foreground">{lic.contact_email}</div></td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{lic.org_name || '-'}</td>
+                      <td className="px-3 py-2.5 text-xs text-muted-foreground">{lic.plan || '-'}</td>
+                      <td className="px-3 py-2.5 text-xs text-center text-muted-foreground whitespace-nowrap">{lic.duration}{t({ ko: '개월', ja: 'か月', en: 'mo' })} · {lic.user_count}</td>
+                      <td className={`px-3 py-2.5 text-xs font-mono ${revoked ? 'line-through text-muted-foreground' : ''}`}>{lic.coupon_code}</td>
+                      <td className="px-3 py-2.5 text-center">
+                        {revoked
+                          ? <span className="text-[10px] text-rose-700 bg-rose-50 rounded px-1.5 py-0.5">{t({ ko: '무효', ja: '無効', en: 'Revoked' })}</span>
+                          : lic.email_sent
+                            ? <span className="text-[10px] text-teal-700 bg-teal-50 rounded px-1.5 py-0.5">{t({ ko: '발송됨', ja: '送信済み', en: 'Sent' })}</span>
+                            : <span className="text-[10px] text-amber-600 bg-amber-50 rounded px-1.5 py-0.5">{t({ ko: '미발송', ja: '未送信', en: 'Not sent' })}</span>}
+                        {revoked && lic.revoke_reason && (
+                          <div className="text-[10px] text-muted-foreground mt-0.5">{lic.revoke_reason}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex gap-1">
+                          <button onClick={() => copyCode(lic.coupon_code)} title={t({ ko: '코드 복사', ja: 'コードをコピー', en: 'Copy code' })}
+                            className="p-1 rounded hover:bg-muted text-muted-foreground"><Copy className="h-3.5 w-3.5" /></button>
+                          {!revoked && (
+                            <>
+                              <button onClick={() => handleResend(lic)} title={t({ ko: '이메일 재발송', ja: 'メール再送信', en: 'Resend email' })}
+                                className="p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Send className="h-3.5 w-3.5" /></button>
+                              <button onClick={() => askRevoke(lic)} title={t({ ko: '무효화', ja: '無効化', en: 'Revoke' })}
+                                className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Ban className="h-3.5 w-3.5" /></button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* 딜 추가 모달 */}
       <Dialog open={addDialogOpen} onOpenChange={open => { if (!open) { setAddDialogOpen(false); setEditingDealId(null); } }}>
