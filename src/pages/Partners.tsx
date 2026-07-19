@@ -483,10 +483,13 @@ function PartnerSheet({ open, onClose, initial, onSaved }: PartnerSheetProps) {
         },
       });
 
-      // 초대 이메일 발송
+      // 초대 이메일 발송 (파트너 언어에 맞춰 한국어/영어)
+      const locale = f.locale ?? 'ko';
       await sendInviteEmail({
         to: email, name, inviteCode: code,
-        role: 'partner', invitedBy: '심스페이스',
+        role: 'partner',
+        invitedBy: locale === 'ko' ? '심스페이스' : 'Seamspace',
+        locale,
       });
       toast.success(existed ? `${email}으로 초대를 재발송했습니다` : `${email}으로 파트너 초대를 발송했습니다`);
       setInviteOpen(false);

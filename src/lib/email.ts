@@ -112,52 +112,100 @@ function button(text: string, url: string): string {
 }
 
 // ── 초대 이메일 ────────────────────────────────────
+// locale에 따라 한국어/일본어/영어로 발송. 지정 없거나 모르는 값이면 영어(ko만 한국어).
 export async function sendInviteEmail(params: {
   to: string;
   name: string;
   inviteCode: string;
   role: string;
   invitedBy: string;
+  locale?: string;
 }): Promise<void> {
-  const roleLabel: Record<string, string> = {
-    admin: '관리자', sub_admin: '서브관리자', guest: '게스트',
+  const locale = params.locale ?? 'ko';
+
+  const roleLabel: Record<string, Record<string, string>> = {
+    ko: { admin: '관리자', sub_admin: '서브관리자', guest: '게스트', partner: '파트너' },
+    ja: { admin: '管理者', sub_admin: 'サブ管理者', guest: 'ゲスト', partner: 'パートナー' },
+    en: { admin: 'Administrator', sub_admin: 'Sub-administrator', guest: 'Guest', partner: 'Partner' },
+  };
+  const roleFor = (loc: string) => roleLabel[loc]?.[params.role] || params.role;
+
+  const copy = {
+    ko: {
+      heading:   '초대장이 도착했습니다 👋',
+      intro:     `<strong style="color:#18181b;">${params.invitedBy}</strong>님이 <strong style="color:#18181b;">Seamspace CRM</strong>에 초대했습니다.`,
+      name:      '이름',
+      email:     '이메일',
+      role:      '역할',
+      roleText:  roleFor('ko'),
+      codeLabel: '초기 비밀번호',
+      notice:    '첫 로그인 후 즉시 비밀번호를 변경해 주세요.',
+      cta:       'CRM 로그인하기',
+      subject:   'Seamspace CRM - 초대장이 도착했습니다',
+    },
+    ja: {
+      heading:   '招待が届きました 👋',
+      intro:     `<strong style="color:#18181b;">${params.invitedBy}</strong>より <strong style="color:#18181b;">Seamspace CRM</strong> へご招待いたします。`,
+      name:      '氏名',
+      email:     'メールアドレス',
+      role:      '役割',
+      roleText:  roleFor('ja'),
+      codeLabel: '初期パスワード',
+      notice:    '初回ログイン後、すぐにパスワードを変更してください。',
+      cta:       'CRM にログイン',
+      subject:   'Seamspace CRM - 招待が届きました',
+    },
+    en: {
+      heading:   'You have been invited 👋',
+      intro:     `<strong style="color:#18181b;">${params.invitedBy}</strong> has invited you to <strong style="color:#18181b;">Seamspace CRM</strong>.`,
+      name:      'Name',
+      email:     'Email',
+      role:      'Role',
+      roleText:  roleFor('en'),
+      codeLabel: 'Temporary password',
+      notice:    'Please change your password right after your first sign-in.',
+      cta:       'Sign in to CRM',
+      subject:   'Seamspace CRM - You have been invited',
+    },
   };
 
+  const t = copy[locale as keyof typeof copy] ?? copy.en;
+
   const html = layout(`
-    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">초대장이 도착했습니다 👋</h2>
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">${t.heading}</h2>
     <p style="margin:0 0 24px;font-size:14px;color:#71717a;line-height:1.7;">
-      <strong style="color:#18181b;">${params.invitedBy}</strong>님이 <strong style="color:#18181b;">Seamspace CRM</strong>에 초대했습니다.
+      ${t.intro}
     </p>
 
     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
       <tr>
         <td style="padding:8px 0;border-bottom:1px solid #f4f4f5;">
-          <span style="font-size:12px;color:#a1a1aa;display:block;margin-bottom:2px;">이름</span>
+          <span style="font-size:12px;color:#a1a1aa;display:block;margin-bottom:2px;">${t.name}</span>
           <span style="font-size:14px;color:#18181b;">${params.name || '—'}</span>
         </td>
       </tr>
       <tr>
         <td style="padding:8px 0;border-bottom:1px solid #f4f4f5;">
-          <span style="font-size:12px;color:#a1a1aa;display:block;margin-bottom:2px;">이메일</span>
+          <span style="font-size:12px;color:#a1a1aa;display:block;margin-bottom:2px;">${t.email}</span>
           <span style="font-size:14px;color:#18181b;">${params.to}</span>
         </td>
       </tr>
       <tr>
         <td style="padding:8px 0;">
-          <span style="font-size:12px;color:#a1a1aa;display:block;margin-bottom:2px;">역할</span>
-          <span style="font-size:14px;color:#18181b;">${roleLabel[params.role] || params.role}</span>
+          <span style="font-size:12px;color:#a1a1aa;display:block;margin-bottom:2px;">${t.role}</span>
+          <span style="font-size:14px;color:#18181b;">${t.roleText}</span>
         </td>
       </tr>
     </table>
 
-    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">초기 비밀번호</p>
+    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">${t.codeLabel}</p>
     ${codeBox(params.inviteCode)}
-    <p style="margin:0;font-size:12px;color:#a1a1aa;text-align:center;">첫 로그인 후 즉시 비밀번호를 변경해 주세요.</p>
+    <p style="margin:0;font-size:12px;color:#a1a1aa;text-align:center;">${t.notice}</p>
 
-    ${button('CRM 로그인하기', `${APP_URL}/login`)}
+    ${button(t.cta, `${APP_URL}/login`)}
   `);
 
-  await sendEmail(params.to, '[Seamspace CRM] 초대장이 도착했습니다', html);
+  await sendEmail(params.to, t.subject, html);
 }
 
 // ── 비밀번호 초기화 이메일 ──────────────────────────

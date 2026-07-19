@@ -7,10 +7,14 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Eye, EyeOff, Lock, ShieldAlert } from 'lucide-react';
 import { sendTelegramNotification } from '@/lib/telegram';
+import { makeT } from '@/lib/partner-i18n';
 
 export default function ChangePassword() {
-  const { changePassword, userProfile, signOut } = useAuth();
+  const { changePassword, userProfile, signOut, partnerLocale } = useAuth();
   const navigate = useNavigate();
+  // 해외 파트너는 초대 메일이 영어/일본어로 나가므로 첫 관문인 이 화면도 같은 언어로 맞춘다.
+  // 파트너가 아닌 사용자(관리자/게스트)는 partnerLocale 기본값 'ko' → 기존 한국어 그대로.
+  const t = makeT(partnerLocale);
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -23,9 +27,12 @@ export default function ChangePassword() {
   const isFirstLogin = userProfile?.status === 'invited' || userProfile?.status === 'invite_failed';
 
   const validate = (): string | null => {
-    if (!isFirstLogin && !currentPassword) return '현재 비밀번호를 입력해 주세요.';
-    if (newPassword.length < 8) return '비밀번호는 8자 이상이어야 합니다.';
-    if (newPassword !== confirmPassword) return '비밀번호가 일치하지 않습니다.';
+    if (!isFirstLogin && !currentPassword)
+      return t({ ko: '현재 비밀번호를 입력해 주세요.', ja: '現在のパスワードを入力してください。', en: 'Please enter your current password.' });
+    if (newPassword.length < 8)
+      return t({ ko: '비밀번호는 8자 이상이어야 합니다.', ja: 'パスワードは8文字以上で入力してください。', en: 'Password must be at least 8 characters.' });
+    if (newPassword !== confirmPassword)
+      return t({ ko: '비밀번호가 일치하지 않습니다.', ja: 'パスワードが一致しません。', en: 'Passwords do not match.' });
     return null;
   };
 
@@ -47,10 +54,11 @@ export default function ChangePassword() {
           `🔑 역할: ${userProfile.role === 'partner' ? '파트너' : userProfile.role}`
         );
       }
-      toast.success('비밀번호가 성공적으로 변경되었습니다.');
+      toast.success(t({ ko: '비밀번호가 성공적으로 변경되었습니다.', ja: 'パスワードを変更しました。', en: 'Your password has been changed.' }));
       navigate('/', { replace: true });
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : '비밀번호 변경에 실패했습니다.');
+      toast.error(error instanceof Error ? error.message
+        : t({ ko: '비밀번호 변경에 실패했습니다.', ja: 'パスワードの変更に失敗しました。', en: 'Failed to change password.' }));
     } finally {
       setLoading(false);
     }
@@ -64,15 +72,15 @@ export default function ChangePassword() {
   const passwordStrength = (): { label: string; color: string; width: string } => {
     const len = newPassword.length;
     if (len === 0) return { label: '', color: '', width: '0%' };
-    if (len < 8) return { label: '너무 짧음', color: 'bg-destructive', width: '25%' };
+    if (len < 8) return { label: t({ ko: '너무 짧음', ja: '短すぎます', en: 'Too short' }), color: 'bg-destructive', width: '25%' };
     const hasUpper = /[A-Z]/.test(newPassword);
     const hasLower = /[a-z]/.test(newPassword);
     const hasNum = /[0-9]/.test(newPassword);
     const hasSpec = /[^A-Za-z0-9]/.test(newPassword);
     const score = [hasUpper, hasLower, hasNum, hasSpec].filter(Boolean).length;
-    if (score <= 2) return { label: '보통', color: 'bg-yellow-500', width: '50%' };
-    if (score === 3) return { label: '강함', color: 'bg-blue-500', width: '75%' };
-    return { label: '매우 강함', color: 'bg-green-500', width: '100%' };
+    if (score <= 2) return { label: t({ ko: '보통', ja: '普通', en: 'Fair' }), color: 'bg-yellow-500', width: '50%' };
+    if (score === 3) return { label: t({ ko: '강함', ja: '強い', en: 'Strong' }), color: 'bg-blue-500', width: '75%' };
+    return { label: t({ ko: '매우 강함', ja: '非常に強い', en: 'Very strong' }), color: 'bg-green-500', width: '100%' };
   };
 
   const strength = passwordStrength();
@@ -94,25 +102,33 @@ export default function ChangePassword() {
             <div className="mb-5 flex items-start gap-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-4 py-3">
               <ShieldAlert className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">처음 로그인하셨습니다.</p>
-                <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">보안을 위해 비밀번호를 변경해 주세요.</p>
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  {t({ ko: '처음 로그인하셨습니다.', ja: '初回ログインです。', en: 'This is your first sign-in.' })}
+                </p>
+                <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+                  {t({ ko: '보안을 위해 비밀번호를 변경해 주세요.', ja: 'セキュリティのため、パスワードを変更してください。', en: 'Please set a new password for security.' })}
+                </p>
               </div>
             </div>
           )}
 
-          <h2 className="text-lg font-semibold mb-5">비밀번호 변경</h2>
+          <h2 className="text-lg font-semibold mb-5">
+            {t({ ko: '비밀번호 변경', ja: 'パスワード変更', en: 'Change password' })}
+          </h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Current password — only for voluntary change */}
             {!isFirstLogin && (
               <div className="space-y-1.5">
-                <Label htmlFor="current-password">현재 비밀번호</Label>
+                <Label htmlFor="current-password">
+                  {t({ ko: '현재 비밀번호', ja: '現在のパスワード', en: 'Current password' })}
+                </Label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="current-password"
                     type={showCurrent ? 'text' : 'password'}
-                    placeholder="현재 비밀번호를 입력하세요"
+                    placeholder={t({ ko: '현재 비밀번호를 입력하세요', ja: '現在のパスワードを入力', en: 'Enter your current password' })}
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
                     className="pl-9 pr-9"
@@ -133,13 +149,15 @@ export default function ChangePassword() {
 
             {/* New password */}
             <div className="space-y-1.5">
-              <Label htmlFor="new-password">새 비밀번호</Label>
+              <Label htmlFor="new-password">
+                {t({ ko: '새 비밀번호', ja: '新しいパスワード', en: 'New password' })}
+              </Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="new-password"
                   type={showNew ? 'text' : 'password'}
-                  placeholder="8자 이상 입력하세요"
+                  placeholder={t({ ko: '8자 이상 입력하세요', ja: '8文字以上で入力', en: 'At least 8 characters' })}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   className="pl-9 pr-9"
@@ -165,20 +183,24 @@ export default function ChangePassword() {
                       style={{ width: strength.width }}
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground">강도: {strength.label}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t({ ko: '강도', ja: '強度', en: 'Strength' })}: {strength.label}
+                  </p>
                 </div>
               )}
             </div>
 
             {/* Confirm password */}
             <div className="space-y-1.5">
-              <Label htmlFor="confirm-password">비밀번호 확인</Label>
+              <Label htmlFor="confirm-password">
+                {t({ ko: '비밀번호 확인', ja: 'パスワード確認', en: 'Confirm password' })}
+              </Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="confirm-password"
                   type={showConfirm ? 'text' : 'password'}
-                  placeholder="비밀번호를 다시 입력하세요"
+                  placeholder={t({ ko: '비밀번호를 다시 입력하세요', ja: 'パスワードを再入力', en: 'Re-enter your password' })}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="pl-9 pr-9"
@@ -195,15 +217,21 @@ export default function ChangePassword() {
                 </button>
               </div>
               {confirmPassword.length > 0 && newPassword !== confirmPassword && (
-                <p className="text-xs text-destructive">비밀번호가 일치하지 않습니다.</p>
+                <p className="text-xs text-destructive">
+                  {t({ ko: '비밀번호가 일치하지 않습니다.', ja: 'パスワードが一致しません。', en: 'Passwords do not match.' })}
+                </p>
               )}
               {confirmPassword.length > 0 && newPassword === confirmPassword && newPassword.length >= 8 && (
-                <p className="text-xs text-green-600 dark:text-green-400">비밀번호가 일치합니다.</p>
+                <p className="text-xs text-green-600 dark:text-green-400">
+                  {t({ ko: '비밀번호가 일치합니다.', ja: 'パスワードが一致しました。', en: 'Passwords match.' })}
+                </p>
               )}
             </div>
 
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? '변경 중...' : '비밀번호 변경'}
+              {loading
+                ? t({ ko: '변경 중...', ja: '変更中...', en: 'Changing...' })
+                : t({ ko: '비밀번호 변경', ja: 'パスワード変更', en: 'Change password' })}
             </Button>
           </form>
 
@@ -214,7 +242,7 @@ export default function ChangePassword() {
                 onClick={() => navigate(-1)}
                 className="text-sm text-muted-foreground hover:text-foreground underline-offset-4 hover:underline transition-colors"
               >
-                취소
+                {t({ ko: '취소', ja: 'キャンセル', en: 'Cancel' })}
               </button>
             </div>
           )}
@@ -226,7 +254,7 @@ export default function ChangePassword() {
                 onClick={handleLogout}
                 className="text-sm text-muted-foreground hover:text-foreground underline-offset-4 hover:underline transition-colors"
               >
-                로그아웃
+                {t({ ko: '로그아웃', ja: 'ログアウト', en: 'Sign out' })}
               </button>
             </div>
           )}
