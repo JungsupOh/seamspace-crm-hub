@@ -21,6 +21,7 @@ export interface PartnerLicense {
   id: string;
   partner_id: string;
   partner_deal_id?: string | null;
+  partner_deal_buyer_id?: string | null;
   coupon_code: string;
   contact_name?: string | null;
   contact_email?: string | null;
@@ -45,6 +46,7 @@ export interface PartnerLicense {
 export interface IssueLicenseInput {
   partnerId?: string;          // admin이 대신 발급 시. partner 본인은 서버가 강제.
   partnerDealId?: string | null;
+  partnerDealBuyerId?: string | null;   // 딜 내 특정 구매자에 귀속
   customerName: string;
   contactEmail: string;
   contactPhone?: string;
@@ -88,6 +90,7 @@ export async function issueLicense(input: IssueLicenseInput): Promise<{ coupon_c
     body: JSON.stringify({
       partnerId:     input.partnerId,
       partnerDealId: input.partnerDealId ?? null,
+      partnerDealBuyerId: input.partnerDealBuyerId ?? null,
       customerName:  input.customerName,
       contactEmail:  input.contactEmail,
       contactPhone:  input.contactPhone ?? '',

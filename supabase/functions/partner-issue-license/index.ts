@@ -74,6 +74,7 @@ Deno.serve(async (req: Request) => {
     // ── 3) 발급 파라미터 ──
     const {
       partnerDealId = null,
+      partnerDealBuyerId = null,
       customerName  = '',
       contactEmail  = '',
       contactPhone  = '',
@@ -84,6 +85,7 @@ Deno.serve(async (req: Request) => {
       amount        = null,
     } = body as {
       partnerDealId?: string | null;
+      partnerDealBuyerId?: string | null;
       customerName?: string;
       contactEmail?: string;
       contactPhone?: string;
@@ -119,6 +121,7 @@ Deno.serve(async (req: Request) => {
       .insert({
         partner_id:       partnerId,
         partner_deal_id:  partnerDealId,
+        partner_deal_buyer_id: partnerDealBuyerId,
         coupon_code:      couponCode,
         contact_name:     customerName || null,
         contact_email:    contactEmail || null,
