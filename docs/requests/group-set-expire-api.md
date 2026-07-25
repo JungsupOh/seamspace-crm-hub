@@ -42,7 +42,7 @@ Authorization: Bearer {ss_access_token}
 | 파라미터 | 필수 | 설명 |
 |---|---|---|
 | `group_id` | O | 만료일을 변경할 그룹의 ID (= `mDiary_app_group.group_ptr_id`) |
-| `service_expire_at` | O | 새 만료일 `YYYY-MM-DD`. 즉시 만료시키려면 오늘 또는 과거 날짜 |
+| `service_expire_at` | O | 새 만료일 `YYYY-MM-DD`. 즉시 차단하려면 과거 날짜(예: 어제) |
 | `reason` | X | 변경 사유 (감사 로그용, 최대 200자) |
 
 > CRM은 `group_id` 를 이미 알고 있습니다.
@@ -60,13 +60,15 @@ HTTP 200
   "success": true,
   "group_id": 19485,
   "group_name": "…",
-  "service_expire_at": "2026-07-25",
+  "service_expire_at": "2026-07-24",
   "is_expired": true
 }
 ```
 
 - `is_expired`: `service_expire_at` 이 오늘 이전이면 `true`
   (CRM이 "만료됨/만료예정"을 구분해 표시하는 데 사용)
+- 즉시 차단이 목적이면 CRM은 `service_expire_at` 에 **어제 날짜**를 보냅니다.
+  오늘로 설정하면 당일 자정까지 이용 가능할 수 있어, 확실히 차단하기 위함입니다.
 
 ### 5.2 존재하지 않는 그룹
 
@@ -104,9 +106,12 @@ HTTP 400
 사용 중 쿠폰 회수 시:
 
 1. CRM이 쿠폰의 그룹 정보(그룹명·멤버 수·관리자·현재 만료일)를 화면에 표시하고,
-   운영자에게 "정말 이 그룹을 만료시키겠습니까?" 를 한 번 더 확인받습니다.
-2. 확인 시 `group_set_expire(group_id, 오늘 날짜)` 를 호출해 즉시 만료시킵니다.
-3. 응답의 `service_expire_at` / `is_expired` 를 발급 원장(`partner_licenses`)에 기록합니다.
+   운영자에게 "정말 이 그룹을 만료시키겠습니까?" 를 확인받습니다.
+2. 되돌리기 어려운 동작이므로, 확인 버튼을 누르면 **최종 확인("정말로 진행합니다")을
+   한 번 더** 표시합니다. (2단계 확인)
+3. 최종 확인 시 `group_set_expire(group_id, 어제 날짜)` 를 호출해 즉시 차단합니다.
+   (오늘이 아니라 어제로 설정 — 당일 잔여 이용을 막기 위함)
+4. 응답의 `service_expire_at` / `is_expired` 를 발급 원장(`partner_licenses`)에 기록합니다.
 
 ---
 
