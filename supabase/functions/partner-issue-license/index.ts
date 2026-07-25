@@ -47,24 +47,24 @@ Deno.serve(async (req: Request) => {
 
     const { data: profile } = await admin
       .from('user_profiles')
-      .select('role, partner_id, partner_role')
+      .select('role, partner_id')
       .eq('id', caller.id)
       .single();
 
-    const role = profile?.role ?? caller.user_metadata?.role;
-    if (role !== 'partner' && role !== 'admin' && role !== 'sub_admin') {
+    const role: string = profile?.role ?? caller.user_metadata?.role ?? '';
+    const isPartner = role.startsWith('partner_');
+    if (!isPartner && role !== 'admin' && role !== 'sub_admin') {
       return json({ error: 'Not allowed' }, 403);
     }
-    // 파트너 사용자는 내부 역할이 manager여야 발급 가능 (member/viewer 차단).
-    // partner_role 미지정(레거시)은 manager로 간주. admin/sub_admin은 제한 없음.
-    if (role === 'partner' && (profile?.partner_role ?? 'manager') !== 'manager') {
+    // 파트너 사용자는 partner_admin만 발급 가능 (member/viewer 차단). admin/sub_admin은 제한 없음.
+    if (isPartner && role !== 'partner_admin') {
       return json({ error: '이용권 발급 권한이 없습니다 (관리자 역할 필요)' }, 403);
     }
 
     const body = await req.json();
 
     // partner면 자기 partner_id 강제 / admin은 명시 partner_id 허용
-    const partnerId = (role === 'partner') ? profile?.partner_id : (body.partnerId ?? profile?.partner_id);
+    const partnerId = isPartner ? profile?.partner_id : (body.partnerId ?? profile?.partner_id);
     if (!partnerId) return json({ error: 'partner_id를 확인할 수 없습니다' }, 400);
 
     const { data: partner } = await admin

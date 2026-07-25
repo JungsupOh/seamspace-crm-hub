@@ -16,20 +16,24 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { makeT } from '@/lib/partner-i18n';
 
-type UserRole = 'admin' | 'sub_admin' | 'guest' | 'partner';
+type UserRole = 'admin' | 'sub_admin' | 'partner_admin' | 'partner_member' | 'partner_viewer' | 'guest';
 
 const ROLE_LABELS: Record<UserRole, string> = {
   admin: '관리자',
   sub_admin: '서브관리자',
+  partner_admin: '파트너 관리자',
+  partner_member: '파트너 참여자',
+  partner_viewer: '파트너 게스트',
   guest: '게스트',
-  partner: '파트너',
 };
 
 const ROLE_BADGE_CLASSES: Record<UserRole, string> = {
   admin: 'bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300',
   sub_admin: 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300',
+  partner_admin: 'bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300',
+  partner_member: 'bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300',
+  partner_viewer: 'bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300',
   guest: 'bg-gray-100 text-gray-600 dark:bg-gray-800/60 dark:text-gray-400',
-  partner: 'bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300',
 };
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -49,7 +53,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   };
 
   const role = userProfile?.role as UserRole | undefined;
-  const isPartnerRole = role === 'partner';
+  const isPartnerRole = !!role?.startsWith('partner_');
 
   // 파트너 전용 미니멀 레이아웃 (사이드바/검색 없음)
   if (isPartnerRole) {
@@ -71,8 +75,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
                     <span className="text-sm font-medium max-w-[120px] truncate">
                       {userProfile.name || userProfile.email.split('@')[0]}
                     </span>
-                    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${ROLE_BADGE_CLASSES.partner}`}>
-                      {t({ ko: '파트너', ja: 'パートナー', en: 'Partner' })}
+                    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${ROLE_BADGE_CLASSES[role ?? 'partner_member']}`}>
+                      {role === 'partner_admin'  ? t({ ko: '관리자', ja: '管理者', en: 'Admin' })
+                       : role === 'partner_viewer' ? t({ ko: '게스트', ja: 'ゲスト', en: 'Viewer' })
+                       : t({ ko: '참여자', ja: 'メンバー', en: 'Member' })}
                     </span>
                   </Button>
                 </DropdownMenuTrigger>

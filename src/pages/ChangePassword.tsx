@@ -51,7 +51,7 @@ export default function ChangePassword() {
           `👤 <b>사용자 활성화</b>\n\n` +
           `📧 ${userProfile.email}\n` +
           `🏷 ${userProfile.name || '—'}\n` +
-          `🔑 역할: ${userProfile.role === 'partner' ? '파트너' : userProfile.role}`
+          `🔑 역할: ${userProfile.role}`
         );
       }
       toast.success(t({ ko: '비밀번호가 성공적으로 변경되었습니다.', ja: 'パスワードを変更しました。', en: 'Your password has been changed.' }));

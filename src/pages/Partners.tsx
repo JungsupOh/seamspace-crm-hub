@@ -376,12 +376,12 @@ function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerShe
   const [deleteFileConfirmOpen, setDeleteFileConfirmOpen] = useState(false);
   const [deleteFileTargetId, setDeleteFileTargetId] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
-  const [partnerUsers, setPartnerUsers] = useState<Array<{ id: string; email: string; name: string | null; status: string; partner_role?: string | null; last_sign_in_at?: string }>>([]);
+  const [partnerUsers, setPartnerUsers] = useState<Array<{ id: string; email: string; name: string | null; status: string; role?: string | null; last_sign_in_at?: string }>>([]);
   // 담당자 초대 폼 — 파트너 대표 연락처(contact_email)와 분리해 여러 명 초대 가능
   const [inviteOpen, setInviteOpen]   = useState(false);
   const [inviteName, setInviteName]   = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole]   = useState<'manager' | 'member' | 'viewer'>('manager');
+  const [inviteRole, setInviteRole]   = useState<'partner_admin' | 'partner_member' | 'partner_viewer'>('partner_member');
   const [deleteUserConfirmOpen, setDeleteUserConfirmOpen] = useState(false);
   const [deleteUserTarget, setDeleteUserTarget] = useState<{ id: string; email: string } | null>(null);
   // 신규 등록 직후 "담당자를 초대할까요?" 확인
@@ -408,7 +408,7 @@ function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerShe
   // 파트너에 연결된 사용자 목록 로드
   const loadPartnerUsers = useCallback(async (partnerId: string) => {
     const { data } = await supabase
-      .from('user_profiles').select('id,email,name,status,partner_role').eq('partner_id', partnerId);
+      .from('user_profiles').select('id,email,name,status,role').eq('partner_id', partnerId);
     setPartnerUsers(data ?? []);
   }, []);
 
@@ -441,7 +441,7 @@ function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerShe
    * 이미 있는 계정이면 비밀번호를 이번 초대코드로 재설정한다.
    * (재설정하지 않으면 메일에 적힌 코드가 실제 비밀번호와 달라 로그인이 안 됨)
    */
-  const inviteAccount = async (rawEmail: string, rawName: string, partnerRole: 'manager' | 'member' | 'viewer' = 'manager') => {
+  const inviteAccount = async (rawEmail: string, rawName: string, partnerRole: 'partner_admin' | 'partner_member' | 'partner_viewer' = 'partner_member') => {
     const email = rawEmail.trim();
     const name  = rawName.trim();
     if (!email) { toast.error('초대할 담당자 이메일을 입력해주세요'); return; }
@@ -458,7 +458,7 @@ function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerShe
       try {
         const { user } = await adminAuthFetch('createUser', {
           email, password: code,
-          user_metadata: { name: name || email.split('@')[0], role: 'partner', partner_id: initial.id },
+          user_metadata: { name: name || email.split('@')[0], role: partnerRole, partner_id: initial.id },
         });
         userId = user?.id ?? null;
       } catch (e) {
@@ -480,9 +480,8 @@ function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerShe
       await adminAuthFetch('updateProfile', {
         userId,
         updates: {
-          role: 'partner',
+          role: partnerRole,
           partner_id: initial.id,
-          partner_role: partnerRole,
           name: name || null,
           status: 'invited',
           is_first_login: true,
@@ -501,20 +500,20 @@ function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerShe
       setInviteOpen(false);
       setInviteName('');
       setInviteEmail('');
-      setInviteRole('manager');
+      setInviteRole('partner_member');
       await loadPartnerUsers(initial.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '초대 실패');
     } finally { setInviting(false); }
   };
 
-  // 기존 파트너 계정의 내부 역할 변경 (관리자/참여자/게스트)
-  const changeUserRole = async (userId: string, partnerRole: 'manager' | 'member' | 'viewer') => {
+  // 기존 파트너 계정의 역할 변경 (관리자/참여자/게스트)
+  const changeUserRole = async (userId: string, newRole: 'partner_admin' | 'partner_member' | 'partner_viewer') => {
     if (!initial?.id) return;
     // 낙관적 업데이트
-    setPartnerUsers(prev => prev.map(u => u.id === userId ? { ...u, partner_role: partnerRole } : u));
+    setPartnerUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
     try {
-      await adminAuthFetch('updateProfile', { userId, updates: { partner_role: partnerRole } });
+      await adminAuthFetch('updateProfile', { userId, updates: { role: newRole } });
       toast.success('역할이 변경되었습니다');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '역할 변경 실패');
@@ -848,9 +847,9 @@ function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerShe
                       <Label className="text-xs">역할</Label>
                       <div className="grid grid-cols-3 gap-2 mt-1">
                         {([
-                          { v: 'manager', label: '관리자', desc: '이용권+딜' },
-                          { v: 'member',  label: '참여자', desc: '딜만' },
-                          { v: 'viewer',  label: '게스트', desc: '보기만' },
+                          { v: 'partner_admin',  label: '관리자', desc: '이용권+딜' },
+                          { v: 'partner_member', label: '참여자', desc: '딜만' },
+                          { v: 'partner_viewer', label: '게스트', desc: '보기만' },
                         ] as const).map(r => (
                           <button key={r.v} type="button"
                             onClick={() => setInviteRole(r.v)}
@@ -866,7 +865,7 @@ function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerShe
                     </p>
                     <div className="flex justify-end gap-2">
                       <Button size="sm" variant="ghost" className="h-7 text-xs"
-                        onClick={() => { setInviteOpen(false); setInviteName(''); setInviteEmail(''); setInviteRole('manager'); }}
+                        onClick={() => { setInviteOpen(false); setInviteName(''); setInviteEmail(''); setInviteRole('partner_member'); }}
                         disabled={inviting}>
                         취소
                       </Button>
@@ -892,13 +891,13 @@ function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerShe
                           {/* 내부 역할 — 관리자가 즉시 변경 가능 */}
                           {canEdit && (
                             <select
-                              value={(u.partner_role as string) ?? 'manager'}
-                              onChange={e => changeUserRole(u.id, e.target.value as 'manager' | 'member' | 'viewer')}
+                              value={(u.role as string) ?? 'partner_member'}
+                              onChange={e => changeUserRole(u.id, e.target.value as 'partner_admin' | 'partner_member' | 'partner_viewer')}
                               className="h-6 rounded border border-border bg-background px-1 text-[10px]"
-                              title="파트너 내부 역할">
-                              <option value="manager">관리자</option>
-                              <option value="member">참여자</option>
-                              <option value="viewer">게스트</option>
+                              title="파트너 역할">
+                              <option value="partner_admin">관리자</option>
+                              <option value="partner_member">참여자</option>
+                              <option value="partner_viewer">게스트</option>
                             </select>
                           )}
                           <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium
@@ -911,7 +910,7 @@ function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerShe
                             <>
                               <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[11px]"
                                 title="초대 코드를 새로 발급해 다시 보냅니다 (기존 비밀번호는 무효화됩니다)"
-                                onClick={() => inviteAccount(u.email, u.name ?? '', (u.partner_role as 'manager' | 'member' | 'viewer') ?? 'manager')}
+                                onClick={() => inviteAccount(u.email, u.name ?? '', (u.role as 'partner_admin' | 'partner_member' | 'partner_viewer') ?? 'partner_member')}
                                 disabled={inviting}>
                                 재발송
                               </Button>

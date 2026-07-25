@@ -105,7 +105,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   }
 
   // Partner: redirect to partner portal, block other pages
-  if (userProfile?.role === 'partner') {
+  if (userProfile?.role?.startsWith('partner_')) {
     if (location.pathname !== '/partner' && location.pathname !== '/change-password') {
       return <Navigate to="/partner" replace />;
     }
