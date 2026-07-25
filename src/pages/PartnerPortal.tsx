@@ -829,13 +829,13 @@ export default function PartnerPortal() {
       </div>
       {/* 딜 추가 모달 */}
       <Dialog open={addDialogOpen} onOpenChange={open => { if (!open) { setAddDialogOpen(false); setEditingDealId(null); } }}>
-        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
+        <DialogContent className="max-w-lg max-h-[90vh] grid grid-rows-[auto_1fr_auto] gap-3 overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
           <DialogHeader className="shrink-0">
             <DialogTitle>{editingDealId ? t({ ko: '딜 상세 / 수정', ja: '案件詳細 / 修正', en: 'Deal Details / Edit' }) : t({ ko: '새 딜 추가', ja: '新規案件', en: 'New Deal' })}</DialogTitle>
           </DialogHeader>
           {/* viewer는 폼 전체를 비활성화 (보기 전용). fieldset이 내부 입력을 일괄 disable.
               단, 이용권 조작 버튼은 canManageLicenses로 별도 게이팅되어 viewer에겐 이미 숨김. */}
-          <fieldset disabled={!canEditPartnerDeals} className="space-y-4 pt-2 pb-1 overflow-y-auto flex-1 min-h-0 min-w-0 border-0 p-0 m-0 disabled:opacity-100">
+          <fieldset disabled={!canEditPartnerDeals} className="space-y-4 overflow-y-auto min-h-0 min-w-0 border-0 p-0 m-0 pr-1 disabled:opacity-100">
             {/* 계약일 */}
             <div>
               <Label className="text-xs">{t({ ko: '계약일', ja: '契約日', en: 'Contract date' })}</Label>
