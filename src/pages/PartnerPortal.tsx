@@ -340,6 +340,11 @@ export default function PartnerPortal() {
       toast.error(t({ ko: '구매자를 최소 1명 입력해주세요', ja: '購入者を最低1名入力してください', en: 'Please enter at least one buyer' }));
       return;
     }
+    // 이메일 필수 — 이용권이 이메일로 발송되므로 (구매자 = 발송 대상)
+    if (validBuyers.some(b => !b.buyer_email.trim())) {
+      toast.error(t({ ko: '구매자 이메일을 모두 입력해주세요', ja: '購入者のメールをすべて入力してください', en: 'Every buyer needs an email' }));
+      return;
+    }
     setAdding(true);
     try {
       const totalAmount = itemsTotal;
@@ -830,7 +835,7 @@ export default function PartnerPortal() {
           </DialogHeader>
           {/* viewer는 폼 전체를 비활성화 (보기 전용). fieldset이 내부 입력을 일괄 disable.
               단, 이용권 조작 버튼은 canManageLicenses로 별도 게이팅되어 viewer에겐 이미 숨김. */}
-          <fieldset disabled={!canEditPartnerDeals} className="space-y-4 pt-2 overflow-y-auto flex-1 min-w-0 border-0 p-0 m-0 disabled:opacity-100">
+          <fieldset disabled={!canEditPartnerDeals} className="space-y-4 pt-2 pb-1 overflow-y-auto flex-1 min-h-0 min-w-0 border-0 p-0 m-0 disabled:opacity-100">
             {/* 계약일 */}
             <div>
               <Label className="text-xs">{t({ ko: '계약일', ja: '契約日', en: 'Contract date' })}</Label>
@@ -1020,8 +1025,8 @@ export default function PartnerPortal() {
                         <Input value={b.buyer_phone} onChange={e => updateBuyer(idx, 'buyer_phone', phoneFmt(e.target.value))} placeholder={phonePlaceholder} className="h-7 text-xs" />
                       </div>
                       <div>
-                        <span className="text-[10px] text-muted-foreground">{t({ ko: '이메일', ja: 'メール', en: 'Email' })}</span>
-                        <Input value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" />
+                        <span className="text-[10px] text-muted-foreground">{t({ ko: '이메일', ja: 'メール', en: 'Email' })} *</span>
+                        <Input type="email" required value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" />
                       </div>
                     </div>
                     {/* 학생 수·이용기간은 구매자가 아니라 '이용권'의 값이다.
@@ -1074,6 +1079,13 @@ export default function PartnerPortal() {
                               </div>
                             );
                           })}
+                          {/* 기존 고객에게 이용권 추가 발급 */}
+                          {canManageLicenses && bLics.length > 0 && (
+                            <Button size="sm" variant="outline" className="h-6 text-[11px] px-2"
+                              onClick={() => deal && openIssueDialog(deal, { ...b, id: b.id } as unknown as PartnerDealBuyer)}>
+                              <Plus className="h-3 w-3 mr-0.5" />{t({ ko: '추가 발급', ja: '追加発行', en: 'Issue more' })}
+                            </Button>
+                          )}
                         </div>
                       );
                     })()}
