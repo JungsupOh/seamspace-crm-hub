@@ -7,7 +7,8 @@ CRM에서 mDiary 백엔드에 요청하는 API·연동 건을 모아둡니다.
 
 | 문서 | 요청일 | 상태 | 요약 |
 |---|---|---|---|
-| [쿠폰 무효화 API](./coupon-revoke-api.md) | 2026-07-20 | 스펙 확정 (2026-07-25) | 계약 결렬·오발급 쿠폰을 정지시키는 `coupon_revoke` + `coupon_info` 조회 |
+| [쿠폰 무효화 API](./coupon-revoke-api.md) | 2026-07-20 | 구현 완료 (2026-07-25 검증) | 미사용 쿠폰 회수 `coupon_revoke` + `coupon_info` 조회 |
+| [그룹 만료일 변경 API](./group-set-expire-api.md) | 2026-07-25 | 요청 준비 | 사용 중 쿠폰 회수를 위해 그룹을 만료시키는 `group_set_expire` |
 
 관련 문서: [쿠폰 상태 변경 Webhook 명세](../COUPON_WEBHOOK_SPEC.md)
 
