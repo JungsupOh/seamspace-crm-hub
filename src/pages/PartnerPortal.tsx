@@ -79,7 +79,10 @@ const emptyIssueForm = (): IssueForm => ({
 });
 
 export default function PartnerPortal() {
-  const { userProfile, partnerLocale, partnerCurrency, partnerCountry, canIssueLicenses } = useAuth();
+  const { userProfile, partnerLocale, partnerCurrency, partnerCountry, canIssueLicenses,
+          canEditPartnerDeals, canManageLicenses } = useAuth();
+  // 코드는 manager만 원문 열람. member/viewer는 마스킹.
+  const maskCode = (code: string) => canManageLicenses ? code : '••••••';
   const isIntl = partnerLocale !== 'ko';
   const t = makeT(partnerLocale);
   const curUnit = currencyUnit(partnerCurrency);
@@ -632,9 +635,11 @@ export default function PartnerPortal() {
       {/* 이용권 발급은 항상 '구매자'에서 시작한다 (딜 펼치기 또는 딜 수정 화면).
           여기 별도 발급 버튼을 두면 구매자와 무관한 이용권이 생겨 헷갈리므로 제거. */}
       <div className="flex justify-end gap-2">
-        <Button size="sm" onClick={handleOpenAddDialog} disabled={adding}>
-          <Plus className="h-4 w-4 mr-1.5" />{t({ ko: '딜 추가', ja: '案件追加', en: 'Add Deal' })}
-        </Button>
+        {canEditPartnerDeals && (
+          <Button size="sm" onClick={handleOpenAddDialog} disabled={adding}>
+            <Plus className="h-4 w-4 mr-1.5" />{t({ ko: '딜 추가', ja: '案件追加', en: 'Add Deal' })}
+          </Button>
+        )}
       </div>
 
       {/* 딜 테이블 — 행을 펼치면 구매자별 이용권이 아코디언으로 열린다 */}
@@ -745,14 +750,16 @@ export default function PartnerPortal() {
                                 </div>
                                 <div className="flex-1 space-y-1">
                                   {bLics.length === 0 ? (
-                                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openIssueDialog(d, b)}>
-                                      <Ticket className="h-3.5 w-3.5 mr-1" />{t({ ko: '이용권 발급', ja: 'ライセンス発行', en: 'Issue license' })}
-                                    </Button>
+                                    canManageLicenses ? (
+                                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openIssueDialog(d, b)}>
+                                        <Ticket className="h-3.5 w-3.5 mr-1" />{t({ ko: '이용권 발급', ja: 'ライセンス発行', en: 'Issue license' })}
+                                      </Button>
+                                    ) : <span className="text-[11px] text-muted-foreground">{t({ ko: '미발급', ja: '未発行', en: 'Not issued' })}</span>
                                   ) : bLics.map(lic => {
                                     const revoked = lic.status === 'revoked';
                                     return (
                                       <div key={lic.id} className="flex items-center gap-2">
-                                        <span className={`font-mono text-[11px] ${revoked ? 'line-through text-muted-foreground' : ''}`}>{lic.coupon_code}</span>
+                                        <span className={`font-mono text-[11px] ${revoked ? 'line-through text-muted-foreground' : ''}`}>{maskCode(lic.coupon_code)}</span>
                                         <span className="text-[10px] text-muted-foreground">
                                           {t({ ko: '학생', ja: '生徒', en: 'Students' })} {lic.user_count ?? '-'} · {t({ ko: '기간', ja: '期間', en: 'Term' })} {lic.duration ?? '-'}{t({ ko: '개월', ja: 'か月', en: 'mo' })}
                                         </span>
@@ -765,18 +772,22 @@ export default function PartnerPortal() {
                                             <span className={`text-[10px] rounded px-1.5 py-0.5 ${lic.email_sent ? 'text-teal-700 bg-teal-50' : 'text-amber-600 bg-amber-50'}`}>
                                               {lic.email_sent ? t({ ko: '발송됨', ja: '送信済み', en: 'Sent' }) : t({ ko: '미발송', ja: '未送信', en: 'Not sent' })}
                                             </span>
-                                            <button onClick={() => copyCode(lic.coupon_code)} title={t({ ko: '코드 복사', ja: 'コードをコピー', en: 'Copy code' })}
-                                              className="p-0.5 rounded hover:bg-muted text-muted-foreground"><Copy className="h-3 w-3" /></button>
-                                            <button onClick={() => handleResend(lic)} title={t({ ko: '이메일 재발송', ja: 'メール再送信', en: 'Resend email' })}
-                                              className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Send className="h-3 w-3" /></button>
-                                            <button onClick={() => askRevoke(lic)} title={t({ ko: '무효화', ja: '無効化', en: 'Revoke' })}
-                                              className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Ban className="h-3 w-3" /></button>
+                                            {canManageLicenses && (
+                                              <>
+                                                <button onClick={() => copyCode(lic.coupon_code)} title={t({ ko: '코드 복사', ja: 'コードをコピー', en: 'Copy code' })}
+                                                  className="p-0.5 rounded hover:bg-muted text-muted-foreground"><Copy className="h-3 w-3" /></button>
+                                                <button onClick={() => handleResend(lic)} title={t({ ko: '이메일 재발송', ja: 'メール再送信', en: 'Resend email' })}
+                                                  className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Send className="h-3 w-3" /></button>
+                                                <button onClick={() => askRevoke(lic)} title={t({ ko: '무효화', ja: '無効化', en: 'Revoke' })}
+                                                  className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Ban className="h-3 w-3" /></button>
+                                              </>
+                                            )}
                                           </>
                                         )}
                                       </div>
                                     );
                                   })}
-                                  {bLics.length > 0 && (
+                                  {canManageLicenses && bLics.length > 0 && (
                                     <Button size="sm" variant="outline" className="h-6 text-[11px] px-2" onClick={() => openIssueDialog(d, b)}>
                                       <Plus className="h-3 w-3 mr-0.5" />{t({ ko: '추가 발급', ja: '追加発行', en: 'Issue more' })}
                                     </Button>
@@ -789,9 +800,9 @@ export default function PartnerPortal() {
                           {dealLicenses.filter(l => !l.partner_deal_buyer_id).map(lic => (
                             <div key={lic.id} className="flex items-center gap-2 rounded-md bg-background px-3 py-2">
                               <span className="min-w-[180px] text-[10px] text-muted-foreground">{t({ ko: '(구매자 미지정)', ja: '(購入者未指定)', en: '(no buyer linked)' })}</span>
-                              <span className={`font-mono text-[11px] ${lic.status === 'revoked' ? 'line-through text-muted-foreground' : ''}`}>{lic.coupon_code}</span>
+                              <span className={`font-mono text-[11px] ${lic.status === 'revoked' ? 'line-through text-muted-foreground' : ''}`}>{maskCode(lic.coupon_code)}</span>
                               <span className="text-[10px] text-muted-foreground">{lic.contact_email}</span>
-                              {lic.status !== 'revoked' && (
+                              {canManageLicenses && lic.status !== 'revoked' && (
                                 <>
                                   <button onClick={() => copyCode(lic.coupon_code)} className="p-0.5 rounded hover:bg-muted text-muted-foreground"><Copy className="h-3 w-3" /></button>
                                   <button onClick={() => handleResend(lic)} className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Send className="h-3 w-3" /></button>
@@ -817,7 +828,9 @@ export default function PartnerPortal() {
           <DialogHeader>
             <DialogTitle>{editingDealId ? t({ ko: '딜 상세 / 수정', ja: '案件詳細 / 修正', en: 'Deal Details / Edit' }) : t({ ko: '새 딜 추가', ja: '新規案件', en: 'New Deal' })}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 pt-2 overflow-y-auto flex-1">
+          {/* viewer는 폼 전체를 비활성화 (보기 전용). fieldset이 내부 입력을 일괄 disable.
+              단, 이용권 조작 버튼은 canManageLicenses로 별도 게이팅되어 viewer에겐 이미 숨김. */}
+          <fieldset disabled={!canEditPartnerDeals} className="space-y-4 pt-2 overflow-y-auto flex-1 min-w-0 border-0 p-0 m-0 disabled:opacity-100">
             {/* 계약일 */}
             <div>
               <Label className="text-xs">{t({ ko: '계약일', ja: '契約日', en: 'Contract date' })}</Label>
@@ -1025,15 +1038,17 @@ export default function PartnerPortal() {
                             <Ticket className="h-3 w-3" />{t({ ko: '이용권', ja: 'ライセンス', en: 'License' })}
                           </span>
                           {bLics.length === 0 ? (
-                            <Button size="sm" variant="outline" className="h-6 text-[11px] px-2"
-                              onClick={() => deal && openIssueDialog(deal, { ...b, id: b.id } as unknown as PartnerDealBuyer)}>
-                              <Ticket className="h-3 w-3 mr-1" />{t({ ko: '이용권 발급', ja: 'ライセンス発行', en: 'Issue license' })}
-                            </Button>
+                            canManageLicenses ? (
+                              <Button size="sm" variant="outline" className="h-6 text-[11px] px-2"
+                                onClick={() => deal && openIssueDialog(deal, { ...b, id: b.id } as unknown as PartnerDealBuyer)}>
+                                <Ticket className="h-3 w-3 mr-1" />{t({ ko: '이용권 발급', ja: 'ライセンス発行', en: 'Issue license' })}
+                              </Button>
+                            ) : <span className="text-[11px] text-muted-foreground">{t({ ko: '미발급', ja: '未発行', en: 'Not issued' })}</span>
                           ) : bLics.map(lic => {
                             const revoked = lic.status === 'revoked';
                             return (
                               <div key={lic.id} className="flex items-center gap-2 flex-wrap">
-                                <span className={`font-mono text-[11px] ${revoked ? 'line-through text-muted-foreground' : ''}`}>{lic.coupon_code}</span>
+                                <span className={`font-mono text-[11px] ${revoked ? 'line-through text-muted-foreground' : ''}`}>{maskCode(lic.coupon_code)}</span>
                                 <span className="text-[10px] text-muted-foreground">
                                   {t({ ko: '학생', ja: '生徒', en: 'Students' })} {lic.user_count ?? '-'} · {t({ ko: '기간', ja: '期間', en: 'Term' })} {lic.duration ?? '-'}{t({ ko: '개월', ja: 'か月', en: 'mo' })}
                                 </span>
@@ -1044,12 +1059,16 @@ export default function PartnerPortal() {
                                     <span className={`text-[10px] rounded px-1.5 py-0.5 ${lic.email_sent ? 'text-teal-700 bg-teal-50' : 'text-amber-600 bg-amber-50'}`}>
                                       {lic.email_sent ? t({ ko: '발송됨', ja: '送信済み', en: 'Sent' }) : t({ ko: '미발송', ja: '未送信', en: 'Not sent' })}
                                     </span>
-                                    <button onClick={() => copyCode(lic.coupon_code)} title={t({ ko: '코드 복사', ja: 'コードをコピー', en: 'Copy code' })}
-                                      className="p-0.5 rounded hover:bg-muted text-muted-foreground"><Copy className="h-3 w-3" /></button>
-                                    <button onClick={() => handleResend(lic)} title={t({ ko: '이메일 재발송', ja: 'メール再送信', en: 'Resend email' })}
-                                      className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Send className="h-3 w-3" /></button>
-                                    <button onClick={() => askRevoke(lic)} title={t({ ko: '무효화', ja: '無効化', en: 'Revoke' })}
-                                      className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Ban className="h-3 w-3" /></button>
+                                    {canManageLicenses && (
+                                      <>
+                                        <button onClick={() => copyCode(lic.coupon_code)} title={t({ ko: '코드 복사', ja: 'コードをコピー', en: 'Copy code' })}
+                                          className="p-0.5 rounded hover:bg-muted text-muted-foreground"><Copy className="h-3 w-3" /></button>
+                                        <button onClick={() => handleResend(lic)} title={t({ ko: '이메일 재발송', ja: 'メール再送信', en: 'Resend email' })}
+                                          className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Send className="h-3 w-3" /></button>
+                                        <button onClick={() => askRevoke(lic)} title={t({ ko: '무효화', ja: '無効化', en: 'Revoke' })}
+                                          className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Ban className="h-3 w-3" /></button>
+                                      </>
+                                    )}
                                   </>
                                 )}
                               </div>
@@ -1062,8 +1081,8 @@ export default function PartnerPortal() {
                 ))}
 
                 {/* 구매자에 연결되지 않은 이용권 — 구매자 지정 기능 이전에 발급된 건.
-                    여기 안 띄우면 팝업에서 아예 보이지 않아 코드가 사라진 것처럼 보인다. */}
-                {canIssueLicenses && editingDealId && (() => {
+                    구매자 연결(관리 동작)이 필요하므로 manager에게만 노출. */}
+                {canManageLicenses && editingDealId && (() => {
                   const orphans = licenses.filter(l => l.partner_deal_id === editingDealId && !l.partner_deal_buyer_id);
                   if (orphans.length === 0) return null;
                   return (
@@ -1105,21 +1124,24 @@ export default function PartnerPortal() {
               <Label className="text-xs">{t({ ko: '비고', ja: '備考', en: 'Notes' })}</Label>
               <Input value={(addForm.remarks as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, remarks: e.target.value }))} className="h-8 text-sm" placeholder={t({ ko: '특이사항 입력', ja: '特記事項を入力', en: 'Notes' })} />
             </div>
-          </div>
+          </fieldset>
           <div className="flex items-center justify-between gap-2 pt-3 border-t">
-            {/* 삭제는 수정 모드에서만 (목록 행에서는 이용권 버튼에 자리를 내줌) */}
-            {editingDealId ? (
+            {/* 삭제는 수정 모드 + 편집권한(manager/member)일 때만 */}
+            {editingDealId && canEditPartnerDeals ? (
               <Button variant="ghost" size="sm" onClick={() => handleDelete(editingDealId)}
                 className="text-destructive hover:text-destructive hover:bg-destructive/10">
                 <Trash2 className="h-3.5 w-3.5 mr-1" />{t({ ko: '삭제', ja: '削除', en: 'Delete' })}
               </Button>
             ) : <div />}
             <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => { setAddDialogOpen(false); setEditingDealId(null); }}>{t({ ko: '취소', ja: 'キャンセル', en: 'Cancel' })}</Button>
-            <Button size="sm" onClick={handleDialogSubmit} disabled={adding}>
-              {adding && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
-              {editingDealId ? t({ ko: '저장', ja: '保存', en: 'Save' }) : t({ ko: '추가', ja: '追加', en: 'Add' })}
-            </Button>
+            <Button variant="outline" size="sm" onClick={() => { setAddDialogOpen(false); setEditingDealId(null); }}>{t({ ko: canEditPartnerDeals ? '취소' : '닫기', ja: canEditPartnerDeals ? 'キャンセル' : '閉じる', en: canEditPartnerDeals ? 'Cancel' : 'Close' })}</Button>
+            {/* viewer는 저장 버튼 없음 (보기 전용) */}
+            {canEditPartnerDeals && (
+              <Button size="sm" onClick={handleDialogSubmit} disabled={adding}>
+                {adding && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+                {editingDealId ? t({ ko: '저장', ja: '保存', en: 'Save' }) : t({ ko: '추가', ja: '追加', en: 'Add' })}
+              </Button>
+            )}
             </div>
           </div>
         </DialogContent>

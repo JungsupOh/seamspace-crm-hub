@@ -5,6 +5,8 @@ import { makeT, type PartnerLocale } from '@/lib/partner-i18n';
 
 export type UserRole = 'admin' | 'sub_admin' | 'guest' | 'partner';
 export type UserStatus = 'invite_failed' | 'invited' | 'active' | 'inactive';
+// 파트너 내부 역할 — role='partner'일 때만 의미. 그 외 사용자는 null.
+export type PartnerRole = 'manager' | 'member' | 'viewer';
 
 export interface UserProfile {
   id: string;
@@ -15,6 +17,7 @@ export interface UserProfile {
   is_first_login: boolean;
   created_by: string | null;
   partner_id: string | null;
+  partner_role: PartnerRole | null;
   created_at: string;
 }
 
@@ -38,6 +41,10 @@ interface AuthContextValue {
   partnerLocale: PartnerLocale;
   partnerCurrency: string;
   partnerCountry: string;
+  // 파트너 내부 역할 기반 권한 (role='partner'일 때만 유효)
+  partnerRole: PartnerRole | null;
+  canEditPartnerDeals: boolean;   // manager | member — 딜 등록/수정/삭제
+  canManageLicenses: boolean;     // manager AND 업체 발급허용 — 발급/재발송/무효화/코드열람
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -219,10 +226,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isGuest = userProfile?.role === 'guest';
   const isPartner = userProfile?.role === 'partner';
   const canEdit = isAdmin || isSubAdmin;
+  // 업체 스위치 — 이 파트너가 이용권을 발급할 수 있는 계약인가 (섹션 노출 여부)
   const canIssueLicenses = !!partnerOptions?.can_issue_licenses;
   const partnerLocale = (partnerOptions?.locale as PartnerLocale) ?? 'ko';
   const partnerCurrency = partnerOptions?.currency ?? 'KRW';
   const partnerCountry = partnerOptions?.country ?? 'KR';
+  // 파트너 내부 역할 기반 권한. 기존 파트너 사용자는 DB에서 manager로 승격됨.
+  // partner_role이 없으면(레거시/미지정) manager로 간주해 회귀를 막는다.
+  const partnerRole: PartnerRole | null = isPartner
+    ? ((userProfile?.partner_role as PartnerRole) ?? 'manager')
+    : null;
+  const canEditPartnerDeals = partnerRole === 'manager' || partnerRole === 'member';
+  const canManageLicenses = canIssueLicenses && partnerRole === 'manager';
 
   return (
     <AuthContext.Provider
@@ -245,6 +260,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         partnerLocale,
         partnerCurrency,
         partnerCountry,
+        partnerRole,
+        canEditPartnerDeals,
+        canManageLicenses,
       }}
     >
       {children}
