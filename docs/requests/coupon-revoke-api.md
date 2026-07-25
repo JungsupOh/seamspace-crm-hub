@@ -1,7 +1,10 @@
 # 심스페이스 CRM — 쿠폰 무효화(revoke) API 요청
 
 > mDiary 백엔드 API 추가 요청
-> 작성: 2026-07-20 · 담당 연락처: info@tebahsoft.com
+> 작성: 2026-07-20 · **스펙 확정: 2026-07-25 (백엔드팀 회신)** · 담당 연락처: info@tebahsoft.com
+>
+> ✅ 아래 스펙은 백엔드팀과 합의 완료된 내용입니다.
+> 조회 시 상태 확인을 위해 `coupon_info` API도 함께 제공됩니다 (§9 참조).
 
 ## 1. 목적
 
@@ -113,13 +116,39 @@ HTTP 404
 - **성공·실패와 무관하게 응답에 `status` 를 항상 포함**해 주세요.
   거절당한 경우에도 CRM이 현재 상태를 알 수 있어야 원장을 정확히 동기화합니다.
 
-## 8. CRM 연동 계획
+## 8. 쿠폰 조회 API — `coupon_info` (백엔드팀 제공 확정)
+
+무효 상태를 CRM이 직접 유추하지 않도록, 조회 응답에 `status` 필드가 포함됩니다.
+
+```
+GET(또는 POST) /mDiary_app/coupon_info/
+```
+
+응답:
+
+```json
+{
+  "message": "success",
+  "data": {
+    "user_limit": 60,
+    "duration": 1,
+    "descript": "test coupon 발행2",
+    "is_used": true,
+    "status": "revoked"
+  },
+  "server_status": "normal"
+}
+```
+
+- `status`: `available` | `in_use` | `revoked` (§5 정의와 동일)
+- CRM은 이 `status` 를 그대로 읽어 원장과 동기화합니다.
+  (`is_used` + `used_group` 조합으로 유추할 필요 없음)
+
+## 9. CRM 연동 계획
 
 API가 준비되면 CRM 발급 원장(`partner_licenses`)의 무효화 처리에서
-이 엔드포인트를 호출하고, 응답의 `status` 를 그대로 기록합니다.
-
-무효 상태 조회는 기존 필드(`is_used` / `used_group`)로 판별 가능하므로
-**조회 API 변경은 필요하지 않습니다.**
+`coupon_revoke` 를 호출하고, 응답의 `status` 를 그대로 기록합니다.
+상태 재확인이 필요할 때는 `coupon_info` 의 `status` 를 사용합니다.
 
 ---
 
@@ -133,5 +162,6 @@ API가 준비되면 CRM 발급 원장(`partner_licenses`)의 무효화 처리에
   - 현재는 CRM 원장에만 표시. **실제 코드 차단은 이 API 연동 후 적용.**
   - 연동 시 이 함수에 엔드포인트 호출 한 단계만 추가하면 됩니다.
 - 상태 조회: `supabase/functions/get-coupon-status/index.ts`
-  - `mDiary_app_coupon` 에서 `is_used`, `used_group_id` 를 이미 함께 읽고 있어
-    `is_used = 1 AND used_group_id IS NULL` 로 무효 건 판별이 가능합니다.
+  - 현재는 `mDiary_app_coupon` 에서 `is_used`, `used_group_id` 를 직접 읽어 유추.
+  - 확정된 `coupon_info` API가 `status` 를 직접 주므로, 연동 시 이 값을 사용하도록
+    전환하면 유추 로직을 제거할 수 있습니다.
