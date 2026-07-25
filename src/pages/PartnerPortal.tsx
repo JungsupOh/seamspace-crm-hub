@@ -829,8 +829,8 @@ export default function PartnerPortal() {
       </div>
       {/* 딜 추가 모달 */}
       <Dialog open={addDialogOpen} onOpenChange={open => { if (!open) { setAddDialogOpen(false); setEditingDealId(null); } }}>
-        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col" onOpenAutoFocus={e => e.preventDefault()}>
-          <DialogHeader>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onOpenAutoFocus={e => e.preventDefault()}>
+          <DialogHeader className="shrink-0">
             <DialogTitle>{editingDealId ? t({ ko: '딜 상세 / 수정', ja: '案件詳細 / 修正', en: 'Deal Details / Edit' }) : t({ ko: '새 딜 추가', ja: '新規案件', en: 'New Deal' })}</DialogTitle>
           </DialogHeader>
           {/* viewer는 폼 전체를 비활성화 (보기 전용). fieldset이 내부 입력을 일괄 disable.
@@ -1137,7 +1137,7 @@ export default function PartnerPortal() {
               <Input value={(addForm.remarks as string) ?? ''} onChange={e => setAddForm(p => ({ ...p, remarks: e.target.value }))} className="h-8 text-sm" placeholder={t({ ko: '특이사항 입력', ja: '特記事項を入力', en: 'Notes' })} />
             </div>
           </fieldset>
-          <div className="flex items-center justify-between gap-2 pt-3 border-t">
+          <div className="flex items-center justify-between gap-2 pt-3 border-t shrink-0 bg-background">
             {/* 삭제는 수정 모드 + 편집권한(manager/member)일 때만 */}
             {editingDealId && canEditPartnerDeals ? (
               <Button variant="ghost" size="sm" onClick={() => handleDelete(editingDealId)}
