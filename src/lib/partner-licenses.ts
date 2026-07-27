@@ -149,35 +149,76 @@ export async function issueLicense(input: IssueLicenseInput): Promise<{ coupon_c
   return { coupon_code: data.coupon_code, license_id: data.license_id ?? null, email_sent: emailSent };
 }
 
-/**
- * 이용권 무효화.
- *
- * ⚠️ 현재는 CRM 원장에만 무효 표시가 된다. mDiary 쪽에 쿠폰 무효화 API가 아직 없어
- * 실제 코드 사용 차단은 불가하다(백엔드팀 요청 대기 중). API가 생기면 이 함수에서
- * 해당 엔드포인트를 호출하는 단계만 추가하면 된다.
- * 원장 행은 지우지 않는다 — 정산 근거와 발급 이력을 보존해야 하기 때문.
- */
-export async function revokeLicense(lic: PartnerLicense, reason?: string): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  const res = await fetch(`${BASE_URL}?id=eq.${lic.id}`, {
-    method: 'PATCH',
-    headers: { ...HEADERS, Prefer: 'return=minimal' },
-    body: JSON.stringify({
-      status: 'revoked',
-      revoked_at: new Date().toISOString(),
-      revoked_by: user?.id ?? null,
-      revoke_reason: reason || null,
-    }),
+async function callRevokeFn(payload: Record<string, unknown>) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) throw new Error('로그인 세션이 없습니다. 다시 로그인해 주세요.');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/partner-revoke-license`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(`무효화 실패 (${res.status})`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `요청 실패 (${res.status})`);
+  return data as { result?: string; used_group?: string | null; group_name?: string; service_expire_at?: string };
+}
 
+export type RevokeResult =
+  | { result: 'revoked' }
+  | { result: 'in_use'; used_group: string | null }
+  | { result: 'not_found' };
+
+/**
+ * 이용권 회수 (미사용 쿠폰).
+ * mDiary coupon_revoke를 서버(엣지 함수)에서 호출하고 원장을 갱신한다.
+ * - revoked: 실제로 회수됨
+ * - in_use : 사용 중 → 그룹을 만료시켜야 함 (expireLicenseGroup으로 에스컬레이션)
+ * - not_found: mDiary에 코드 없음
+ */
+export async function revokeLicense(lic: PartnerLicense, reason?: string): Promise<RevokeResult> {
+  const data = await callRevokeFn({ licenseId: lic.id, action: 'revoke', reason });
+  if (data.result === 'revoked') {
+    notifyPartnerLicenseRevoked({
+      orgName: lic.org_name ?? undefined, contactName: lic.contact_name ?? undefined,
+      contactEmail: lic.contact_email ?? '', couponCode: lic.coupon_code, reason,
+    });
+  }
+  return data as RevokeResult;
+}
+
+/** 사용 중 이용권 회수 — 연결된 그룹을 만료(expireDate=어제)시킨다. */
+export async function expireLicenseGroup(lic: PartnerLicense, groupId: string, expireDate: string, reason?: string): Promise<{ group_name?: string; service_expire_at?: string }> {
+  const data = await callRevokeFn({ licenseId: lic.id, action: 'expire', groupId, expireDate, reason });
   notifyPartnerLicenseRevoked({
-    orgName:      lic.org_name ?? undefined,
-    contactName:  lic.contact_name ?? undefined,
-    contactEmail: lic.contact_email ?? '',
-    couponCode:   lic.coupon_code,
-    reason,
+    orgName: lic.org_name ?? undefined, contactName: lic.contact_name ?? undefined,
+    contactEmail: lic.contact_email ?? '', couponCode: lic.coupon_code,
+    reason: `그룹 만료(${data.group_name ?? groupId})${reason ? ' · ' + reason : ''}`,
   });
+  return data;
+}
+
+/** 쿠폰의 그룹 정보 조회 (사용 중 회수 시 확인용). get-coupon-status로 최신화 후 원장 읽기. */
+export interface CouponGroupInfo {
+  used_group_id: string | null;
+  group_name: string | null;
+  member_count: number | null;
+  service_expire_at: string | null;
+  admin_name: string | null;
+}
+export async function getCouponGroupInfo(couponCode: string): Promise<CouponGroupInfo | null> {
+  // 최신 그룹 정보로 동기화
+  await fetch(`${SUPABASE_URL}/functions/v1/get-coupon-status`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+    body: JSON.stringify({ codes: [couponCode] }),
+  }).catch(() => {});
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/mdiary_coupons?coupon_code=eq.${encodeURIComponent(couponCode)}&select=used_group_id,group_name,member_count,service_expire_at,admin_name`,
+    { headers: HEADERS },
+  );
+  if (!res.ok) return null;
+  const rows = await res.json();
+  return rows[0] ?? null;
 }
 
 /** 이용권을 특정 구매자에 귀속 (구매자 지정 이전에 발급된 건 정리용) */

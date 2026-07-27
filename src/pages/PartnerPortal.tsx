@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AmountInput } from '@/components/AmountInput';
 import { LocalizedDateInput } from '@/components/LocalizedDateInput';
 import { makeT, formatMoney, currencyUnit, formatIntlPhone } from '@/lib/partner-i18n';
-import { issueLicense, getPartnerLicenses, resendLicenseEmail, revokeLicense, setLicenseBuyer, type PartnerLicense } from '@/lib/partner-licenses';
+import { issueLicense, getPartnerLicenses, resendLicenseEmail, revokeLicense, expireLicenseGroup, getCouponGroupInfo, setLicenseBuyer, type PartnerLicense, type CouponGroupInfo } from '@/lib/partner-licenses';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -70,8 +70,10 @@ interface IssueForm {
   userCount: number;
   amount: number | '';
 }
-/** 무효화되지 않은 이용권 수 */
-const activeCount = (list: PartnerLicense[]) => list.filter(l => l.status !== 'revoked').length;
+/** 회수(무효/만료)된 이용권인지 */
+const isTerminal = (s?: string | null) => s === 'revoked' || s === 'expired';
+/** 유효(회수되지 않은) 이용권 수 */
+const activeCount = (list: PartnerLicense[]) => list.filter(l => !isTerminal(l.status)).length;
 
 const emptyIssueForm = (): IssueForm => ({
   partnerDealId: '', partnerDealBuyerId: '', customerName: '', contactEmail: '', contactPhone: '',
@@ -124,6 +126,11 @@ export default function PartnerPortal() {
   const [revokeConfirmOpen, setRevokeConfirmOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<PartnerLicense | null>(null);
   const [revokeReason, setRevokeReason] = useState('');
+  const [revoking, setRevoking] = useState(false);
+  // 사용 중 이용권 → 그룹 만료 (2단계 확인)
+  const [expireConfirmOpen, setExpireConfirmOpen] = useState(false);
+  const [expireFinalOpen, setExpireFinalOpen] = useState(false);
+  const [expireGroup, setExpireGroup] = useState<CouponGroupInfo | null>(null);
 
   // 학교 검색
   const [schoolQuery, setSchoolQuery] = useState('');
@@ -539,7 +546,7 @@ export default function PartnerPortal() {
   const maybeAskIssue = (deal: PartnerDeal, dealBuyers: PartnerDealBuyer[]) => {
     if (!canIssueLicenses) return;
     const pending = dealBuyers.filter(b => !licenses.some(
-      l => l.partner_deal_buyer_id === b.id && l.status !== 'revoked',
+      l => l.partner_deal_buyer_id === b.id && !isTerminal(l.status),
     ));
     if (pending.length === 0) return;
     setIssuePromptDeal(deal);
@@ -567,14 +574,50 @@ export default function PartnerPortal() {
   const confirmRevoke = async () => {
     const lic = revokeTarget;
     setRevokeConfirmOpen(false);
-    setRevokeTarget(null);
     if (!lic) return;
+    setRevoking(true);
     try {
-      await revokeLicense(lic, revokeReason);
-      toast.success(t({ ko: '무효 처리되었습니다', ja: '無効化しました', en: 'Revoked' }));
+      const res = await revokeLicense(lic, revokeReason);
+      if (res.result === 'revoked') {
+        toast.success(t({ ko: '회수되었습니다', ja: '回収しました', en: 'Revoked' }));
+        setRevokeTarget(null);
+        if (partner?.id) getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
+      } else if (res.result === 'not_found') {
+        toast.error(t({ ko: 'mDiary에 없는 코드입니다', ja: 'mDiaryに存在しないコードです', en: 'Code not found in mDiary' }));
+        setRevokeTarget(null);
+      } else if (res.result === 'in_use') {
+        // 사용 중 → 그룹 만료로 에스컬레이션. 그룹 정보를 불러와 확인창 표시.
+        const info = await getCouponGroupInfo(lic.coupon_code);
+        setExpireGroup(info);
+        setExpireConfirmOpen(true);   // revokeTarget 유지
+      }
+    } catch (e) {
+      toast.error(`${t({ ko: '회수 실패', ja: '回収失敗', en: 'Revoke failed' })}: ${e instanceof Error ? e.message : String(e)}`);
+      setRevokeTarget(null);
+    } finally { setRevoking(false); }
+  };
+
+  // 사용 중 이용권 → 그룹 만료 (2단계 확인)
+  const confirmExpireStep1 = () => { setExpireConfirmOpen(false); setExpireFinalOpen(true); };
+
+  const confirmExpireFinal = async () => {
+    const lic = revokeTarget;
+    setExpireFinalOpen(false);
+    if (!lic || !expireGroup?.used_group_id) { setRevokeTarget(null); return; }
+    setRevoking(true);
+    try {
+      // 어제 날짜로 만료 (당일 잔여 이용 차단)
+      const y = new Date(); y.setDate(y.getDate() - 1);
+      const expireDate = y.toISOString().slice(0, 10);
+      await expireLicenseGroup(lic, expireGroup.used_group_id, expireDate, revokeReason);
+      toast.success(t({ ko: '그룹을 만료시켰습니다', ja: 'グループを失効させました', en: 'Group expired' }));
       if (partner?.id) getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
     } catch (e) {
-      toast.error(`${t({ ko: '무효화 실패', ja: '無効化に失敗しました', en: 'Revoke failed' })}: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`${t({ ko: '그룹 만료 실패', ja: 'グループ失効に失敗しました', en: 'Group expire failed' })}: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRevoking(false);
+      setRevokeTarget(null);
+      setExpireGroup(null);
     }
   };
 
@@ -761,7 +804,7 @@ export default function PartnerPortal() {
                                       </Button>
                                     ) : <span className="text-[11px] text-muted-foreground">{t({ ko: '미발급', ja: '未発行', en: 'Not issued' })}</span>
                                   ) : bLics.map(lic => {
-                                    const revoked = lic.status === 'revoked';
+                                    const revoked = isTerminal(lic.status);
                                     return (
                                       <div key={lic.id} className="flex items-center gap-2">
                                         <span className={`font-mono text-[11px] ${revoked ? 'line-through text-muted-foreground' : ''}`}>{maskCode(lic.coupon_code)}</span>
@@ -770,7 +813,7 @@ export default function PartnerPortal() {
                                         </span>
                                         {revoked ? (
                                           <span className="text-[10px] text-rose-700 bg-rose-50 rounded px-1.5 py-0.5">
-                                            {t({ ko: '무효', ja: '無効', en: 'Revoked' })}{lic.revoke_reason ? ` · ${lic.revoke_reason}` : ''}
+                                            {lic.status === 'expired' ? t({ ko: '만료', ja: '失効', en: 'Expired' }) : t({ ko: '무효', ja: '無効', en: 'Revoked' })}{lic.revoke_reason ? ` · ${lic.revoke_reason}` : ''}
                                           </span>
                                         ) : (
                                           <>
@@ -805,9 +848,9 @@ export default function PartnerPortal() {
                           {dealLicenses.filter(l => !l.partner_deal_buyer_id).map(lic => (
                             <div key={lic.id} className="flex items-center gap-2 rounded-md bg-background px-3 py-2">
                               <span className="min-w-[180px] text-[10px] text-muted-foreground">{t({ ko: '(구매자 미지정)', ja: '(購入者未指定)', en: '(no buyer linked)' })}</span>
-                              <span className={`font-mono text-[11px] ${lic.status === 'revoked' ? 'line-through text-muted-foreground' : ''}`}>{maskCode(lic.coupon_code)}</span>
+                              <span className={`font-mono text-[11px] ${isTerminal(lic.status) ? 'line-through text-muted-foreground' : ''}`}>{maskCode(lic.coupon_code)}</span>
                               <span className="text-[10px] text-muted-foreground">{lic.contact_email}</span>
-                              {canManageLicenses && lic.status !== 'revoked' && (
+                              {canManageLicenses && !isTerminal(lic.status) && (
                                 <>
                                   <button onClick={() => copyCode(lic.coupon_code)} className="p-0.5 rounded hover:bg-muted text-muted-foreground"><Copy className="h-3 w-3" /></button>
                                   <button onClick={() => handleResend(lic)} className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary"><Send className="h-3 w-3" /></button>
@@ -1050,7 +1093,7 @@ export default function PartnerPortal() {
                               </Button>
                             ) : <span className="text-[11px] text-muted-foreground">{t({ ko: '미발급', ja: '未発行', en: 'Not issued' })}</span>
                           ) : bLics.map(lic => {
-                            const revoked = lic.status === 'revoked';
+                            const revoked = isTerminal(lic.status);
                             return (
                               <div key={lic.id} className="flex items-center gap-2 flex-wrap">
                                 <span className={`font-mono text-[11px] ${revoked ? 'line-through text-muted-foreground' : ''}`}>{maskCode(lic.coupon_code)}</span>
@@ -1058,7 +1101,7 @@ export default function PartnerPortal() {
                                   {t({ ko: '학생', ja: '生徒', en: 'Students' })} {lic.user_count ?? '-'} · {t({ ko: '기간', ja: '期間', en: 'Term' })} {lic.duration ?? '-'}{t({ ko: '개월', ja: 'か月', en: 'mo' })}
                                 </span>
                                 {revoked ? (
-                                  <span className="text-[10px] text-rose-700 bg-rose-50 rounded px-1.5 py-0.5">{t({ ko: '무효', ja: '無効', en: 'Revoked' })}</span>
+                                  <span className="text-[10px] text-rose-700 bg-rose-50 rounded px-1.5 py-0.5">{lic.status === 'expired' ? t({ ko: '만료', ja: '失効', en: 'Expired' }) : t({ ko: '무효', ja: '無効', en: 'Revoked' })}</span>
                                 ) : (
                                   <>
                                     <span className={`text-[10px] rounded px-1.5 py-0.5 ${lic.email_sent ? 'text-teal-700 bg-teal-50' : 'text-amber-600 bg-amber-50'}`}>
@@ -1105,9 +1148,9 @@ export default function PartnerPortal() {
                       </span>
                       {orphans.map(lic => (
                         <div key={lic.id} className="flex items-center gap-2 flex-wrap">
-                          <span className={`font-mono text-[11px] ${lic.status === 'revoked' ? 'line-through text-muted-foreground' : ''}`}>{lic.coupon_code}</span>
+                          <span className={`font-mono text-[11px] ${isTerminal(lic.status) ? 'line-through text-muted-foreground' : ''}`}>{lic.coupon_code}</span>
                           <span className="text-[10px] text-muted-foreground">{lic.contact_email}</span>
-                          {lic.status !== 'revoked' && (
+                          {!isTerminal(lic.status) && (
                             <>
                               <select
                                 value=""
@@ -1262,12 +1305,12 @@ export default function PartnerPortal() {
       <AlertDialog open={revokeConfirmOpen} onOpenChange={setRevokeConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t({ ko: '이용권 무효화', ja: 'ライセンス無効化', en: 'Revoke License' })}</AlertDialogTitle>
+            <AlertDialogTitle>{t({ ko: '이용권 회수', ja: 'ライセンス回収', en: 'Revoke License' })}</AlertDialogTitle>
             <AlertDialogDescription>
               {t({
-                ko: `${revokeTarget?.coupon_code ?? ''} 코드를 무효 처리합니다. 발급 이력은 정산 근거로 남습니다.`,
-                ja: `${revokeTarget?.coupon_code ?? ''} を無効化します。発行履歴は精算の根拠として残ります。`,
-                en: `Revoke code ${revokeTarget?.coupon_code ?? ''}. The issuance record is kept for settlement.`,
+                ko: `${revokeTarget?.coupon_code ?? ''} 코드를 회수합니다. 아직 사용 전이면 즉시 무효화되고, 이미 사용 중이면 그룹 만료 여부를 다시 확인합니다. 발급 이력은 정산 근거로 남습니다.`,
+                ja: `${revokeTarget?.coupon_code ?? ''} を回収します。未使用なら即時無効化し、使用中ならグループ失効を再確認します。発行履歴は精算の根拠として残ります。`,
+                en: `Revoke ${revokeTarget?.coupon_code ?? ''}. If unused it’s voided immediately; if already in use you’ll confirm expiring the group. The record is kept for settlement.`,
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1277,9 +1320,66 @@ export default function PartnerPortal() {
               placeholder={t({ ko: '예: 오발급, 결제 취소', ja: '例：誤発行、決済キャンセル', en: 'e.g. issued by mistake, payment cancelled' })} />
           </div>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t({ ko: '취소', ja: 'キャンセル', en: 'Cancel' })}</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmRevoke} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {t({ ko: '무효화', ja: '無効化', en: 'Revoke' })}
+            <AlertDialogCancel onClick={() => setRevokeTarget(null)}>{t({ ko: '취소', ja: 'キャンセル', en: 'Cancel' })}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRevoke} disabled={revoking} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {revoking && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              {t({ ko: '회수', ja: '回収', en: 'Revoke' })}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 사용 중 이용권 → 그룹 만료 확인 (1단계: 그룹 정보) */}
+      <AlertDialog open={expireConfirmOpen} onOpenChange={setExpireConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t({ ko: '사용 중인 그룹을 만료시킵니다', ja: '利用中のグループを失効させます', en: 'Expire an active group' })}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t({
+                ko: '이 이용권은 이미 사용되어 그룹이 서비스를 이용 중입니다. 코드 회수로는 중단되지 않으며, 그룹을 만료시켜야 서비스가 중단됩니다.',
+                ja: 'このライセンスは既に使用され、グループがサービスを利用中です。コード回収では停止できず、グループを失効させる必要があります。',
+                en: 'This license is already in use by a group. Revoking the code won’t stop it — the group must be expired.',
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-1">
+            <div className="flex justify-between"><span className="text-muted-foreground">{t({ ko: '그룹', ja: 'グループ', en: 'Group' })}</span><span className="font-medium">{expireGroup?.group_name ?? '-'}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">{t({ ko: '이용 멤버', ja: '利用メンバー', en: 'Members' })}</span><span className="font-medium">{expireGroup?.member_count ?? '-'}{t({ ko: '명', ja: '名', en: '' })}</span></div>
+            {expireGroup?.admin_name && <div className="flex justify-between"><span className="text-muted-foreground">{t({ ko: '관리자', ja: '管理者', en: 'Admin' })}</span><span className="font-medium">{expireGroup.admin_name}</span></div>}
+            <div className="flex justify-between"><span className="text-muted-foreground">{t({ ko: '현재 만료일', ja: '現在の失効日', en: 'Current expiry' })}</span><span className="font-medium">{expireGroup?.service_expire_at ?? '-'}</span></div>
+          </div>
+          {!expireGroup?.used_group_id && (
+            <p className="text-[11px] text-destructive">{t({ ko: '그룹 정보를 찾지 못했습니다. 잠시 후 다시 시도해 주세요.', ja: 'グループ情報が取得できませんでした。しばらくして再試行してください。', en: 'Could not resolve the group. Please try again shortly.' })}</p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setRevokeTarget(null); setExpireGroup(null); }}>{t({ ko: '취소', ja: 'キャンセル', en: 'Cancel' })}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmExpireStep1} disabled={!expireGroup?.used_group_id}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {t({ ko: '그룹 만료시키기', ja: 'グループを失効', en: 'Expire group' })}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 그룹 만료 최종 확인 (2단계) */}
+      <AlertDialog open={expireFinalOpen} onOpenChange={setExpireFinalOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t({ ko: '정말로 진행합니다', ja: '本当に実行します', en: 'Are you absolutely sure?' })}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t({
+                ko: `"${expireGroup?.group_name ?? ''}" 그룹을 즉시 만료시킵니다 (어제 날짜로). 멤버 ${expireGroup?.member_count ?? 0}명이 더 이상 서비스를 이용할 수 없게 됩니다. 되돌리기 어렵습니다.`,
+                ja: `「${expireGroup?.group_name ?? ''}」グループを即時失効させます（昨日付）。メンバー${expireGroup?.member_count ?? 0}名が利用できなくなります。元に戻すのは困難です。`,
+                en: `Expire "${expireGroup?.group_name ?? ''}" immediately (dated yesterday). Its ${expireGroup?.member_count ?? 0} member(s) will lose access. This is hard to undo.`,
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setRevokeTarget(null); setExpireGroup(null); }}>{t({ ko: '취소', ja: 'キャンセル', en: 'Cancel' })}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmExpireFinal} disabled={revoking}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {revoking && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              {t({ ko: '만료 확정', ja: '失効を確定', en: 'Confirm expire' })}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
