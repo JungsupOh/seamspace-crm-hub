@@ -127,12 +127,65 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return json({ ok: true, sent, skipped, failed, total: subscribers.length }, 200);
+    // 발송 직후 스토리지 정리 — 버킷에 APK 파일은 2개만 유지 (직전 발송분 + 이번 발송분).
+    // CI가 빌드를 계속 밀어넣어도 미발송/구버전 파일이 쌓이지 않게 함.
+    const retention = await pruneApkFiles().catch(e => { console.warn("[apk-broadcast] 정리 실패", e); return null; });
+
+    return json({ ok: true, sent, skipped, failed, total: subscribers.length, pruned: retention?.deleted ?? 0 }, 200);
   } catch (e) {
     console.error("[apk-broadcast] 오류:", e);
     return json({ ok: false, message: String(e) }, 500);
   }
 });
+
+// 발송 기준 보존: 가장 최근 발송된 2개 버전 파일 + 현재 최신(is_latest) 파일만 남기고
+// 나머지 releases/ 스토리지 객체는 삭제, 해당 apk_versions 행의 file_path는 NULL(이력 보존).
+const APK_BUCKET = "apk-files";
+async function pruneApkFiles(): Promise<{ deleted: number } | null> {
+  // 1) 가장 최근 발송된 version_id 2개 (apk_send_history.sent_at desc, distinct)
+  const histRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/apk_send_history?select=version_id,sent_at&order=sent_at.desc`,
+    { headers: DB_HEADERS },
+  );
+  const hist = histRes.ok ? await histRes.json() as Array<{ version_id: string }> : [];
+  const broadcastKeep: string[] = [];
+  for (const h of hist) {
+    if (!broadcastKeep.includes(h.version_id)) broadcastKeep.push(h.version_id);
+    if (broadcastKeep.length >= 2) break;
+  }
+
+  // 2) 안전장치 — is_latest 버전은 다운로드 페이지가 서빙하므로 항상 보존
+  const latestRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/apk_versions?is_latest=eq.true&select=id`,
+    { headers: DB_HEADERS },
+  );
+  const latest = latestRes.ok ? await latestRes.json() as Array<{ id: string }> : [];
+  const keepIds = new Set([...broadcastKeep, ...latest.map(l => l.id)]);
+
+  // 3) 삭제 대상 = keepIds 외의 파일 살아있는 버전
+  const allRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/apk_versions?file_path=not.is.null&select=id,file_path`,
+    { headers: DB_HEADERS },
+  );
+  const all = allRes.ok ? await allRes.json() as Array<{ id: string; file_path: string }> : [];
+  const toDelete = all.filter(v => !keepIds.has(v.id));
+  if (toDelete.length === 0) return { deleted: 0 };
+
+  // 4) 스토리지 일괄 삭제
+  await fetch(`${SUPABASE_URL}/storage/v1/object/${APK_BUCKET}`, {
+    method: "DELETE", headers: DB_HEADERS,
+    body: JSON.stringify({ prefixes: toDelete.map(v => v.file_path) }),
+  }).catch(() => {});
+
+  // 5) DB 파일 메타 NULL (행/이력은 보존)
+  const ids = toDelete.map(v => v.id).join(",");
+  await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=in.(${ids})`, {
+    method: "PATCH", headers: { ...DB_HEADERS, Prefer: "return=minimal" },
+    body: JSON.stringify({ file_path: null, sha256: null, file_size: null }),
+  }).catch(() => {});
+
+  return { deleted: toDelete.length };
+}
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {

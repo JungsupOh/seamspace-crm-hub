@@ -8,7 +8,8 @@ CRM에서 mDiary 백엔드에 요청하는 API·연동 건을 모아둡니다.
 | 문서 | 요청일 | 상태 | 요약 |
 |---|---|---|---|
 | [쿠폰 무효화 API](./coupon-revoke-api.md) | 2026-07-20 | 구현 완료 (2026-07-25 검증) | 미사용 쿠폰 회수 `coupon_revoke` + `coupon_info` 조회 |
-| [그룹 만료일 변경 API](./group-set-expire-api.md) | 2026-07-25 | 요청 준비 | 사용 중 쿠폰 회수를 위해 그룹을 만료시키는 `group_set_expire` |
+| [그룹 만료일 변경 API](./group-set-expire-api.md) | 2026-07-25 | 구현 완료 (CRM 연동됨) | 사용 중 쿠폰 회수를 위해 그룹을 만료시키는 `group_set_expire` |
+| [APK CI 푸시 API](./apk-publish-api.md) | 2026-07-29 | CRM 구현·검증 완료 → CI 연결 대기 | 개발팀 CI가 CRM에 APK를 직접 푸시 (**우리가 만든 엔드포인트를 CI가 호출**) |
 
 관련 문서: [쿠폰 상태 변경 Webhook 명세](../COUPON_WEBHOOK_SPEC.md)
 

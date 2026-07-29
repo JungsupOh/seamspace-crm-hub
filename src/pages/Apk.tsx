@@ -156,6 +156,7 @@ export default function ApkPage() {
                 <div className="flex items-center justify-between mb-1">
                   <span className="font-semibold text-sm">v{v.version_name}</span>
                   <div className="flex gap-1">
+                    {v.source === 'ci' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">CI 자동</span>}
                     {v.is_latest && <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-100 text-teal-700">최신</span>}
                     {!v.file_path && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">파일 없음</span>}
                   </div>
@@ -552,13 +553,8 @@ function UploadVersionDialog({ uploaderId, onClose, onCreated }: {
         is_latest: isLatest,
       });
       toast.success(`v${versionName} 업로드 완료`);
-      // 새 업로드 직후 자동 cleanup — 최근 2개만 파일 보존 (이력은 유지)
-      cleanupOldApkFiles(2).then(r => {
-        if (r.deleted > 0) {
-          const mb = (r.bytesFreed / 1024 / 1024).toFixed(1);
-          toast.info(`오래된 파일 ${r.deleted}개 자동 정리 (${mb} MB 회수)`);
-        }
-      }).catch(() => { /* silent — 업로드는 이미 성공 */ });
+      // 파일 정리는 '발송 시점'에 서버(apk-broadcast)가 수행한다 — 직전 발송분 + 이번 발송분 2개 유지.
+      // 업로드 직후 정리하면 아직 발송 안 한 이전 발송분을 지울 수 있어 여기선 하지 않는다.
       onCreated();
     } catch (e) {
       toast.error(`업로드 실패: ${e instanceof Error ? e.message : String(e)}`);

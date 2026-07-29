@@ -38,6 +38,7 @@ export interface ApkVersion {
   min_android?: string;
   uploaded_by?: string | null;
   is_latest: boolean;
+  source?: 'admin' | 'ci';
   created_at: string;
 }
 
