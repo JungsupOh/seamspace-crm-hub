@@ -347,10 +347,19 @@ export default function PartnerPortal() {
       toast.error(t({ ko: '구매자를 최소 1명 입력해주세요', ja: '購入者を最低1名入力してください', en: 'Please enter at least one buyer' }));
       return;
     }
-    // 이메일 필수 — 이용권이 이메일로 발송되므로 (구매자 = 발송 대상)
-    if (validBuyers.some(b => !b.buyer_email.trim())) {
-      toast.error(t({ ko: '구매자 이메일을 모두 입력해주세요', ja: '購入者のメールをすべて入力してください', en: 'Every buyer needs an email' }));
-      return;
+    // 필수 연락처는 시장(로케일)에 따라 다르다.
+    //  - 해외(isIntl): 이용권이 이메일로 발송되므로 이메일 필수
+    //  - 국내(ko): 전화번호 중심 운영이므로 전화번호 필수
+    if (isIntl) {
+      if (validBuyers.some(b => !b.buyer_email.trim())) {
+        toast.error(t({ ko: '구매자 이메일을 모두 입력해주세요', ja: '購入者のメールをすべて入力してください', en: 'Every buyer needs an email' }));
+        return;
+      }
+    } else {
+      if (validBuyers.some(b => !b.buyer_phone.trim())) {
+        toast.error(t({ ko: '구매자 전화번호를 모두 입력해주세요', ja: '購入者の電話番号をすべて入力してください', en: 'Every buyer needs a phone number' }));
+        return;
+      }
     }
     setAdding(true);
     try {
@@ -1064,12 +1073,13 @@ export default function PartnerPortal() {
                         <Input value={b.buyer_name} onChange={e => updateBuyer(idx, 'buyer_name', e.target.value)} placeholder={t({ ko: '홍길동', ja: '山田太郎', en: 'Full name' })} className="h-7 text-xs" />
                       </div>
                       <div>
-                        <span className="text-[10px] text-muted-foreground">{t({ ko: '연락처', ja: '連絡先', en: 'Phone' })}</span>
-                        <Input value={b.buyer_phone} onChange={e => updateBuyer(idx, 'buyer_phone', phoneFmt(e.target.value))} placeholder={phonePlaceholder} className="h-7 text-xs" />
+                        {/* 국내는 전화 필수, 해외는 이메일 필수 (필수 표시 * 위치를 로케일로 이동) */}
+                        <span className="text-[10px] text-muted-foreground">{t({ ko: '연락처', ja: '連絡先', en: 'Phone' })}{!isIntl && ' *'}</span>
+                        <Input required={!isIntl} value={b.buyer_phone} onChange={e => updateBuyer(idx, 'buyer_phone', phoneFmt(e.target.value))} placeholder={phonePlaceholder} className="h-7 text-xs" />
                       </div>
                       <div>
-                        <span className="text-[10px] text-muted-foreground">{t({ ko: '이메일', ja: 'メール', en: 'Email' })} *</span>
-                        <Input type="email" required value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" />
+                        <span className="text-[10px] text-muted-foreground">{t({ ko: '이메일', ja: 'メール', en: 'Email' })}{isIntl && ' *'}</span>
+                        <Input type="email" required={isIntl} value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" />
                       </div>
                     </div>
                     {/* 학생 수·이용기간은 구매자가 아니라 '이용권'의 값이다.
