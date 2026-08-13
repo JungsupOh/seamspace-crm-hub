@@ -487,7 +487,7 @@ export default function Contacts() {
   const [bulkType, setBulkType]       = useState('');
   const [bulkStage, setBulkStage]     = useState('');
   const { widths: colW, startResize } = useResizableColumns('contacts_col_widths', {
-    이름: 110, 교육청: 130, 소속: 120, 전화: 110, 이메일: 160, 유형: 80, 스테이지: 72, 최근활동: 88,
+    이름: 110, 교육청: 130, 소속: 120, 전화: 110, 이메일: 160, 유형: 80, 스테이지: 72, 최근활동: 88, 등록일: 88,
   });
   const [sortField, setSortField]     = useState('Name');
   const [sortDir, setSortDir]         = useState<'asc' | 'desc'>('asc');
@@ -764,12 +764,16 @@ export default function Contacts() {
     return dates.length ? dates.sort().at(-1)! : '';
   };
 
+  // CRM에 이 고객 정보가 처음 등록된 날 (contacts.created_at)
+  const registeredAt = (c: AirtableRecord<ContactFields>): string => (c.createdTime ?? '').slice(0, 10);
+
   const fieldKey: Record<string, (c: AirtableRecord<ContactFields>) => string> = {
     Name:    c => c.fields.Name    ?? '',
     Org:     c => c.fields.Org_Name ?? '',
     Phone:   c => c.fields.phone_normalized ?? '',
     Stage:   c => normalizeStage(c.fields.Lead_Stage),
     Date:    c => latestActivity(c.fields),
+    Created: registeredAt,
   };
   const sorted = [...filtered].sort((a, b) => {
     const fn = fieldKey[sortField];
@@ -942,6 +946,7 @@ export default function Contacts() {
                   { label: '유형',     field: null    },
                   { label: '스테이지', field: 'Stage' },
                   { label: '최근활동', field: 'Date'  },
+                  { label: '등록일',   field: 'Created' },
                 ] as { label: string; field: string | null }[]).map(({ label, field }) => (
                   <th
                     key={label}
@@ -969,7 +974,7 @@ export default function Contacts() {
             <tbody>
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
+                  <td colSpan={10} className="px-4 py-10 text-center text-muted-foreground">
                     데이터가 없습니다.
                   </td>
                 </tr>
@@ -991,6 +996,7 @@ export default function Contacts() {
                   <td className="px-3 py-1.5"><TypeBadge type={c.fields.Contact_Type} /></td>
                   <td className="px-3 py-1.5"><StageBadge stage={c.fields.Lead_Stage} /></td>
                   <td className="px-3 py-1.5 text-xs text-muted-foreground tabular-nums">{latestActivity(c.fields)}</td>
+                  <td className="px-3 py-1.5 text-xs text-muted-foreground tabular-nums">{registeredAt(c)}</td>
                 </tr>
               ))}
             </tbody>
@@ -1117,13 +1123,14 @@ export default function Contacts() {
                   )}
 
                   {/* 기타 정보 */}
-                  {(selected.fields.Lead_Source || selected.fields.data_source_date) && (
+                  {(selected.fields.Lead_Source || selected.fields.data_source_date || selected.createdTime) && (
                     <section className="space-y-1.5">
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">기타</p>
                       <div className="space-y-1">
                         {[
                           { label: '유입경로', value: selected.fields.Lead_Source },
                           { label: '최근활동', value: selected.fields.data_source_date },
+                          { label: '등록일',   value: registeredAt(selected) },
                         ].filter(r => r.value).map(({ label, value }) => (
                           <div key={label} className="flex gap-3">
                             <span className="text-xs text-muted-foreground w-16 flex-shrink-0 pt-0.5">{label}</span>
