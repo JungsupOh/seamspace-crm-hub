@@ -166,6 +166,9 @@ function parseSimpleFilter(formula: string): { column: string; value: string } |
 
 // ── Core API functions ───────────────────────────
 
+// PostgREST(Supabase) 기본 max-rows. 한 요청이 이보다 많이 돌려주지 않는다.
+const PAGE_SIZE = 1000;
+
 async function fetchAll<T>(tableName: string, params?: Record<string, string>): Promise<AirtableRecord<T>[]> {
   const table = resolveTable(tableName);
   const headers = await getAuthHeaders();
@@ -193,17 +196,28 @@ async function fetchAll<T>(tableName: string, params?: Record<string, string>): 
     url = url.replace('select=*', `select=${selectCols}`);
   }
 
-  // Order by created_at desc by default
-  url += '&order=created_at.desc';
+  // Order by created_at desc by default.
+  // id 를 2차 정렬키로 둬야 created_at 동값 행의 페이지 경계가 흔들리지 않는다(누락/중복 방지).
+  url += '&order=created_at.desc,id.asc';
 
-  const res = await fetch(url, { headers });
+  // PostgREST 는 요청당 최대 1000행만 돌려준다(Supabase max-rows).
+  // Range 헤더로 페이지를 넘겨가며 전부 받아온다 — 안 그러면 1000행에서 조용히 잘린다.
+  const rows: Record<string, unknown>[] = [];
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const res = await fetch(url, {
+      headers: { ...headers, 'Range-Unit': 'items', Range: `${offset}-${offset + PAGE_SIZE - 1}` },
+    });
 
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData?.message || `Supabase error: ${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData?.message || `Supabase error: ${res.status} ${res.statusText}`);
+    }
+
+    const page = await res.json() as Record<string, unknown>[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
   }
 
-  const rows = await res.json() as Record<string, unknown>[];
   let records = rows.map(row => rowToRecord<T>(tableName, row));
 
   // Client-side filtering for complex formulas
