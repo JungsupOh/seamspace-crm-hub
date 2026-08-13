@@ -100,12 +100,13 @@ Content-Type: application/json
 ```bash
 SHA=$(sha256sum app-release.apk | cut -d' ' -f1)
 SIZE=$(stat -c%s app-release.apk)
-INIT=$(curl -sX POST "$CRM/functions/v1/apk-publish" -H "X-Webhook-Secret: $SECRET" \
+INIT=$(curl -fsSX POST "$CRM/functions/v1/apk-publish" -H "X-Webhook-Secret: $SECRET" \
   -H "Content-Type: application/json" -d '{"action":"init","filename":"app-release.apk"}')
-UPURL=$(echo "$INIT" | jq -r .upload_url); PATH=$(echo "$INIT" | jq -r .path)
-curl -sX PUT "$UPURL" -H "Content-Type: application/vnd.android.package-archive" --data-binary @app-release.apk
-curl -sX POST "$CRM/functions/v1/apk-publish" -H "X-Webhook-Secret: $SECRET" -H "Content-Type: application/json" \
-  -d "{\"action\":\"commit\",\"path\":\"$PATH\",\"version_name\":\"$VNAME\",\"version_code\":$VCODE,\"sha256\":\"$SHA\",\"file_size\":$SIZE,\"changelog\":\"$NOTES\",\"min_android\":\"7.0+\"}"
+UPURL=$(echo "$INIT" | jq -r .upload_url)
+APK_PATH=$(echo "$INIT" | jq -r .path)   # PATH 는 쉘 PATH 를 덮어쓰므로 변수명으로 쓰지 말 것
+curl -fsSX PUT "$UPURL" -H "Content-Type: application/vnd.android.package-archive" --data-binary @app-release.apk
+curl -fsSX POST "$CRM/functions/v1/apk-publish" -H "X-Webhook-Secret: $SECRET" -H "Content-Type: application/json" \
+  -d "{\"action\":\"commit\",\"path\":\"$APK_PATH\",\"version_name\":\"$VNAME\",\"version_code\":$VCODE,\"sha256\":\"$SHA\",\"file_size\":$SIZE,\"changelog\":\"$NOTES\",\"min_android\":\"7.0+\"}"
 ```
 > **릴리스 빌드에서만** 실행하세요. 매 커밋/테스트 빌드에서 돌리면 최신 버전이 계속 바뀝니다.
 > (구독자 이메일이 나가는 건 아니지만, is_latest가 바뀌어 신규 구독자가 테스트 빌드를 받게 됩니다.)
