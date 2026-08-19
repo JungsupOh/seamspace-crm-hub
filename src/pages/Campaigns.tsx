@@ -21,6 +21,9 @@ import { apiCreateCoupon, apiSendCoupon } from '@/lib/coupons';
 import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
 import { LuckySevenGroupsView } from '@/components/LuckySevenGroupDialog';
 import { getRecentSendLogs, canSendUH2821, todayUHStage, type AlimtalkRecipient } from '@/lib/alimtalk';
+import { normalizePhone } from '@/lib/phone';
+import { parseLeadExcel, type ParsedLeadRow, type LeadParseResult } from '@/lib/campaign-lead-import';
+import { upsertLeadContact } from '@/lib/luckySeven';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { MessageSquare } from 'lucide-react';
@@ -326,6 +329,27 @@ function parseExcel(file: File): Promise<ParsedRow[]> {
     reader.onerror = () => reject(new Error('파일 읽기 실패'));
     reader.readAsArrayBuffer(file);
   });
+}
+
+// ── 오프라인 리드 일괄 등록 (전시회 부스 스캔 등) ──────────────────
+// 공개 폼을 거치지 않고 현장에서 수집한 명단을 campaign_leads로 올린다.
+// 바이너리가 아닌 소량 JSON이므로 50건씩 끊어 보낸다(REST 페이로드 안정성).
+type NewCampaignLead = Omit<CampaignLead, 'id' | 'created_at'> & { created_at?: string };
+
+async function bulkAddCampaignLeads(rows: NewCampaignLead[]): Promise<CampaignLead[]> {
+  const created: CampaignLead[] = [];
+  for (let i = 0; i < rows.length; i += 50) {
+    const chunk = rows.slice(i, i + 50);
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads`, {
+      method: 'POST',
+      headers: { ...HEADERS, Prefer: 'return=representation' },
+      body: JSON.stringify(chunk),
+    });
+    if (!r.ok) throw new Error(`리드 일괄 등록 실패 (${r.status})`);
+    const data = await r.json();
+    if (Array.isArray(data)) created.push(...data);
+  }
+  return created;
 }
 
 // deal_licenses에서 phone + 발급일 목록 가져옴.
@@ -1203,6 +1227,22 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   }).length ?? 0;
   const convRate    = licTotal > 0 ? Math.round((licConverted / licTotal) * 100) : 0;
 
+  // 리드 기준 지표 — 체험권을 발급하지 않는 오프라인 캠페인(전시회 부스 등)은
+  // 이용권이 0건이라 위 지표만으로는 성과가 보이지 않는다.
+  // 전환 판정 규칙은 licConverted와 동일: 리드 획득 시점(부스 방문 시각) 이후에
+  // 생긴 딜만 인정한다. 원래 알던 고객의 과거 구매를 전시회 성과로 오인하지 않기 위함.
+  const leadTotal = leads?.length ?? 0;
+  const leadConverted = leads?.filter(l => {
+    const dealAt = convertedPhones.get(normalize(l.phone_normalized || l.phone));
+    return !!dealAt && dealAt > l.created_at;
+  }).length ?? 0;
+  const leadConvRate = leadTotal > 0 ? Math.round((leadConverted / leadTotal) * 100) : 0;
+
+  // CAC 분모로 쓸 '접점을 가진 사람 수'.
+  // 리드에서 발급된 이용권은 같은 사람이므로 중복으로 세지 않고,
+  // 리드 없이 수동/엑셀로 등록된 이용권만 더한다.
+  const reachedPeople = leadTotal + (syncedLicenses?.filter(l => !l.lead_id).length ?? 0);
+
   // 쿠폰 펀널 — 캠페인이 쿠폰 발급형일 때만
   const couponEnabled = campaign.coupon_settings?.enabled === true;
   const { data: campaignCoupons } = useQuery({
@@ -1241,15 +1281,23 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   return (
     <div>
       {/* 동기화 후 이용권 통계 + CAC */}
-      {syncDone && licTotal > 0 && (() => {
+      {syncDone && (licTotal > 0 || leadTotal > 0) && (() => {
         const cost = campaign.actual_cost ?? 0;
-        const leadCount = syncedLicenses ? (syncedLicenses.length + (leads?.length ?? 0)) : 0;
-        const cacLead = cost && leadCount ? Math.round(cost / leadCount) : 0;
+        const cacLead = cost && reachedPeople ? Math.round(cost / reachedPeople) : 0;
         const cacTrial = cost && licTotal ? Math.round(cost / licTotal) : 0;
-        const cacDeal = cost && licConverted ? Math.round(cost / licConverted) : 0;
+        // 딜 전환 단가는 이용권 경로 + 리드 경로를 합친 실제 전환 건수로 나눈다
+        const totalConverted = licConverted + leadConverted;
+        const cacDeal = cost && totalConverted ? Math.round(cost / totalConverted) : 0;
         return (
           <div className="mb-3 space-y-2">
             <div className="flex items-center gap-5 px-2 py-2.5 rounded-lg bg-muted/20 border border-border">
+              {leadTotal > 0 && (
+                <Stat icon={<Inbox className="h-3.5 w-3.5" />} label="리드" value={leadTotal} />
+              )}
+              {leadTotal > 0 && (
+                <Stat icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="리드→구매"
+                  value={`${leadConverted.toLocaleString()} (${leadConvRate}%)`} accent="purple" />
+              )}
               <Stat icon={<Ticket className="h-3.5 w-3.5" />} label="발송" value={licTotal} />
               <Stat icon={<Clock className="h-3.5 w-3.5" />} label="사용중" value={licActive} accent="teal" />
               <Stat icon={<XCircle className="h-3.5 w-3.5" />} label="만료" value={licExpired} accent="orange" />
@@ -1260,7 +1308,7 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
                 <span className="text-amber-700 font-medium">CAC</span>
                 <span className="text-muted-foreground">리드 <strong className="text-foreground">{cacLead ? `${cacLead.toLocaleString()}원` : '-'}</strong></span>
                 <span className="text-muted-foreground">체험발송 <strong className="text-foreground">{cacTrial ? `${cacTrial.toLocaleString()}원` : '-'}</strong></span>
-                <span className="text-muted-foreground">딜전환 <strong className="text-foreground">{cacDeal ? `${cacDeal.toLocaleString()}원` : '-'}</strong></span>
+                <span className="text-muted-foreground">구매전환 <strong className="text-foreground">{cacDeal ? `${cacDeal.toLocaleString()}원` : '-'}</strong></span>
                 <span className="ml-auto text-muted-foreground">집행 {cost.toLocaleString()}원{campaign.budget ? ` / 예산 ${campaign.budget.toLocaleString()}원` : ''}</span>
               </div>
             )}
@@ -1761,6 +1809,106 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     }
   };
 
+  // ── 오프라인 리드 엑셀 일괄 등록 ──────────────────────────────
+  // 전시회 부스처럼 공개 폼을 안 거친 현장 명단을 이 캠페인의 리드로 올린다.
+  // 흐름: 파일 선택 → 미리보기(무엇이 등록되고 무엇이 걸러지는지) → 사용자 확인 → 등록
+  const leadFileRef = useRef<HTMLInputElement>(null);
+  const [importPreview, setImportPreview] = useState<
+    { parsed: LeadParseResult; fresh: ParsedLeadRow[]; alreadyHere: number } | null
+  >(null);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ done: 0, total: 0 });
+
+  const handleLeadFile = async (file: File) => {
+    try {
+      const parsed = await parseLeadExcel(file);
+      // 이 캠페인에 이미 등록된 번호는 제외 — 같은 파일을 다시 올려도 중복되지 않게
+      const here = new Set((leads ?? []).map(l => normalizePhone(l.phone_normalized || l.phone || '')));
+      const fresh = parsed.rows.filter(r => !here.has(r.phone_normalized));
+      setImportPreview({ parsed, fresh, alreadyHere: parsed.rows.length - fresh.length });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (leadFileRef.current) leadFileRef.current.value = '';
+    }
+  };
+
+  const runLeadImport = async () => {
+    if (!importPreview || importPreview.fresh.length === 0) return;
+    const { fresh } = importPreview;
+    setImporting(true);
+    setImportProgress({ done: 0, total: fresh.length });
+    try {
+      // 1) campaign_leads 등록. 방문시간을 created_at으로 써야 '리드 이후 발생한 딜'
+      //    판정(전환율)이 실제 획득 시점 기준으로 맞는다.
+      const created = await bulkAddCampaignLeads(fresh.map(r => ({
+        campaign_id:      campaign.id,
+        name:             r.name,
+        phone:            r.phone,
+        phone_normalized: r.phone_normalized,
+        email:            r.email,
+        school_name:      r.school_name,
+        position:         r.position,
+        source:           '전시회(행사)참가',
+        status:           '신규',
+        custom_fields:    Object.keys(r.custom_fields).length ? r.custom_fields : null,
+        ...(r.visited_at ? { created_at: r.visited_at } : {}),
+      })));
+
+      // 2) contacts 동기화 — 기존 고객이면 활동이력 1줄만 추가되고 다른 필드는 안 건드린다.
+      //    동시 5건씩 처리 (383건 순차 처리는 너무 느리고, 전량 동시는 서버에 부담)
+      let matchedExisting = 0;
+      let done = 0;
+      const queue = [...created];
+      const worker = async () => {
+        for (;;) {
+          const lead = queue.shift();
+          if (!lead) return;
+          const visitDay = (lead.created_at ?? new Date().toISOString()).slice(0, 10);
+          try {
+            const res = await upsertLeadContact(
+              {
+                name:    lead.name,
+                phone:   lead.phone,
+                email:   lead.email ?? '',
+                orgName: lead.school_name ?? '',
+              },
+              {
+                country:      'kr',
+                leadSource:   campaign.name,
+                activityNote: `[${visitDay}] 전시회 부스 방문 — ${campaign.name}`,
+                contactType:  '교사',
+                leadStage:    '신규',
+              },
+            );
+            if (res.isExisting) matchedExisting++;
+            // 공개 폼 경로는 이 값을 안 채워 리드↔고객 연결이 끊겨 있었다. 여기선 처음부터 채운다.
+            await updateCampaignLead(lead.id, { converted_contact_id: res.contactId }).catch(() => {});
+          } catch (e) {
+            console.warn('[리드 임포트] contacts 동기화 실패', lead.name, e);
+          } finally {
+            done++;
+            setImportProgress({ done, total: created.length });
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: 5 }, worker));
+
+      qc.invalidateQueries({ queryKey: ['all_campaign_leads'] });
+      qc.invalidateQueries({ queryKey: ['campaign_history_phones', campaign.id] });
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+      toast.success(
+        `리드 ${created.length}건 등록 — 이미 알던 고객 ${matchedExisting}명, 신규 고객 ${created.length - matchedExisting}명`,
+        { duration: 8000 },
+      );
+      setImportPreview(null);
+    } catch (e) {
+      toast.error(`리드 등록 실패: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <div className="space-y-2">
       {/* 상단: 상태 통계 */}
@@ -1817,8 +1965,91 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
             className="h-7 text-xs px-2.5">
             <Upload className="h-3 w-3 mr-1 rotate-180" />다운로드
           </Button>
+          <Button size="sm" variant="outline" disabled={importing}
+            onClick={() => leadFileRef.current?.click()}
+            className="h-7 text-xs px-2.5"
+            title="전시회 부스 명단처럼 공개 폼을 거치지 않은 리드를 엑셀로 올립니다">
+            <Upload className="h-3 w-3 mr-1" />리드 가져오기
+          </Button>
+          <input ref={leadFileRef} type="file" accept=".xlsx,.xls" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleLeadFile(f); }} />
         </div>
       </div>
+
+      {/* 리드 엑셀 가져오기 — 확인 패널 */}
+      {importPreview && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 space-y-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-sm">리드 가져오기 확인</span>
+            {!importing && (
+              <button onClick={() => setImportPreview(null)}
+                className="p-1 rounded hover:bg-muted" title="취소">
+                <X className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="rounded-md bg-background border border-border px-2 py-1.5">
+              <div className="text-muted-foreground text-[10px]">파일 전체</div>
+              <div className="text-base font-bold tabular-nums">{importPreview.parsed.total}</div>
+            </div>
+            <div className="rounded-md bg-background border border-primary/40 px-2 py-1.5">
+              <div className="text-muted-foreground text-[10px]">등록할 리드</div>
+              <div className="text-base font-bold tabular-nums text-primary">{importPreview.fresh.length}</div>
+            </div>
+            <div className="rounded-md bg-background border border-border px-2 py-1.5">
+              <div className="text-muted-foreground text-[10px]">이미 이 캠페인에 있음</div>
+              <div className="text-base font-bold tabular-nums">{importPreview.alreadyHere}</div>
+            </div>
+            <div className="rounded-md bg-background border border-border px-2 py-1.5">
+              <div className="text-muted-foreground text-[10px]">제외 (번호없음/파일내중복)</div>
+              <div className="text-base font-bold tabular-nums">
+                {importPreview.parsed.noPhone.length + importPreview.parsed.dupInFile.length}
+              </div>
+            </div>
+          </div>
+
+          {importPreview.parsed.noPhone.length > 0 && (
+            <p className="text-amber-700">
+              핸드폰 없음 {importPreview.parsed.noPhone.length}건 — 등록되지 않습니다:{' '}
+              <span className="text-muted-foreground">
+                {importPreview.parsed.noPhone.slice(0, 8).join(', ')}
+                {importPreview.parsed.noPhone.length > 8 && ` 외 ${importPreview.parsed.noPhone.length - 8}명`}
+              </span>
+            </p>
+          )}
+          {importPreview.parsed.dupInFile.length > 0 && (
+            <p className="text-amber-700">
+              파일 안에서 번호 중복 {importPreview.parsed.dupInFile.length}건 — 첫 행만 등록됩니다:{' '}
+              <span className="text-muted-foreground">
+                {importPreview.parsed.dupInFile.slice(0, 8).join(', ')}
+                {importPreview.parsed.dupInFile.length > 8 && ` 외 ${importPreview.parsed.dupInFile.length - 8}명`}
+              </span>
+            </p>
+          )}
+
+          <p className="text-muted-foreground">
+            등록 시 고객(contacts)에도 함께 반영됩니다. 이미 있는 고객은 활동이력 1줄만 추가되고
+            소속·유형·스테이지는 그대로 둡니다. 이용권이나 알림톡은 발송하지 않습니다.
+          </p>
+
+          <div className="flex items-center gap-2 pt-1">
+            <Button size="sm" className="h-7 text-xs px-3"
+              disabled={importing || importPreview.fresh.length === 0}
+              onClick={runLeadImport}>
+              {importing
+                ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" />등록 중 {importProgress.done}/{importProgress.total}</>
+                : `${importPreview.fresh.length}건 등록`}
+            </Button>
+            {!importing && (
+              <Button size="sm" variant="outline" className="h-7 text-xs px-3"
+                onClick={() => setImportPreview(null)}>
+                취소
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 목록 */}
       {filtered.length === 0 ? (

@@ -35,29 +35,15 @@ import { notifyNewDeal } from '@/lib/telegram';
 import { syncPartnerDealDates } from '@/lib/partner-deals';
 import { getDealUsers, saveDealUsers, type DealUserInput } from '@/lib/deal-users';
 import { toast } from 'sonner';
+import { normalizePhone } from '@/lib/phone';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 // ── 전화번호 정규화 (표시용 하이픈 포맷) ──────────────
-function normalizePhone(raw: string): string {
-  if (!raw) return '';
-  const d = raw.replace(/\D/g, '');
-  // 국제번호(+로 시작, 예: +1 516-815-6314)는 한국식 포맷 적용 없이 숫자만으로 정규화
-  // → 저장/매칭 일관성 (해외 연락처 인식)
-  if (raw.trim().startsWith('+')) return d;
-  if (d.startsWith('82') && d.length >= 11) {
-    const local = '0' + d.slice(2);
-    if (local.length === 11) return `${local.slice(0, 3)}-${local.slice(3, 7)}-${local.slice(7)}`;
-    if (local.length === 12 && /^050[5-9]/.test(local)) return `${local.slice(0, 4)}-${local.slice(4, 8)}-${local.slice(8)}`;
-  }
-  // 050[5-9] 안심번호: 12자리 4-4-4
-  if (d.length === 12 && /^050[5-9]/.test(d)) return `${d.slice(0, 4)}-${d.slice(4, 8)}-${d.slice(8)}`;
-  // 010 등: 11자리 3-4-4
-  if (d.length === 11 && d.startsWith('01')) return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
-  if (d.length === 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
-  return raw;
-}
+// 전화번호 정규화는 @/lib/phone 의 normalizePhone(숫자만) 정본을 쓴다.
+// 이 파일의 모든 사용처는 매칭·저장용이며 표시용이 아니다.
+// (과거 로컬 구현은 하이픈을 붙여 반환했고, 그 값이 phone_normalized 로 저장돼 중복의 원인이 됐다)
 
 // ── 스테이지 메타 ─────────────────────────────────
 const STAGE_META: Record<string, { label: string; color: string }> = {

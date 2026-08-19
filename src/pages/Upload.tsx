@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import { normalizePhone } from '@/lib/phone';
 
 // ── Airtable 테이블 & 필드 정의 ───────────────────
 const AIRTABLE_TABLES: Record<string, { label: string; fields: string[] }> = {
@@ -82,9 +83,11 @@ function excelDateToISO(val: unknown): string | null {
   return null;
 }
 
-// 전화번호 정규화 → 010-XXXX-XXXX (한국) or 원본 유지 (외국)
+// 표시용 포맷터 → 010-XXXX-XXXX (한국) or 원본 유지 (외국)
 // 반환: { display: string, country: string | null }
-function normalizePhone(raw: unknown): { display: string; country: string | null } {
+// 중복 판정 키는 여기서 만들지 않는다. 그건 @/lib/phone 의 normalizePhone(숫자만)이 담당.
+// (과거 이 함수 이름이 normalizePhone 이라 정규화 키까지 하이픈으로 저장돼 중복이 대량 발생했다)
+function formatPhoneKR(raw: unknown): { display: string; country: string | null } {
   if (!raw) return { display: '', country: null };
   const s = String(raw).trim();
   const digits = s.replace(/[^0-9]/g, '');
@@ -449,10 +452,10 @@ export default function Upload() {
           }
           // 전화번호 정규화 → Phone + phone_normalized 동시 설정
           else if (airtableField === 'Phone' || airtableField === 'phone_normalized') {
-            const { display, country } = normalizePhone(val);
+            const { display, country } = formatPhoneKR(val);
             if (display) {
-              fields['Phone'] = display;
-              fields['phone_normalized'] = display;
+              fields['Phone'] = display;                              // 사람이 읽는 형태
+              fields['phone_normalized'] = normalizePhone(display);   // 매칭 키 — 숫자만
             }
             if (country && !fields['Country']) fields['Country'] = country;
             return;
@@ -474,7 +477,7 @@ export default function Upload() {
 
         // Country가 없고 Phone이 한국 번호면 Korea 설정
         if (!fields['Country'] && fields['Phone']) {
-          const { country } = normalizePhone(fields['Phone']);
+          const { country } = formatPhoneKR(fields['Phone']);
           if (country) fields['Country'] = country;
         }
 

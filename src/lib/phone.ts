@@ -22,7 +22,9 @@ export function normalizePhone(raw: string, country: PhoneCountry = 'kr'): strin
     return digits;
   }
 
-  // kr: 그대로 숫자만
+  // kr: 숫자만. 국가번호 82는 제거하고 국내 표기(0…)로 되돌린다
+  //     (+82 10-1234-5678 → 01012345678) — 같은 사람이 국가번호 유무로 갈라지는 것 방지
+  if (digits.startsWith('82') && digits.length >= 11) return '0' + digits.slice(2);
   return digits;
 }
 

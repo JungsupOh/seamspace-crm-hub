@@ -196,7 +196,7 @@ export async function fetchLuckySevenCampaign(slug: string) {
 
 // ─────────────────────────────────────────────────
 // contacts upsert (멤버 1명)
-// 신규면 contact_type='리드' 생성, 기존이면 빈 필드만 보강 (contact_type은 절대 덮어쓰지 않음)
+// 신규면 contact_type(기본 '리드') 생성, 기존이면 빈 필드만 보강 (contact_type은 절대 덮어쓰지 않음)
 // ─────────────────────────────────────────────────
 
 import { normalizePhone as normalizePhoneI18n, type PhoneCountry } from './phone';
@@ -205,6 +205,8 @@ export interface UpsertLeadContactOptions {
   country?: PhoneCountry;     // 'kr' (기본) | 'jp' — 전화 정규화 국가
   leadSource?: string;        // 신규 contact insert 시 기록 (예: 'EDIX Japan 2026')
   activityNote?: string;      // 기존 고객 매칭 시 contacts.notes 앞에 1줄 추가 (예: '[2026-05-09] 캠페인 신청 — EDIX Japan 2026')
+  contactType?: string;       // 신규 insert 시 유형. 미지정이면 '리드'(기존 동작 유지)
+  leadStage?: string;         // 신규 insert 시 스테이지. 미지정이면 설정하지 않음(기존 동작 유지)
 }
 
 export interface UpsertLeadContactResult {
@@ -261,8 +263,11 @@ export async function upsertLeadContact(
       phone_normalized: phoneNorm,
       email: member.email,
       org_name: member.orgName,
-      contact_type: '리드',
+      contact_type: options.contactType ?? '리드',
       lead_source: options.leadSource ?? '럭키세븐 5월',
+      // 스테이지는 넘어온 경우에만 기록한다. 비워두면 normalizeStage가 빈 문자열을
+      // 돌려줘서 고객 화면의 리드 퍼널 집계에서 아예 빠진다.
+      ...(options.leadStage ? { lead_stage: options.leadStage } : {}),
       // 신규 contact도 첫 활동이력으로 기록 (있을 때만)
       ...(options.activityNote && options.activityNote.trim()
         ? { notes: options.activityNote.trim() }
