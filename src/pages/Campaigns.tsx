@@ -1864,7 +1864,11 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
         for (;;) {
           const lead = queue.shift();
           if (!lead) return;
-          const visitDay = (lead.created_at ?? new Date().toISOString()).slice(0, 10);
+          // created_at은 UTC ISO다. 노트에 적는 날짜는 사람이 읽는 한국 날짜여야 하므로
+          // 9시간을 더해 KST 기준 날짜로 되돌린다 (오전 이른 방문이 하루 밀리는 것 방지).
+          const visitDay = new Date(
+            new Date(lead.created_at ?? new Date().toISOString()).getTime() + 9 * 60 * 60 * 1000,
+          ).toISOString().slice(0, 10);
           try {
             const res = await upsertLeadContact(
               {
