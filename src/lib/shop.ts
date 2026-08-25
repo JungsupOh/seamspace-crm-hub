@@ -5,6 +5,21 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
 
 // ── 타입 ──────────────────────────────────────────
+// 옵션은 두 형태를 모두 받는다.
+//   문자열     — 가격이 같은 단순 선택지 (예: 보드게임 '한글판' | '영문판')
+//   {label,price} — 선택지마다 가격이 다른 경우 (예: 일기 제본 페이지 구간별 단가)
+export type ShopProductOption = string | { label: string; price: number };
+
+export function optionLabel(o: ShopProductOption): string {
+  return typeof o === 'string' ? o : o.label;
+}
+
+// 선택한 옵션의 단가. 문자열 옵션이면 상품 기본가를 그대로 쓴다.
+export function optionPrice(o: ShopProductOption | undefined, basePrice: number): number {
+  if (o && typeof o === 'object' && typeof o.price === 'number') return o.price;
+  return basePrice;
+}
+
 export interface ShopProduct {
   id: string;
   name: string;
@@ -13,11 +28,12 @@ export interface ShopProduct {
   original_price?: number;         // 정가 (할인 전, null이면 할인 없음)
   unit_qty: number;
   unit_label?: string;
-  options?: string[];
+  options?: ShopProductOption[];
   image_url?: string;
   detail_image_url?: string;
   active: boolean;
   sort_order: number;
+  shipping_fee?: number | null;    // 이 상품만의 고정 배송비. null이면 공통 정책(3,000원 + 무료배송 할인)
 }
 
 export interface CartItem {
@@ -26,6 +42,7 @@ export interface CartItem {
   option?: string;
   qty: number;
   unitPrice: number;
+  shippingFee?: number;   // 담을 때의 상품 고정 배송비 스냅샷 (unitPrice와 같은 방식)
 }
 
 export interface ShopOrder {
@@ -149,7 +166,11 @@ export function getCartTotal(cart: CartItem[], address?: string): {
   const subtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.qty, 0);
   const hasPhysical = cart.some(item => !DIGITAL_PRODUCTS.has(item.productId));
   const needsShipping = hasPhysical;
-  const shippingBreakdown = calcShipping({ subtotal, needsShipping, address });
+  // 고정 배송비 상품이 섞여 있으면 가장 비싼 것 하나만 적용한다.
+  // 상품별로 합산하지 않는 이유: 이 스토어는 주문 1건에 배송비 1회 부과 구조다.
+  const fixedFees = cart.map(i => i.shippingFee ?? 0).filter(f => f > 0);
+  const fixedFee = fixedFees.length > 0 ? Math.max(...fixedFees) : null;
+  const shippingBreakdown = calcShipping({ subtotal, needsShipping, address, fixedFee });
   return {
     subtotal,
     shippingFee: shippingBreakdown.total,

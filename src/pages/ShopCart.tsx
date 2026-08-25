@@ -27,7 +27,7 @@ export default function ShopCart() {
     saveCart(next);
   };
 
-  const { subtotal, shippingFee, total, needsShipping } = getCartTotal(items);
+  const { subtotal, shippingFee, total, needsShipping, shippingBreakdown } = getCartTotal(items);
   const finalTotal = Math.max(0, total - couponDiscount);
 
   const [couponApplying, setCouponApplying] = useState(false);
@@ -146,14 +146,18 @@ export default function ShopCart() {
             <span className="text-muted-foreground">배송비</span>
             <span>{shippingFee === 0 ? '무료' : `${shippingFee.toLocaleString()}원`}</span>
           </div>
-          {needsShipping && shippingFee > 0 && subtotal < 50000 && (
+          {/* 고정 배송비 상품(제작 상품)이 담기면 금액을 늘려도 무료배송이 되지 않는다 */}
+          {needsShipping && !shippingBreakdown.isFixed && shippingFee > 0 && subtotal < 50000 && (
             <p className="text-xs text-muted-foreground">
               {(50000 - subtotal).toLocaleString()}원 더 담으면 무료배송!
             </p>
           )}
           {needsShipping && (
             <p className="text-[10px] text-muted-foreground">
-              제주·도서산간은 결제 단계에서 추가 배송비가 표시됩니다 (5만원당 3,000원씩 차감).
+              제주·도서산간은 결제 단계에서 추가 배송비가 표시됩니다
+              {shippingBreakdown.isFixed
+                ? ' (제작 상품이 포함돼 무료배송 할인은 적용되지 않습니다).'
+                : ' (5만원당 3,000원씩 차감).'}
             </p>
           )}
           {couponDiscount > 0 && (

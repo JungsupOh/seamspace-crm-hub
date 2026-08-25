@@ -99,6 +99,23 @@ export default function Shop() {
                 </>);
               })()}
             </Link>
+            {/* 상품이 활성화된 뒤에만 노출한다 — DB 미적용 상태에서 카드만 뜨면
+                이름·가격 없는 카드가 '상품을 찾을 수 없습니다'로 연결된다 */}
+            {products?.find(p => p.id === 'diary') && (() => {
+              const p = products.find(p => p.id === 'diary')!;
+              return (
+                <Link to="/shop/diary" className="group text-center">
+                  <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-3">
+                    <img src="/banner/diary(Thmb).webp" alt={p.name} className="w-full aspect-[16/9] object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async" />
+                  </div>
+                  <h3 className="font-bold text-base">{p.name}</h3>
+                  <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                    <span className="text-sm font-bold">{p.price.toLocaleString()}원부터</span>
+                    {p.unit_label && <span className="text-xs text-muted-foreground">/ {p.unit_label}</span>}
+                  </div>
+                </Link>
+              );
+            })()}
             <Link to="/shop/minddiary" className="group text-center">
               <div className="rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow mb-3">
                 <img src="/banner/MindDiary(Thmb).webp" alt="AI 마음일기" className="w-full aspect-[16/9] object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" decoding="async" />
@@ -121,6 +138,7 @@ export default function Shop() {
           <p>주소: 대전광역시 유성구 대학로99, 510호 (궁동, 대전팁스타운)</p>
           <p>전화: 042-864-5566 · 이메일: sales@tebahsoft.com</p>
           <p className="pt-1">배송비: 3,000원 (50,000원 이상 무료배송) · 국내 배송만 가능</p>
+          <p>단, 나의 이야기 출력 서비스는 제작 상품으로 배송비 3,500원이 고정 부과됩니다 (무료배송 대상 아님)</p>
         </div>
       </footer>
     </div>

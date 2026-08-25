@@ -203,7 +203,10 @@ export default function ShopCheckout() {
         <div className="bg-white rounded-2xl border border-border p-4 space-y-3">
           <p className="text-sm font-medium">배송지</p>
           <p className="text-[10px] text-muted-foreground -mt-1.5">
-            제주·도서산간은 추가 배송비가 발생합니다 (5만원당 3,000원씩 차감).
+            제주·도서산간은 추가 배송비가 발생합니다
+            {shippingBreakdown.isFixed
+              ? ' (제작 상품이 포함돼 무료배송 할인은 적용되지 않습니다).'
+              : ' (5만원당 3,000원씩 차감).'}
           </p>
           <div className="flex gap-2">
             <Input value={form.zipcode} readOnly placeholder="우편번호" className="h-10 w-28" />
