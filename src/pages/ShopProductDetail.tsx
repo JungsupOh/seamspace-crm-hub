@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, ShoppingCart, Minus, Plus, AlertTriangle, X } from 'lucide-react';
+import { ArrowLeft, ShoppingCart, Minus, Plus, AlertTriangle, X, Truck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { getShopProduct, addToCart, getCart, optionLabel, optionPrice, qtyUnitFromLabel,
          type ShopProductOption } from '@/lib/shop';
@@ -188,6 +188,7 @@ export default function ShopProductDetail() {
             <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
               <li>· 최소 페이지 수 <strong className="text-foreground">36p</strong> 부터 제작 가능합니다.</li>
               <li>· 배송비 <strong className="text-foreground">3,500원</strong> 별도 (제작 상품이라 무료배송 대상이 아닙니다)</li>
+              <li>· 주문 후 제작에 들어가며, <strong className="text-foreground">배송까지 약 10일</strong> 정도 소요됩니다.</li>
             </ul>
           </div>
         )}
@@ -311,6 +312,14 @@ export default function ShopProductDetail() {
               </div>
               <span className="text-base font-bold shrink-0">{lineTotal.toLocaleString()}원</span>
             </div>
+          )}
+
+          {/* 제작 상품이라 바로 배송되지 않는다 — 결제 직전에 한 번 더 알린다 */}
+          {product.id === 'diary' && (
+            <p className="mb-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <Truck className="h-3.5 w-3.5 shrink-0" />
+              주문 후 제작 — 배송까지 약 <strong className="text-foreground">10일</strong> 정도 소요됩니다.
+            </p>
           )}
 
           {/* 일기 제본: 결제 전 필수 확인 — 버튼 위에 둬야 누르기 전에 반드시 눈에 들어온다.
