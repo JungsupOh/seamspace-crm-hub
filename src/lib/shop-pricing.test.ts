@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { calcShipping } from './shipping';
-import { getCartTotal, optionPrice, optionLabel, type CartItem } from './shop';
+import { getCartTotal, optionPrice, optionLabel, qtyUnitFromLabel, type CartItem } from './shop';
 
 const item = (o: Partial<CartItem> & { productId: string }): CartItem => ({
   productName: 'x', qty: 1, unitPrice: 10000, ...o,
@@ -110,5 +110,23 @@ describe('옵션 가격', () => {
 
   it('옵션 미선택이면 기본가', () => {
     expect(optionPrice(undefined, 26000)).toBe(26000);
+  });
+});
+
+describe('수량 단위 표시', () => {
+  it("'1권'/'1개'처럼 명확하면 단위를 붙인다", () => {
+    expect(qtyUnitFromLabel('1권')).toBe('권');   // 일기 제본
+    expect(qtyUnitFromLabel('1개')).toBe('개');   // 보드게임
+  });
+
+  it('수량 단위가 애매한 상품에는 붙이지 않는다', () => {
+    expect(qtyUnitFromLabel('10개 1세트')).toBe('');    // 키링 — 수량은 '세트' 수라 '개'는 오해를 준다
+    expect(qtyUnitFromLabel('1학급 1개월')).toBe('');   // 마음일기 — 학급·개월 복합
+  });
+
+  it('값이 없으면 빈 문자열', () => {
+    expect(qtyUnitFromLabel(undefined)).toBe('');
+    expect(qtyUnitFromLabel(null)).toBe('');
+    expect(qtyUnitFromLabel('')).toBe('');
   });
 });

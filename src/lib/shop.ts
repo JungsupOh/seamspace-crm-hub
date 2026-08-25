@@ -20,6 +20,13 @@ export function optionPrice(o: ShopProductOption | undefined, basePrice: number)
   return basePrice;
 }
 
+// 수량 옆에 붙일 단위. unit_label이 '1권'/'1개'처럼 명확할 때만 쓴다.
+// '10개 1세트'(키링), '1학급 1개월'(마음일기)처럼 수량 단위가 애매한 상품은
+// 잘못된 단위를 붙이느니 아무것도 안 붙인다.
+export function qtyUnitFromLabel(unitLabel?: string | null): string {
+  return unitLabel?.match(/^1([가-힣]{1,2})$/)?.[1] ?? '';
+}
+
 export interface ShopProduct {
   id: string;
   name: string;
