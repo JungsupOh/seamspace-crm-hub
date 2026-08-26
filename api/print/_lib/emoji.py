@@ -56,6 +56,10 @@ _CANDIDATE = re.compile(
     "|[\U0001F000-\U0001FAFF]"
 )
 
+# 이모지를 글자 크기 그대로 두면 한글보다 커 보이고 윗줄과 부딪힌다.
+# Noto Emoji 글리프가 em 사각형을 꽉 채우는 반면 한글은 여백이 있기 때문이다.
+EMOJI_SCALE = 0.85
+
 _registered = False
 _supported = None  # 코드포인트 -> 글리프. 폰트가 실제로 가진 것만 들어있다.
 
@@ -79,16 +83,19 @@ def _escape(text):
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def to_markup(text):
+def to_markup(text, font_size):
     """
     사용자 텍스트를 Paragraph 용 마크업으로 바꾼다.
-    이모지는 이모지 폰트로 감싸고, 나머지는 이스케이프한 글자 그대로 둔다.
+    이모지는 이모지 폰트로 조금 작게 감싸고, 나머지는 이스케이프한 글자 그대로 둔다.
     연속된 이모지는 한 번만 감싼다.
+
+    글자 크기를 줄여 가며 다시 배치할 때는 그 크기로 다시 불러야 한다.
     """
     if not text:
         return ""
 
     ensure_font()
+    emoji_size = round(font_size * EMOJI_SCALE, 2)
     text = _COMBINING.sub("", text)
 
     out = []
@@ -102,7 +109,9 @@ def to_markup(text):
 
     def flush_emo():
         if emo:
-            out.append(f'<font name="{FONT_NAME}">{"".join(emo)}</font>')
+            out.append(
+                f'<font name="{FONT_NAME}" size="{emoji_size}">{"".join(emo)}</font>'
+            )
             emo.clear()
 
     for ch in text:

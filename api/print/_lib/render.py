@@ -37,7 +37,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
-from reportlab.platypus import Frame, Paragraph
+from reportlab.platypus import Frame, KeepInFrame, Paragraph
 
 from .emoji import to_markup
 from .emotions import EMOTION_ICONS
@@ -98,6 +98,16 @@ ILLUSTRATIONS = {
         ("bgImage/seamInGarden.png", 12, -3, 60 * 2.7, 35.807 * 2.7),
         ("bgImage/seamsInBusStop.png", -23, -8, 70 * 2.7, 37.718 * 2.7),
     ],
+}
+
+# 줄간격. 원본은 글자 크기가 줄어도 leading 을 12pt 로 고정해 뒀는데, 그러면
+# 축소 루프가 높이를 거의 못 줄인다(leading 이 높이를 지배한다). 그래서 애초에
+# 줄간격을 빡빡하게 잡을 수밖에 없었다. 글자 크기에 비례시키면 넉넉하게 주면서도
+# 넘칠 때 확실히 줄어든다.
+LEADING = {
+    "topic": 1.25,   # 원본 12/11 = 1.09
+    "body":  1.45,   # 원본 12/10 = 1.20
+    "talk":  1.35,   # 원본 11/11 = 1.00 — 가장 빡빡했다
 }
 
 # 글자 축소가 멈추는 하한. 여기 도달하면 더 줄이지 않고 프레임이 넘치는 만큼 잘라낸다
@@ -167,22 +177,44 @@ def is_renderable(diary):
     return True
 
 
-def _fit(text, style_of, frame_w, frame_h, limit, start_size):
-    """
-    프레임 높이에 맞을 때까지 글자를 0.5pt 씩 줄인다.
-    text 는 to_markup() 을 거친 마크업이어야 한다.
+# Frame 의 기본 안쪽 여백. 실제로 글이 들어갈 수 있는 크기는 프레임에서 이만큼 작다.
+FRAME_PADDING = 6
 
-    원본과 다른 점은 MIN_FONT_SIZE 하한뿐이다. leading 이 고정인데 fontSize 만
-    줄이는 구조라 어느 지점부터는 높이가 더 줄지 않는데, 원본에는 탈출 조건이
-    없어서 무한 루프가 가능했다.
+
+def avail(frame_w, frame_h):
+    """프레임에서 여백을 뺀, 글이 실제로 놓일 수 있는 크기."""
+    return frame_w - 2 * FRAME_PADDING, frame_h - 2 * FRAME_PADDING
+
+
+def _fit(raw_text, style_of, frame_w, frame_h, limit, start_size):
     """
+    프레임에 맞을 때까지 글자를 0.5pt 씩 줄이고, 그래도 넘치면 잘리지 않게 감싼다.
+
+    원본과 다른 점:
+      - MIN_FONT_SIZE 하한. 원본은 탈출 조건이 없어 무한 루프가 가능했다.
+      - 크기마다 마크업을 다시 만든다. 이모지를 글자 크기에 맞춰 줄여야 하기 때문이다.
+      - 프레임 여백을 빼고 잰다. 원본은 프레임 크기 그대로 재서, 토닥토닥은
+        높이 75pt 까지 통과시키는데 실제 공간은 68pt 뿐이었다. 그 사이에 걸린 글은
+        Frame.addFromList 가 조용히 버려서 문장 끝이 사라졌다.
+      - 하한까지 줄여도 안 들어가면 KeepInFrame 으로 통째로 축소해 넣는다.
+        원본은 이 경우에도 그냥 버렸다.
+
+    limit 은 디자인상의 상한이다(예: 주제는 두 줄까지). 실제 공간보다 클 수는 없다.
+    """
+    avail_w, avail_h = avail(frame_w, frame_h)
+    limit = min(limit, avail_h)
+
     size = start_size
-    para = Paragraph(text, style_of(size))
-    _, h = para.wrap(frame_w, frame_h)
+    para = Paragraph(to_markup(raw_text, size), style_of(size))
+    _, h = para.wrap(avail_w, avail_h)
     while h >= limit and size > MIN_FONT_SIZE:
         size -= 0.5
-        para = Paragraph(text, style_of(size))
-        _, h = para.wrap(frame_w, frame_h)
+        para = Paragraph(to_markup(raw_text, size), style_of(size))
+        _, h = para.wrap(avail_w, avail_h)
+
+    if h >= limit:
+        # 최소 크기로도 넘친다 — 통째로 축소해 프레임 안에 우겨넣는다.
+        return KeepInFrame(avail_w, avail_h, [para], mode="shrink")
     return para
 
 
@@ -277,32 +309,32 @@ def draw_diary_page(c, diary, alt_state):
             name="Topic",
             fontName="Freesentation-4Regular",
             fontSize=size,
-            leading=12,
+            leading=size * LEADING["topic"],
             wordWrap="CJK",
             textColor=text_color,
         )
 
-    para = _fit(to_markup(topic), topic_style, frame_w, frame_h, frame_h - 30, 11)
+    para = _fit(topic, topic_style, frame_w, frame_h, frame_h - 30, 11)
     Frame(76, topic_y, frame_w, frame_h, showBoundary=0).addFromList([para], c)
 
     # ── 8. 일기 본문 ────────────────────────────────────────────────────
     # 먼저 반 페이지에 들어가는지 보고, 들어가면 남는 자리에 삽화를 넣는다.
     body_w, body_h, body_h_short, body_y = 345, 300, 170, 118
-    content = to_markup(diary.get("content") or "")
+    content = diary.get("content") or ""
 
     def body_style(size):
         return ParagraphStyle(
             name="Body",
             fontName="Geurimilgi",
             fontSize=size,
-            leading=12,
+            leading=size * LEADING["body"],
             wordWrap="CJK",
             textColor="#2F2725",
             alignment=TA_JUSTIFY,
         )
 
-    para = Paragraph(content, body_style(10))
-    _, h = para.wrap(body_w, body_h_short)
+    para = Paragraph(to_markup(content, 10), body_style(10))
+    _, h = para.wrap(*avail(body_w, body_h_short))
 
     if h < (body_h_short - 15):
         Frame(40, body_y + body_h_short - 30, body_w, body_h_short, showBoundary=0).addFromList([para], c)
@@ -320,14 +352,14 @@ def draw_diary_page(c, diary, alt_state):
 
     # ── 9. 토닥토닥 ─────────────────────────────────────────────────────
     talk_w, talk_h = 300, 80
-    talk = to_markup(diary.get("SeamTalk") or "")
+    talk = diary.get("SeamTalk") or ""
 
     def talk_style(size):
         return ParagraphStyle(
             name="Talk",
             fontName="EduSeaum",
             fontSize=size,
-            leading=11,
+            leading=size * LEADING["talk"],
             wordWrap="CJK",
             textColor="#2F2725",
         )
