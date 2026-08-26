@@ -215,6 +215,18 @@ export default function Print() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+        {/* 프리뷰 주소와 운영 주소가 눈으로 구분이 안 돼 옛 배포를 보고 있는 일이 잦다.
+            임시 배포면 대놓고 알려 준다. */}
+        {__BUILD_INFO__.env !== 'production' && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p className="font-medium">임시 배포(프리뷰) 화면입니다.</p>
+            <p className="text-xs mt-1">
+              최신 기능은 운영 주소에서 확인하세요 —{' '}
+              <a href="https://seamspace-crm-hub.vercel.app/print"
+                className="underline font-medium">seamspace-crm-hub.vercel.app/print</a>
+            </p>
+          </div>
+        )}
         {!session ? (
           /* ── 1단계: 관리자 로그인 ─────────────────────────────── */
           <div className="bg-white rounded-2xl border border-border p-5 space-y-4 max-w-md mx-auto">
@@ -485,6 +497,10 @@ export default function Print() {
             )}
           </>
         )}
+
+        <p className="text-center text-[11px] text-muted-foreground pt-2">
+          빌드 {__BUILD_INFO__.sha} · {__BUILD_INFO__.env} · {__BUILD_INFO__.at}
+        </p>
       </main>
     </div>
   );
