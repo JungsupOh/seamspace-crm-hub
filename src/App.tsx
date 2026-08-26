@@ -38,6 +38,7 @@ import ShopFail from "./pages/ShopFail";
 import ShopOrderLookup from "./pages/ShopOrderLookup";
 import ShopOrders from "./pages/ShopOrders";
 import ShopLuckySeven from "./pages/ShopLuckySeven";
+import Print from "./pages/Print";
 import LuckySevenForm from "./pages/LuckySevenForm";
 import LuckySevenPay from "./pages/LuckySevenPay";
 import LuckySevenPayComplete from "./pages/LuckySevenPayComplete";
@@ -174,6 +175,9 @@ function AppRoutes() {
       <Route path="/shop/lookup" element={<ShopOrderLookup />} />
       {/* 럭키세븐 — Shop 카드 → 상세 이미지 → 신청 폼 진입 */}
       <Route path="/shop/lucky-seven" element={<ShopLuckySeven />} />
+
+      {/* 일기 제본 PDF 생성 (관리자 전용 — 페이지 안에서 일기 서버 관리자 로그인으로 막는다) */}
+      <Route path="/print" element={<Print />} />
       {/* 레거시 호환 — 과거 /order-test로 이메일 발송된 건 그대로 동작 */}
       <Route path="/order-test" element={<OrderTest />} />
       <Route path="/order-test/complete" element={<OrderComplete />} />

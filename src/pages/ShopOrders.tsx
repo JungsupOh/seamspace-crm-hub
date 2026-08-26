@@ -28,6 +28,7 @@ const PRODUCT_ICON: Record<string, { label: string; bg: string; fg: string; name
   boardgame: { label: '보', bg: 'bg-indigo-700',  fg: 'text-white',         name: '마음여행 보드게임' },
   keyring:   { label: '키', bg: 'bg-yellow-200',  fg: 'text-yellow-800',    name: '감정 키링 10종' },
   minddiary: { label: '마', bg: 'bg-purple-200',  fg: 'text-purple-800',    name: 'AI 마음일기' },
+  diary:     { label: '일', bg: 'bg-emerald-200', fg: 'text-emerald-800',   name: '나의 이야기 출력 서비스' },
 };
 
 // 상품 필터 옵션 — 마음일기는 딜관리에서 별도로 보므로 제외
@@ -35,6 +36,7 @@ const PRODUCT_FILTER_OPTIONS = [
   { id: 'all',       label: '전체' },
   { id: 'boardgame', label: '보드게임' },
   { id: 'keyring',   label: '키링' },
+  { id: 'diary',     label: '일기 제본' },
 ];
 
 const STATUS_LIST = ['결제완료', '배송준비', '배송중', '배송완료', '취소'] as const;
