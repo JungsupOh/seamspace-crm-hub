@@ -494,11 +494,16 @@ export default function OrderTest() {
 
   // ── 계산값 ────────────────────────────────────
   const activePlan = PLANS.find(p => p.id === info.planId) ?? PLANS[1];
+  // 플랜별 최소 판매 개월 (소수학급 = 4개월)
+  const minMonths = activePlan.minMonths ?? 1;
+  const durationChips = [1, 4].filter(m => m >= minMonths);
   const { price: rawUnitPrice, isEvent: priceIsEvent } = getUnitPrice(info.months, info.planId);
-  // 직접 단가가 없는 조합 기간(예: 8개월)은 최저가 조합 총액을 단가로 사용
+  // 직접 단가가 없는 조합 기간(예: 8개월)은 최저가 조합 총액을 단가로 사용한다.
+  // 반드시 '같은 개월수'의 제안만 쓴다 — 다른 개월수의 금액을 끌어오면 기간과 금액이
+  // 어긋난 견적서가 나간다(소수학급 1개월을 4개월 금액 4만원으로 찍던 버그).
   const unitPrice = rawUnitPrice > 0
     ? rawUnitPrice
-    : (getSuggestions(info.months, info.planId)[0]?.total ?? 0);
+    : (getSuggestions(info.months, info.planId).find(s => s.months === info.months)?.total ?? 0);
   const total = unitPrice * info.qty;
   const supply = Math.round(total / 1.1);
   const tax = total - supply;
@@ -566,8 +571,11 @@ export default function OrderTest() {
   }, [customMonths, info.planId]);
 
   const selectPlan = (planId: PlanKey) => {
-    // 플랜만 변경, 학생수/이용권수량/직접입력 개월수는 유지
-    setInfo(prev => ({ ...prev, planId }));
+    // 플랜만 변경, 학생수/이용권수량/직접입력 개월수는 유지.
+    // 단, 플랜의 최소 판매 개월보다 짧으면 최소값으로 올린다 — 다른 플랜에서
+    // 1개월을 고른 채 소수학급으로 넘어오면 판매 불가 조합이 되기 때문.
+    const min = PLANS.find(p => p.id === planId)?.minMonths ?? 1;
+    setInfo(prev => ({ ...prev, planId, months: Math.max(prev.months, min) }));
   };
 
   const step1Valid = !!(info.orgName.trim() && info.contactName.trim() && info.phone.trim() && info.email.trim());
@@ -1573,18 +1581,23 @@ export default function OrderTest() {
                             </div>
                           </div>
                         )}
-                        <div className="grid grid-cols-2 gap-2 mb-2">
-                          {[1, 4].map(m => (
+                        <div className={`grid gap-2 mb-2 ${durationChips.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                          {durationChips.map(m => (
                             <button key={m} type="button"
                               onClick={() => { setInfo(p => ({ ...p, months: m })); setShowCustom(false); }}
                               className={`relative rounded-xl border-2 p-3.5 text-left transition-all
                                 ${info.months === m && !showCustom ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/40'}`}>
                               <p className="font-semibold text-sm">{m}개월</p>
-                              <p className="text-base font-bold mt-1">{fmt(REG[m][info.planId])}</p>
+                              <p className="text-base font-bold mt-1">{fmt(getUnitPrice(m, info.planId).price)}</p>
                               {info.months === m && !showCustom && <CheckCircle2 className="absolute bottom-3 right-3 h-4 w-4 text-primary" />}
                             </button>
                           ))}
                         </div>
+                        {minMonths > 1 && (
+                          <p className="text-xs text-muted-foreground mb-2">
+                            {activePlan.label}은 {minMonths}개월부터 구매할 수 있습니다.
+                          </p>
+                        )}
                         <button type="button" onClick={() => setShowCustom(v => !v)}
                           className={`w-full text-sm border rounded-xl py-2.5 transition-colors
                             ${showCustom ? 'border-primary text-primary bg-primary/5' : 'border-dashed border-muted-foreground/40 text-muted-foreground hover:border-primary/50 hover:text-primary'}`}>
@@ -1594,7 +1607,7 @@ export default function OrderTest() {
                           <div className="mt-3 space-y-3">
                             <div className="flex items-center gap-2">
                               <Input type="number" value={customMonths} onChange={e => setCustomMonths(e.target.value)}
-                                placeholder="예: 9" className="h-10 w-28" min={1} max={60} />
+                                placeholder="예: 9" className="h-10 w-28" min={minMonths} max={60} />
                               <span className="text-sm text-muted-foreground">개월</span>
                             </div>
                             {suggestions.length > 0 && (
