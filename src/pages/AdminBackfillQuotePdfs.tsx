@@ -174,7 +174,9 @@ export default function AdminBackfillQuotePdfs() {
                     <tr key={q.quote_number} className="border-t border-border">
                       <td className="px-3 py-2">
                         {status === 'done'   && <CheckCircle2 className="h-4 w-4 text-teal-600" />}
-                        {status === 'failed' && <AlertCircle className="h-4 w-4 text-rose-600" titleAccess={errMsg} />}
+                        {status === 'failed' && (
+                          <span title={errMsg}><AlertCircle className="h-4 w-4 text-rose-600" /></span>
+                        )}
                         {status === 'pending' && <span className="text-muted-foreground/50">·</span>}
                       </td>
                       <td className="px-3 py-2 font-mono text-xs">{q.quote_number}</td>

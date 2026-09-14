@@ -372,7 +372,7 @@ function DealUploadDialog({ existingDeals, onDone }: {
   const skipCount = parsed.length - newDeals.length;
 
   const statusSummary = newDeals.reduce<Record<string, number>>((acc, d) => {
-    const s = d.Deal_Stage ?? 'Lead';
+    const s = d.Deal_Stage ?? '체험권';
     acc[s] = (acc[s] ?? 0) + 1;
     return acc;
   }, {});
@@ -1253,7 +1253,7 @@ function DealForm({
     if (fields.Payment_Date) return '입금완료';
     if (pendingLic.length > 0 || storedLic.length > 0) return '이용권 발송완료';
     if (Object.keys(pending).some(k => k.startsWith('quote')) || Object.keys(stored).some(k => k.startsWith('quote'))) return '견적';
-    return 'Lead';
+    return '체험권';
   };
 
   // 기존 DB 파일 제거 (저장 시 실제 삭제)
@@ -2386,7 +2386,8 @@ function DealForm({
                 // 계좌이체 등 입금일 입력 시 계약일이 비어있으면 동일 날짜로 자동 설정 (이미 있으면 보존 — 연락 계약 건)
                 if (v && !f.Contract_Date) next.Contract_Date = v;
                 setF(next);
-                if (!f.Deal_Stage || ['Lead', 'Proposal', 'Contract', 'Closed_Won', '체험권', '견적', '계약체결/구매', '템플릿 회신대기', '이용권 발송완료', '결제예정', '입금대기', '입금완료'].includes(f.Deal_Stage ?? '')) {
+                // 딜취소/계약파기는 자동 갱신 대상이 아니다 — DEAL_STAGES 는 그 둘을 뺀 진행 단계 목록
+                if (!f.Deal_Stage || (DEAL_STAGES as readonly string[]).includes(f.Deal_Stage)) {
                   const stage = autoStage(pendingFiles, storedFiles, pendingLicenseFiles, storedLicenseFiles, next);
                   setF(p => ({ ...p, Deal_Stage: stage }));
                 }
@@ -3055,18 +3056,19 @@ export default function Deals() {
     return (b.fields.Quote_Number ?? '').localeCompare(a.fields.Quote_Number ?? '');
   });
 
+  // 계약금액: 계약일이 잡힌 딜의 합계 (회계 기준 = 계약일)
+  const contractedTotal = periodDeals
+    .filter(d => d.fields.Contract_Date)
+    .reduce((s, d) => s + (d.fields.Final_Contract_Value ?? 0), 0);
+
   const pipelineTotals = {
     deal:     periodDeals.length,
-    contract: pipeline
-      .filter(p => ['Contract', 'Active_User', 'Closed_Won'].includes(p.stage))
-      .reduce((s, p) => s + p.total, 0),
-    won: pipeline.find(p => p.stage === 'Closed_Won')?.total ?? 0,
+    // 헤더/전체 버튼의 '계약합계'. 예전에는 Airtable 스테이지(Contract/Closed_Won 등)로
+    // 걸렀는데 그 값들이 사라진 뒤로 항상 0이었다. 아래 '계약금액'과 같은 기준을 쓴다.
+    contract: contractedTotal,
     // 견적금액: 목록 전체 합계
     quote: periodDeals.reduce((s, d) => s + (d.fields.Final_Contract_Value ?? 0), 0),
-    // 계약금액: Contract_Date 셋팅된 합계
-    contracted: periodDeals
-      .filter(d => d.fields.Contract_Date)
-      .reduce((s, d) => s + (d.fields.Final_Contract_Value ?? 0), 0),
+    contracted: contractedTotal,
     // 입금액: Payment_Date 셋팅된 합계
     paid: periodDeals
       .filter(d => d.fields.Payment_Date)
@@ -3508,6 +3510,7 @@ export default function Deals() {
               duration:      lc.duration,
               user_count:    lc.userCount,
               status:        '대기',
+              service_expire_at: null,   // 운영DB 동기화 전까지 미확정
             });
           }
         }

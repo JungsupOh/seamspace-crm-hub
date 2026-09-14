@@ -25,6 +25,7 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 interface LicenseRecord {
   id: string;
   coupon_code: string;
+  contact_phone: string | null;
   org_name: string;
   status: string;
   duration: string;
