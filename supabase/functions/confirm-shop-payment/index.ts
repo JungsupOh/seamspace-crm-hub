@@ -227,7 +227,10 @@ Deno.serve(async (req: Request) => {
             headers: { ...DB_HEADERS, Prefer: "return=representation" },
             body: JSON.stringify({
               deal_name:           `(Shop) ${item.productName} ${customer.name}${seq}`,
-              deal_stage:          "거래종료",
+              // 카드 결제는 끝났지만 카드사 정산(입금)은 아직이라 '입금대기'다.
+              // 정산일이 확인되면 어드민이 payment_date 를 넣고 '입금완료'로 옮긴다.
+              // 딜 스테이지는 src/lib/grades.ts 의 ALL_DEAL_STAGES 에 있는 값만 써야 한다.
+              deal_stage:          "입금대기",
               deal_type:           "New",
               contact_name:        customer.name,
               contact_phone:       phoneNorm,
