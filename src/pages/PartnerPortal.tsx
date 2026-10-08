@@ -38,11 +38,12 @@ interface BuyerInput {
   buyer_email: string;
   student_count: number;
   month_count: number | '';
+  plan_name: string;
 }
 
 const emptyBuyer = (): BuyerInput => ({
   buyer_name: '', buyer_phone: '', buyer_email: '',
-  student_count: 40, month_count: '',
+  student_count: 40, month_count: '', plan_name: '',
 });
 
 interface ItemInput {
@@ -288,6 +289,7 @@ export default function PartnerPortal() {
           buyer_email: b.buyer_email ?? '',
           student_count: b.student_count ?? 40,
           month_count: b.month_count ?? '',
+          plan_name: b.plan_name ?? '',
         }))
       : [{
           buyer_name: deal.buyer_name ?? '',
@@ -295,6 +297,7 @@ export default function PartnerPortal() {
           buyer_email: deal.buyer_email ?? '',
           student_count: deal.student_count ?? 40,
           month_count: deal.month_count ?? '',
+          plan_name: deal.plan_name ?? '',
         }];
     setBuyers(formBuyers.length > 0 ? formBuyers : [emptyBuyer()]);
     setSchoolQuery(deal.school_name ?? '');
@@ -389,6 +392,7 @@ export default function PartnerPortal() {
         buyer_email: b.buyer_email || undefined,
         student_count: b.student_count,
         month_count: b.month_count === '' ? undefined : b.month_count,
+        plan_name: b.plan_name || undefined,
         quantity: 1,
       }));
 
@@ -480,6 +484,7 @@ export default function PartnerPortal() {
       f.contactPhone = buyer?.buyer_phone ?? deal.buyer_phone ?? '';
       if (buyer?.month_count) f.duration = Number(buyer.month_count) || f.duration;
       if (buyer?.student_count) f.userCount = Number(buyer.student_count) || f.userCount;
+      f.plan = buyer?.plan_name || deal.plan_name || f.plan;
     }
     setIssueForm(f);
     setIssuedCode(null);
@@ -1082,9 +1087,46 @@ export default function PartnerPortal() {
                         <Input type="email" required={isIntl} value={b.buyer_email} onChange={e => updateBuyer(idx, 'buyer_email', e.target.value)} placeholder="email@example.com" className="h-7 text-xs" />
                       </div>
                     </div>
-                    {/* 학생 수·이용기간은 구매자가 아니라 '이용권'의 값이다.
-                        발급 화면에서 입력받고, 발급된 이용권에 표시한다.
-                        (구매자 = 누구인가 / 이용권 = 무엇을 샀는가) */}
+                    {/* 구매자별 이용권 내역. 어드민 화면(Partners.tsx)과 같은 항목을 쓴다 —
+                        이용권 발급 권한이 없는 파트너도 '누가 무엇을 샀는지'를 남길 수 있어야 한다.
+                        발급 시에는 이 값이 발급 폼의 기본값으로 들어간다. */}
+                    <div className="grid grid-cols-[1fr_1fr_1fr] gap-2">
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">{t({ ko: '학생 수', ja: '生徒数', en: 'Students' })}</span>
+                        <AmountInput value={b.student_count} onValueChange={n => updateBuyer(idx, 'student_count', n)} className="h-7 text-xs" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">{t({ ko: '개월 수', ja: 'か月数', en: 'Months' })}</span>
+                        <Input type="number" min={1} value={b.month_count}
+                          onChange={e => updateBuyer(idx, 'month_count', e.target.value === '' ? '' : (parseInt(e.target.value, 10) || ''))}
+                          placeholder="12" className="h-7 text-xs" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-muted-foreground">{t({ ko: '플랜', ja: 'プラン', en: 'Plan' })}</span>
+                        {/* 품명 선택과 같은 방식 — 목록에 없는 값이면 직접입력 칸이 따라 나온다 */}
+                        <Select
+                          value={PARTNER_PLAN_LIST.includes(b.plan_name) ? b.plan_name : (b.plan_name ? '__custom__' : '')}
+                          onValueChange={v => {
+                            if (v === '__custom__') {
+                              updateBuyer(idx, 'plan_name', PARTNER_PLAN_LIST.includes(b.plan_name) ? '' : b.plan_name);
+                            } else {
+                              updateBuyer(idx, 'plan_name', v);
+                            }
+                          }}
+                        >
+                          <SelectTrigger className="h-7 text-xs"><SelectValue placeholder={t({ ko: '선택', ja: '選択', en: 'Select' })} /></SelectTrigger>
+                          <SelectContent>
+                            {PARTNER_PLAN_LIST.map(pl => <SelectItem key={pl} value={pl} className="text-xs">{pl}</SelectItem>)}
+                            <SelectItem value="__custom__" className="text-xs">{t({ ko: '기타(직접입력)', ja: 'その他(直接入力)', en: 'Other (type in)' })}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {b.plan_name && !PARTNER_PLAN_LIST.includes(b.plan_name) && (
+                          <Input value={b.plan_name} onChange={e => updateBuyer(idx, 'plan_name', e.target.value)}
+                            placeholder={t({ ko: '플랜명 직접입력', ja: 'プラン名を入力', en: 'Type plan name' })}
+                            className="h-6 text-xs mt-1" />
+                        )}
+                      </div>
+                    </div>
 
                     {/* 이 구매자에게 발급된 이용권 — 저장된 구매자만 (신규는 저장 후 발급) */}
                     {canIssueLicenses && b.id && (() => {
