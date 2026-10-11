@@ -1,5 +1,5 @@
 """
-POST /api/print/stats  {token, username}
+POST /api/print/stats  {token, username, mode?}
   -> {total, renderable, skipped[], firstDate, lastDate, monthly[], quote}
 
 일기를 전부 받아 월별로 집계하고 견적을 낸다.
@@ -63,7 +63,7 @@ class handler(BaseHTTPRequestHandler):
                     "firstDate": dates[0].strftime("%Y-%m-%d") if dates else None,
                     "lastDate": dates[-1].strftime("%Y-%m-%d") if dates else None,
                     "monthly": monthly,
-                    "quote": pricing.plan_volumes(monthly),
+                    "quote": pricing.plan_volumes(monthly, body.get("mode") or pricing.DEFAULT_MODE),
                 },
             )
         except mdiary.MDiaryError as e:

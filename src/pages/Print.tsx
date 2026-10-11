@@ -8,10 +8,7 @@
 
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  ArrowLeft, BookOpen, CalendarDays, CalendarClock, Download,
-  FileText, Loader2, LogOut, Scissors, Search, TriangleAlert,
-} from 'lucide-react';
+import { ArrowLeft, BookOpen, CalendarClock, CalendarDays, CheckCircle2, Download, FileText, Loader2, LogOut, Scissors, Search, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -23,8 +20,9 @@ import {
 import { StatCard } from '@/components/StatCard';
 import {
   fetchStats, formatWon, formatYm, generateVolume, loadSession, login,
-  requote, saveSession,
+  requote, saveSession, SPLIT_MODE_LABEL,
   type DiaryStats, type GeneratedFile, type PrintSession, type Quote,
+  type SplitMode,
 } from '@/lib/print';
 
 export default function Print() {
@@ -43,6 +41,8 @@ export default function Print() {
   // 구간·분책
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [splits, setSplits] = useState<string[]>([]);
+  // 자동 분권 방식 — 최저가(기본) / 균등. 분책 경계를 직접 지정하면 무시된다.
+  const [splitMode, setSplitMode] = useState<SplitMode>('cheapest');
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [showSplitEditor, setShowSplitEditor] = useState(false);
@@ -124,14 +124,18 @@ export default function Print() {
     }
   }
 
-  /** 구간이나 분책 경계가 바뀌면 견적만 다시 계산한다(일기 재조회 없음). */
-  async function refreshQuote(next: { from: string; to: string }, nextSplits: string[]) {
+  /** 구간·분책 경계·분권 방식이 바뀌면 견적만 다시 계산한다(일기 재조회 없음). */
+  async function refreshQuote(
+    next: { from: string; to: string }, nextSplits: string[], mode: SplitMode = splitMode,
+  ) {
     if (!stats) return;
     setQuoting(true);
     setFiles([]);
     try {
       const inRange = nextSplits.filter(ym => ym >= next.from && ym <= next.to);
-      const q = await requote(stats.monthly, next.from, next.to, inRange.length ? inRange : undefined);
+      const q = await requote(
+        stats.monthly, next.from, next.to, inRange.length ? inRange : undefined, mode,
+      );
       setQuote(q);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '견적 계산에 실패했습니다.');
@@ -155,6 +159,14 @@ export default function Print() {
     const next = splits.includes(ym) ? splits.filter(s => s !== ym) : [...splits, ym].sort();
     setSplits(next);
     void refreshQuote(range, next);
+  }
+
+  function changeSplitMode(mode: SplitMode) {
+    if (mode === splitMode) return;
+    setSplitMode(mode);
+    // 분책 경계를 직접 지정한 상태면 자동 분권이 적용되지 않으므로 경계를 비운다.
+    setSplits([]);
+    if (range) void refreshQuote(range, [], mode);
   }
 
   async function handleGenerate() {
@@ -374,6 +386,55 @@ export default function Print() {
                           </p>
                         ))}
 
+                        {/* 분권 방식 — 두 안의 금액을 같이 보여주고 고르게 한다.
+                            가격이 구간제라 '균등'이 '최저가'보다 비쌀 수 있다. */}
+                        {(quote.options?.length ?? 0) > 1 && quote.options!.some(o => o.volumeCount > 1) && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1.5">분권 방식</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              {quote.options!.map(opt => {
+                                const active = splits.length === 0 && splitMode === opt.mode;
+                                const cheapest = Math.min(
+                                  ...quote.options!.filter(o => o.printable).map(o => o.grandTotal),
+                                );
+                                const diff = opt.grandTotal - cheapest;
+                                return (
+                                  <button key={opt.mode} type="button"
+                                    disabled={!opt.printable}
+                                    onClick={() => changeSplitMode(opt.mode)}
+                                    className={`relative rounded-xl border-2 p-3 text-left transition-all disabled:opacity-50
+                                      ${active ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/40'}`}>
+                                    <p className="font-semibold text-sm">{SPLIT_MODE_LABEL[opt.mode]}</p>
+                                    {opt.printable ? (
+                                      <>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5 tabular">
+                                          {opt.volumeCount}권 · {opt.pages.join(' / ')}p
+                                        </p>
+                                        <p className="text-sm font-bold mt-1 tabular">
+                                          {formatWon(opt.grandTotal)}
+                                          {diff > 0 && (
+                                            <span className="text-[11px] font-normal text-amber-600 ml-1">
+                                              +{formatWon(diff)}
+                                            </span>
+                                          )}
+                                        </p>
+                                      </>
+                                    ) : (
+                                      <p className="text-[11px] text-muted-foreground mt-0.5">사용 불가</p>
+                                    )}
+                                    {active && <CheckCircle2 className="absolute top-3 right-3 h-4 w-4 text-primary" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {splits.length > 0 && (
+                              <p className="text-[11px] text-muted-foreground mt-1.5">
+                                분책 경계를 직접 지정해 두어 자동 분권이 적용되지 않습니다.
+                              </p>
+                            )}
+                          </div>
+                        )}
+
                         {quote.volumes.length > 0 && (
                           <>
                             <div className="rounded-xl border border-border overflow-hidden">
@@ -388,7 +449,12 @@ export default function Print() {
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-4">
-                                    <span className="tabular text-muted-foreground">{v.pages}p</span>
+                                    <span className="tabular text-muted-foreground">
+                                      {v.pages}p
+                                      {v.blanks > 0 && (
+                                        <span className="text-amber-600 ml-1">(빈 {v.blanks})</span>
+                                      )}
+                                    </span>
                                     <span className="tabular font-medium w-20 text-right">
                                       {v.price === null ? '—' : formatWon(v.price)}
                                     </span>

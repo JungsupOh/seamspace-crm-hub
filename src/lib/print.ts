@@ -23,13 +23,33 @@ export interface Volume {
   from: string;
   to: string;
   months: string[];
-  pages: number;
+  diaries: number;      // 실제 일기 편수
+  blanks: number;       // 판형 제약(짝수·최소 50p)을 맞추려고 들어간 빈 페이지
+  pages: number;        // 인쇄 페이지 수 = diaries + blanks. 가격은 이 값으로 매긴다
   price: number | null;
+}
+
+/** 자동 분권 방식. 가격이 구간제라 균등이 최저가보다 비쌀 수 있다. */
+export type SplitMode = 'cheapest' | 'balanced';
+
+/** 두 분권 방식을 나란히 비교하기 위한 요약 (quote 응답에 함께 실려 온다) */
+export interface SplitOption {
+  mode: SplitMode;
+  printable: boolean;
+  reason?: string;
+  volumeCount: number;
+  totalPages: number;
+  productTotal: number;
+  grandTotal: number;
+  pages: number[];
 }
 
 export interface Quote {
   printable: boolean;
   reason?: string;
+  mode?: SplitMode;
+  options?: SplitOption[];
+  totalDiaries: number;
   totalPages: number;
   volumes: Volume[];
   productTotal: number;
@@ -90,14 +110,21 @@ export function login(username: string, password: string) {
   return post<PrintSession>('login', { username, password });
 }
 
-export function fetchStats(token: string, username: string) {
-  return post<DiaryStats>('stats', { token, username });
+export function fetchStats(token: string, username: string, mode?: SplitMode) {
+  return post<DiaryStats>('stats', { token, username, mode });
 }
 
-/** 인쇄 구간이나 분책 경계가 바뀔 때 견적만 다시 계산한다(일기 재조회 없음). */
-export function requote(monthly: MonthCount[], from: string, to: string, splits?: string[]) {
-  return post<Quote>('quote', { monthly, from, to, splits });
+/** 인쇄 구간·분책 경계·분권 방식이 바뀔 때 견적만 다시 계산한다(일기 재조회 없음). */
+export function requote(
+  monthly: MonthCount[], from: string, to: string, splits?: string[], mode?: SplitMode,
+) {
+  return post<Quote>('quote', { monthly, from, to, splits, mode });
 }
+
+export const SPLIT_MODE_LABEL: Record<SplitMode, string> = {
+  cheapest: '최저가',
+  balanced: '균등',
+};
 
 /** 한 번에 한 권씩 만든다. 여러 권이면 화면이 순서대로 호출한다. */
 export function generateVolume(token: string, username: string, from: string, to: string) {
