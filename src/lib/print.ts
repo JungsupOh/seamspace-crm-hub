@@ -120,9 +120,17 @@ export interface SweetbookBook {
   env: 'sandbox' | 'live';
   title: string;
   externalRef: string;
-  coverWidthMm: number;
-  coverHeightMm: number;
-  spineWidthMm: number;
+}
+
+/** 표지 PDF. 업체마다 형태가 다르다 — 스위트북은 펼침면 1장, 뚝딱샵은 앞/뒤 낱장 2장. */
+export interface CoverFile {
+  name: string;
+  url: string;
+  bytes: number;
+  layout: 'spread' | 'pages';
+  widthMm: number;
+  heightMm: number;
+  spineWidthMm: number | null;
   spineText: string | null;
 }
 
@@ -162,6 +170,7 @@ export interface GeneratedFile {
   vendor?: Vendor;
   pages: number;
   blanks?: number;      // 업체 페이지 규칙을 맞추려고 채운 빈 페이지
+  cover?: CoverFile;    // 표지 PDF — 업체 무관하게 항상 만들어진다
   book?: SweetbookBook; // 스위트북 모드일 때만. 이미 FINALIZED 상태다
   bytes: number;
   skipped: { id: number | null; date: string | null; reason: string }[];

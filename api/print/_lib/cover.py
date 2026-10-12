@@ -204,3 +204,48 @@ def _spine_text(name, ym_from, ym_to, volume, volume_count):
     if volume and volume_count > 1:
         text += f"     ({volume}/{volume_count})"
     return text
+
+def render_single_pages(out, name, ym_from, ym_to):
+    """
+    앞표지 · 뒤표지를 각각 한 장씩(단면) 담은 2페이지 PDF.
+
+    뚝딱샵은 표지를 웹 에디터에서 조립한다. 책등 너비는 용지·페이지 수에 따라
+    그쪽에서 정하므로 우리가 펼침면을 만들 수 없다. 그래서 재단 크기에 도련을 더한
+    낱장 두 개로 내보낸다 — 에디터에 그대로 올릴 수 있고, 인쇄용 도련도 들어 있다.
+
+    도련은 스위트북과 같은 3mm 다 (뚝딱샵 가이드도 좌우상하 각 3mm 를 요구한다).
+    """
+    ensure_fonts()
+    bleed = 3.0
+    w = TRIM_W + bleed * 2
+    h = TRIM_H + bleed * 2
+
+    c = canvas.Canvas(out, pagesize=(w * mm, h * mm))
+
+    for img, is_front in ((FRONT_IMG, True), (BACK_IMG, False)):
+        c.setFillColor(BG)
+        c.rect(0, 0, w * mm, h * mm, stroke=0, fill=1)
+        c.drawImage(asset(img), bleed * mm, bleed * mm,
+                    width=TRIM_W * mm, height=TRIM_H * mm, mask=None)
+        if is_front:
+            def fx(x_mm):
+                return (bleed + x_mm) * mm
+
+            def fy(top_mm):
+                return (bleed + TRIM_H - top_mm) * mm
+
+            if name:
+                size_pt = _fit(name, _pt_for_height(NAME_H_MM), NAME_MAX_W)
+                _draw_bold(c, fx(NAME_CX), fy(NAME_BASELINE), name, size_pt)
+            date_pt = _pt_for_height(DATE_H_MM)
+            c.setFillColor(colors.white)
+            if ym_from:
+                c.setFont(FONT, date_pt)
+                c.drawString(fx(DATE_LEFT_X), fy(DATE_BASELINE), ym_from)
+            if ym_to:
+                c.setFont(FONT, date_pt)
+                c.drawRightString(fx(DATE_RIGHT_X), fy(DATE_BASELINE), ym_to)
+        c.showPage()
+
+    c.save()
+    return {"widthMm": w, "heightMm": h, "pages": 2}

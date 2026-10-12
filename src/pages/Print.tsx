@@ -738,16 +738,35 @@ export default function Print() {
                     {files.length > 0 && (
                       <div className="space-y-2">
                         {files.map(f => (
-                          <a key={f.name} href={downloadUrl(f)}
-                            className="flex items-center justify-between rounded-xl border border-border px-4 py-3 hover:bg-muted/50 transition-colors">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium truncate">{f.name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {f.pages}페이지 · {(f.bytes / 1024 / 1024).toFixed(1)}MB
-                              </p>
-                            </div>
-                            <Download className="h-4 w-4 shrink-0 ml-3" />
-                          </a>
+                          <div key={f.name} className="rounded-xl border border-border divide-y overflow-hidden">
+                            <a href={downloadUrl(f)}
+                              className="flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors">
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">본문 · {f.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {f.pages}페이지
+                                  {(f.blanks ?? 0) > 0 && <span className="text-amber-600"> (빈 {f.blanks})</span>}
+                                  {' · '}{(f.bytes / 1024 / 1024).toFixed(1)}MB
+                                </p>
+                              </div>
+                              <Download className="h-4 w-4 shrink-0 ml-3" />
+                            </a>
+                            {f.cover && (
+                              <a href={`${f.cover.url}&download=${encodeURIComponent(f.cover.name)}`}
+                                className="flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium truncate">표지 · {f.cover.name}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {f.cover.layout === 'spread'
+                                      ? `펼침면 1장 · ${f.cover.widthMm}×${f.cover.heightMm}mm · 책등 ${f.cover.spineWidthMm}mm`
+                                      : `앞·뒤 2장 · ${f.cover.widthMm}×${f.cover.heightMm}mm`}
+                                    {' · '}{(f.cover.bytes / 1024 / 1024).toFixed(1)}MB
+                                  </p>
+                                </div>
+                                <Download className="h-4 w-4 shrink-0 ml-3" />
+                              </a>
+                            )}
+                          </div>
                         ))}
                         <p className="text-xs text-muted-foreground">
                           다운로드 링크는 30분 뒤 만료됩니다. 만료되면 다시 만들어 주세요.
