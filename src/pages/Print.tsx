@@ -6,10 +6,11 @@
 // 서버(api/print/login.py)가 허용목록으로 한 번 더 거른다 — 일기 조회 API가 대상
 // 사용자를 요청 본문의 username으로 정하기 때문에 화면 단속만으로는 부족하다.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, BookOpen, CalendarClock, CalendarDays, CheckCircle2, Download, FileText, Loader2, LogOut, Scissors, Search, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatPhone } from '@/lib/utils';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -73,6 +74,7 @@ export default function Print() {
   });
   const [estimate, setEstimate] = useState<SweetbookEstimate | null>(null);
   const [placed, setPlaced] = useState<PlacedOrder | null>(null);
+  const addressDetailRef = useRef<HTMLInputElement>(null);
 
   // 스위트북 책이 다 올라간 상태여야 주문할 수 있다
   const bookUids = files.map(f => f.book?.bookUid).filter(Boolean) as string[];
@@ -246,6 +248,27 @@ export default function Print() {
   }
 
   const PENDING_KEY = 'print_pending_order';
+
+  /** Daum 우편번호 검색. /shop 과 같은 스크립트를 쓴다. */
+  const openPostcode = () => {
+    const daum = (window as unknown as { daum?: { Postcode?: unknown } }).daum;
+    if (!daum?.Postcode) {
+      const script = document.createElement('script');
+      script.src = '//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
+      script.onload = () => openPostcode();
+      document.head.appendChild(script);
+      return;
+    }
+    new (window as unknown as {
+      daum: { Postcode: new (o: { oncomplete: (d: { zonecode: string; address: string }) => void }) => { open: () => void } };
+    }).daum.Postcode({
+      oncomplete: (data) => {
+        setShipping(p => ({ ...p, postalCode: data.zonecode, address1: data.address }));
+        // 상세주소로 자연스럽게 넘어가게 포커스를 옮긴다
+        setTimeout(() => addressDetailRef.current?.focus(), 50);
+      },
+    }).open();
+  };
 
   /** 결제창을 띄우기 전에 원가(충전금 차감 예정액)를 확인한다. */
   async function openShipping() {
@@ -825,16 +848,22 @@ export default function Print() {
                             <div className="grid grid-cols-2 gap-2">
                               <Input placeholder="받는 분 *" value={shipping.recipientName}
                                 onChange={e => setShipping(p => ({ ...p, recipientName: e.target.value }))} />
-                              <Input placeholder="연락처 * (010-0000-0000)" value={shipping.recipientPhone}
-                                onChange={e => setShipping(p => ({ ...p, recipientPhone: e.target.value }))} />
+                              <Input placeholder="연락처 *" inputMode="numeric"
+                                value={shipping.recipientPhone}
+                                onChange={e => setShipping(p => ({ ...p, recipientPhone: formatPhone(e.target.value) }))} />
                             </div>
-                            <Input placeholder="우편번호 *" value={shipping.postalCode}
-                              onChange={e => setShipping(p => ({ ...p, postalCode: e.target.value }))} />
-                            <Input placeholder="주소 *" value={shipping.address1}
-                              onChange={e => setShipping(p => ({ ...p, address1: e.target.value }))} />
-                            <Input placeholder="상세주소" value={shipping.address2 ?? ''}
+                            <div className="flex gap-2">
+                              <Input placeholder="우편번호 *" value={shipping.postalCode} readOnly
+                                onClick={openPostcode} className="w-32 cursor-pointer bg-muted/40" />
+                              <Button type="button" variant="outline" onClick={openPostcode}>
+                                <Search className="h-4 w-4 mr-1.5" />우편번호 찾기
+                              </Button>
+                            </div>
+                            <Input placeholder="주소 * (우편번호 찾기로 입력)" value={shipping.address1} readOnly
+                              onClick={openPostcode} className="cursor-pointer bg-muted/40" />
+                            <Input ref={addressDetailRef} placeholder="상세주소 (동·호수)" value={shipping.address2 ?? ''}
                               onChange={e => setShipping(p => ({ ...p, address2: e.target.value }))} />
-                            <Input placeholder="배송 메모" value={shipping.memo ?? ''}
+                            <Input placeholder="배송 메모 (선택)" value={shipping.memo ?? ''}
                               onChange={e => setShipping(p => ({ ...p, memo: e.target.value }))} />
 
                             {estimate && (
