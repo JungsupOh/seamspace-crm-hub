@@ -519,7 +519,8 @@ export default function Print() {
                                     className={`relative rounded-xl border-2 p-3 text-left transition-all
                                       ${active ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/40'}`}>
                                     <p className="font-semibold text-sm">{v.label}</p>
-                                    <p className="text-[11px] text-muted-foreground mt-0.5 tabular">
+                                    <p className="text-[11px] text-muted-foreground mt-0.5">{v.trimLabel}</p>
+                                    <p className="text-[11px] text-muted-foreground tabular">
                                       {v.pageMin}~{v.pageMax}p
                                       {v.pageIncrement > 1 && ` · ${v.pageIncrement}의 배수`}
                                     </p>

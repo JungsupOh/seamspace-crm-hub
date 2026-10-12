@@ -205,7 +205,7 @@ def _spine_text(name, ym_from, ym_to, volume, volume_count):
         text += f"     ({volume}/{volume_count})"
     return text
 
-def render_single_pages(out, name, ym_from, ym_to):
+def render_single_pages(out, name, ym_from, ym_to, trim=None):
     """
     앞표지 · 뒤표지를 각각 한 장씩(단면) 담은 2페이지 PDF.
 
@@ -217,8 +217,13 @@ def render_single_pages(out, name, ym_from, ym_to):
     """
     ensure_fonts()
     bleed = 3.0
-    w = TRIM_W + bleed * 2
-    h = TRIM_H + bleed * 2
+    trim_w, trim_h = trim or (TRIM_W, TRIM_H)
+    w = trim_w + bleed * 2
+    h = trim_h + bleed * 2
+    # 에셋은 A5 재단(148×210) 기준이다. 다른 판형은 재단 영역에 맞춰 늘린다 —
+    # 배경이 단색이라 이음새는 없지만 종횡비가 다르면 그만큼 왜곡된다.
+    sx = trim_w / TRIM_W
+    sy = trim_h / TRIM_H
 
     c = canvas.Canvas(out, pagesize=(w * mm, h * mm))
 
@@ -226,18 +231,18 @@ def render_single_pages(out, name, ym_from, ym_to):
         c.setFillColor(BG)
         c.rect(0, 0, w * mm, h * mm, stroke=0, fill=1)
         c.drawImage(asset(img), bleed * mm, bleed * mm,
-                    width=TRIM_W * mm, height=TRIM_H * mm, mask=None)
+                    width=trim_w * mm, height=trim_h * mm, mask=None)
         if is_front:
             def fx(x_mm):
-                return (bleed + x_mm) * mm
+                return (bleed + x_mm * sx) * mm
 
             def fy(top_mm):
-                return (bleed + TRIM_H - top_mm) * mm
+                return (bleed + trim_h - top_mm * sy) * mm
 
             if name:
-                size_pt = _fit(name, _pt_for_height(NAME_H_MM), NAME_MAX_W)
+                size_pt = _fit(name, _pt_for_height(NAME_H_MM * sy), NAME_MAX_W * sx)
                 _draw_bold(c, fx(NAME_CX), fy(NAME_BASELINE), name, size_pt)
-            date_pt = _pt_for_height(DATE_H_MM)
+            date_pt = _pt_for_height(DATE_H_MM * sy)
             c.setFillColor(colors.white)
             if ym_from:
                 c.setFont(FONT, date_pt)
@@ -248,4 +253,4 @@ def render_single_pages(out, name, ym_from, ym_to):
         c.showPage()
 
     c.save()
-    return {"widthMm": w, "heightMm": h, "pages": 2}
+    return {"widthMm": w, "heightMm": h, "pages": 2, "trimWidthMm": trim_w, "trimHeightMm": trim_h}

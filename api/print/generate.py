@@ -55,6 +55,7 @@ def _make_cover(vendor, spec, pages, display_name, ym_from, ym_to, volume, volum
 
     info = cover.render_single_pages(
         buf, display_name, _ym_label(ym_from), _ym_label(ym_to),
+        trim=pricing.trim_size(vendor),
     )
     return buf.getvalue(), {
         "layout": "pages",
@@ -143,7 +144,9 @@ class handler(BaseHTTPRequestHandler):
             # 견적 금액과 실물이 어긋난다.
             pad_to = pricing.printed_pages(len(selected), vendor)
             buf = io.BytesIO()
-            result = render_volume(selected, buf, include_secret, pad_to)
+            result = render_volume(
+                selected, buf, include_secret, pad_to, pricing.page_size(vendor),
+            )
             data = buf.getvalue()
 
             stamp = datetime.now().strftime("%Y%m%d%H%M%S")

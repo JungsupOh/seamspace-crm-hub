@@ -47,6 +47,9 @@ export interface VendorInfo {
   pageIncrement: number;    // 1이면 페이지 수 제약 없음
   minDiaries: number;
   shippingFee: number;
+  trimWidthMm: number;    // 재단 크기. 인쇄 캔버스는 여기에 도련 3mm 를 더한다
+  trimHeightMm: number;
+  trimLabel: string;      // '신국판 152×225' 처럼 화면에 그대로 쓴다
   bands: PriceBand[];
 }
 

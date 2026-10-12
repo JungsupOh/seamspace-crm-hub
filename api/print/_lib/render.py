@@ -377,7 +377,7 @@ def draw_diary_page(c, diary, alt_state):
     return True
 
 
-def render_volume(diaries, out, include_secret=True, pad_to=0):
+def render_volume(diaries, out, include_secret=True, pad_to=0, page=None):
     """
     일기 목록을 PDF 한 권으로 그려 out(파일 경로 또는 file-like)에 쓴다.
 
@@ -386,11 +386,24 @@ def render_volume(diaries, out, include_secret=True, pad_to=0):
     최소 페이지·짝수 규칙을 맞추기 위한 것이고, 견적이 매긴 인쇄 페이지 수와 실제 PDF
     페이지 수가 달라지면 업로드가 거부되거나 견적과 실물이 어긋나므로 반드시 맞춘다.
 
+    page=(가로mm, 세로mm) 로 다른 판형에 맞출 수 있다. 이 모듈의 모든 좌표는
+    154×216mm(A5+도련) 기준으로 짜여 있고 배경 이미지도 그 비율(1820×2552px)이다.
+    다른 판형은 **좌표계를 그대로 두고 캔버스에 맞춰 늘린다**(c.scale).
+
+    왜 재조판이 아니라 늘리기인가: 좌표·색상·폰트 크기가 인쇄 템플릿 값이고 배경
+    일러스트가 전면이라, 판형마다 다시 잡으면 배경 아트도 새로 만들어야 한다.
+    늘리기는 배경과 내용이 **같은 비율로** 움직여 정렬이 깨지지 않는다.
+    대가는 종횡비 차이만큼의 왜곡이다 — 신국판(158×231)은 세로가 4.2% 더 늘어난다.
+    글자도 그만큼 길어 보이므로, 판형을 상시로 쓸 거면 배경 아트를 새로 받는 게 맞다.
+
     반환: {'pages': 전체 페이지 수, 'blanks': 채운 빈 페이지 수, 'skipped': 건너뛴 일기}
     """
     ensure_fonts()
 
-    c = canvas.Canvas(out, pagesize=PAGE_SIZE)
+    size = PAGE_SIZE if not page else (page[0] * mm, page[1] * mm)
+    c = canvas.Canvas(out, pagesize=size)
+    sx = size[0] / PAGE_SIZE[0]
+    sy = size[1] / PAGE_SIZE[1]
     alt_state = {"GREEN": 1, "YELLOW": 1, "RED": 1}
     pages = 0
     skipped = []
@@ -407,7 +420,12 @@ def render_volume(diaries, out, include_secret=True, pad_to=0):
                 }
             )
             continue
+        if sx != 1 or sy != 1:
+            c.saveState()
+            c.scale(sx, sy)
         draw_diary_page(c, diary, alt_state)
+        if sx != 1 or sy != 1:
+            c.restoreState()
         c.showPage()  # 다음 일기는 새 페이지에. 마지막 호출까지 해야 페이지가 확정된다.
         pages += 1
 

@@ -4,9 +4,13 @@
 제작 업체를 고를 수 있다. 업체마다 **페이지 규칙과 단가가 다르므로** 둘을 한 덩어리로
 묶어 VENDORS 에 둔다. 한쪽만 바꾸면 견적과 실제 청구가 어긋난다.
 
-  ddukddak   뚝딱샵 — 현재 쓰는 곳. 36~300p, 단가 5구간, 배송비 3,500원
-  sweetbook  스위트북 Book Print API — A5 소프트커버(PHOTOBOOK_A5_SC).
+  ddukddak   뚝딱샵 — 현재 쓰는 곳. 신국판 152×225, 36~300p, 단가 5구간, 배송비 3,500원
+  sweetbook  스위트북 Book Print API — A5 소프트커버(PHOTOBOOK_A5_SC) 148×210,
              50~200p·2의 배수, 단가 3구간, 배송비 3,000원
+
+**판형이 업체마다 다르므로 내지 PDF 를 양쪽에 돌려 쓸 수 없다.** 업체를 고른 뒤
+만들어야 한다. 렌더러는 원래 154×216mm(A5+도련) 좌표계로 그려져 있고, 다른 판형은
+그 좌표계를 캔버스 크기에 맞춰 늘려 쓴다(render.render_volume 주석 참고).
 
 스위트북 내지 PDF 캔버스가 154×216mm 로 render.PAGE_SIZE 와 정확히 같아서 내지는
 재조판 없이 그대로 올릴 수 있다. 페이지 규칙과 단가만 다르다.
@@ -33,6 +37,10 @@ VENDORS = {
     "ddukddak": {
         "label": "뚝딱샵",
         "spec": None,                # 별도 판형 코드 없음
+        # 신국판. A5(148×210)는 상품 설명에는 남아 있지만 사이즈 선택 옵션에서 빠졌다.
+        # 선택 가능한 판형: A4 210×297 / B5 188×257 / 신국판 152×225 / 크라운판 176×248
+        "trim": (152.0, 225.0),
+        "trim_label": "신국판 152×225",
         "page_min": 36,              # 이보다 적으면 제작 불가
         "page_max": 300,             # 초과는 분권 대상
         "page_increment": 1,         # 페이지 수 제약 없음
@@ -49,7 +57,9 @@ VENDORS = {
     },
     "sweetbook": {
         "label": "스위트북",
-        "spec": "PHOTOBOOK_A5_SC",   # A5 소프트커버. 내지 캔버스 154×216mm
+        "spec": "PHOTOBOOK_A5_SC",   # A5 소프트커버
+        "trim": (148.0, 210.0),
+        "trim_label": "A5 148×210",
         "page_min": 50,              # 이보다 적으면 빈 페이지로 채워서 제작
         "page_max": 200,
         "page_increment": 2,         # 페이지 수는 2의 배수여야 한다
@@ -93,12 +103,29 @@ def vendor_info(name=None):
         "pageIncrement": v["page_increment"],
         "minDiaries": v["min_diaries"],
         "shippingFee": v["shipping_fee"],
+        "trimWidthMm": v["trim"][0],
+        "trimHeightMm": v["trim"][1],
+        "trimLabel": v["trim_label"],
         "bands": [{"from": lo, "to": hi, "price": pr} for lo, hi, pr in v["bands"]],
     }
 
 
 def vendor_list():
     return [vendor_info(k) for k in VENDORS]
+
+
+def trim_size(vendor=DEFAULT_VENDOR):
+    """업체의 재단 크기 (mm). 내지·표지 캔버스는 여기에 도련 3mm 를 더한다."""
+    return VENDORS[resolve_vendor(vendor)]["trim"]
+
+
+BLEED_MM = 3.0
+
+
+def page_size(vendor=DEFAULT_VENDOR):
+    """도련 포함 인쇄 캔버스 크기 (mm). 뚝딱샵 가이드도 좌우상하 각 3mm 를 요구한다."""
+    w, h = trim_size(vendor)
+    return w + BLEED_MM * 2, h + BLEED_MM * 2
 
 
 def printed_pages(diaries, vendor=DEFAULT_VENDOR):
