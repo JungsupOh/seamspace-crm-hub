@@ -5,12 +5,15 @@ POST /api/print/order
 PDF 생성 단계(generate)에서 권마다 스위트북 책을 FINALIZED 까지 만들어 두었다.
 여기서는 그 책들로 금액을 확인하고, 결제 승인 후 실제 주문을 넣는다.
 
-  action=estimate  충전금 차감 예정액 조회. 결제창을 띄우기 전에 보여준다
-  action=place     ① 토스 결제 승인 → ② 스위트북 주문 생성
+  action=estimate  충전금 차감 예정액 조회
+  action=place     스위트북 주문 생성 (결제는 선택)
+
+**결제는 현재 받지 않는다.** 화면에서 배송지·금액을 최종 확인하고 주문만 넣는다.
+결제를 다시 붙일 때를 대비해 paymentKey 를 받으면 승인하는 경로는 남겨 두었다.
 
 **Sandbox 에서는 결제를 받지 않는다.** 책이 실제로 만들어지지 않는데 돈만 진짜로
-빠져나가는 조합이 제일 나쁘다. 운영 토스 키가 꽂혀 있는 상태에서 Sandbox 를 돌리다
-실결제가 일어난 적이 있어, 아예 서버에서 막는다 — 화면 조건만으로는 부족하다.
+빠져나가는 조합이 제일 나쁘다. 운영 토스 키가 꽂힌 채 Sandbox 를 돌리다 실결제가
+일어난 적이 있어 서버에서 막는다 — 화면 조건만으로는 부족하다.
 
 결제 승인은 Supabase Edge Function(confirm-toss)에 맡긴다. TOSS_SECRET_KEY 가 거기에만
 있고 되읽을 수 없어서인데, 결제 시크릿을 Vercel 에 한 벌 더 두지 않는 쪽이 낫기도 하다.
@@ -27,6 +30,7 @@ PDF 생성 단계(generate)에서 권마다 스위트북 책을 FINALIZED 까지
 import json
 import os
 import sys
+import time
 from http.server import BaseHTTPRequestHandler
 
 import requests
@@ -108,26 +112,24 @@ class handler(BaseHTTPRequestHandler):
             live = sweetbook.is_live()
 
             # Sandbox 는 결제를 받지 않는다. 책이 안 만들어지는데 돈만 빠지는 조합이다.
-            if not live:
-                if payment_key:
-                    return send_json(
-                        self,
-                        {
-                            "error": "테스트(Sandbox) 환경에서는 결제를 받지 않습니다. "
-                            "결제 없이 주문만 넣어 주세요.",
-                        },
-                        400,
-                    )
-                payment = None
-                order_id = order_id or f"SANDBOX-{int(__import__('time').time() * 1000)}"
-            else:
-                if not (payment_key and order_id and amount):
-                    return send_json(self, {"error": "결제 정보가 없습니다."}, 400)
-                # ① 결제 승인 — 실패하면 주문을 넣지 않는다
+            if payment_key and not live:
+                return send_json(
+                    self,
+                    {"error": "테스트(Sandbox) 환경에서는 결제를 받지 않습니다."},
+                    400,
+                )
+
+            payment = None
+            if payment_key:
+                # 결제를 다시 붙였을 때의 경로. 승인 → 주문 순서를 지킨다.
+                if not (order_id and amount):
+                    return send_json(self, {"error": "결제 정보가 부족합니다."}, 400)
                 try:
                     payment = _toss_confirm(payment_key, order_id, int(amount))
                 except Exception as e:  # noqa: BLE001
                     return send_json(self, {"error": f"결제 승인 실패: {e}"}, 402)
+            else:
+                order_id = order_id or f"PRINT-{int(time.time() * 1000)}"
 
             # ② 스위트북 주문 — 실패해도 결제는 그대로 둔다(수동 처리)
             try:

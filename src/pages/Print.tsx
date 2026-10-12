@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, BookOpen, CalendarClock, CalendarDays, CheckCircle2, Download, FileText, Loader2, LogOut, Scissors, Search, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatPhone } from '@/lib/utils';
 
 import { Button } from '@/components/ui/button';
@@ -30,8 +31,6 @@ import {
   type SweetbookEstimate,
   type PlacedOrder,
 } from '@/lib/print';
-
-const TOSS_CLIENT_KEY = import.meta.env.VITE_TOSS_CLIENT_KEY ?? '';
 
 export default function Print() {
   const [session, setSession] = useState<PrintSession | null>(() => loadSession());
@@ -74,6 +73,8 @@ export default function Print() {
   });
   const [estimate, setEstimate] = useState<SweetbookEstimate | null>(null);
   const [placed, setPlaced] = useState<PlacedOrder | null>(null);
+  // 배송지 입력 → 최종 확인 → 주문. 결제는 지금 받지 않는다.
+  const [confirming, setConfirming] = useState(false);
   const addressDetailRef = useRef<HTMLInputElement>(null);
 
   // 스위트북 책이 다 올라간 상태여야 주문할 수 있다
@@ -247,8 +248,6 @@ export default function Print() {
     }
   }
 
-  const PENDING_KEY = 'print_pending_order';
-
   /** Daum 우편번호 검색. /shop 과 같은 스크립트를 쓴다. */
   const openPostcode = () => {
     const daum = (window as unknown as { daum?: { Postcode?: unknown } }).daum;
@@ -288,123 +287,20 @@ export default function Print() {
     }
   }
 
-  /**
-   * Sandbox 전용 — 결제 없이 주문만 넣는다.
-   * 책이 실제로 만들어지지 않는데 돈만 진짜로 빠지는 조합을 막기 위한 것이고,
-   * 서버(order.py)에서도 같은 조건으로 막는다.
-   */
-  async function placeWithoutPayment() {
-    const miss = (['recipientName', 'recipientPhone', 'postalCode', 'address1'] as const)
-      .filter(k => !shipping[k].trim());
-    if (miss.length) {
-      toast.error('받는 분, 연락처, 우편번호, 주소를 입력해 주세요.');
-      return;
-    }
+  /** 최종 확인 후 제작 주문을 넣는다. 결제는 현재 받지 않는다. */
+  async function placeFinalOrder() {
     setOrdering(true);
     try {
       const res = await placeOrder({ bookUids, shipping });
       setPlaced(res);
+      setConfirming(false);
       setShowShipping(false);
-      toast.success('테스트 주문이 접수되었습니다 (결제 없음).');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '주문에 실패했습니다.');
+      toast.error(e instanceof Error ? e.message : '주문에 실패했습니다.', { duration: 20000 });
     } finally {
       setOrdering(false);
     }
   }
-
-  /** 토스 결제창. 리다이렉트로 돌아오므로 주문에 필요한 값은 sessionStorage 에 둔다. */
-  async function startPayment() {
-    if (!quote || !stats) return;
-    const miss = (['recipientName', 'recipientPhone', 'postalCode', 'address1'] as const)
-      .filter(k => !shipping[k].trim());
-    if (miss.length) {
-      toast.error('받는 분, 연락처, 우편번호, 주소를 입력해 주세요.');
-      return;
-    }
-    setOrdering(true);
-    try {
-      const orderId = `PRINT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      sessionStorage.setItem(PENDING_KEY, JSON.stringify({
-        orderId, bookUids, shipping, amount: quote.grandTotal,
-      }));
-
-      if (!window.TossPayments) {
-        const script = document.createElement('script');
-        script.src = 'https://js.tosspayments.com/v1';
-        await new Promise((resolve, reject) => {
-          script.onload = resolve; script.onerror = reject; document.head.appendChild(script);
-        });
-      }
-      const toss = window.TossPayments(TOSS_CLIENT_KEY);
-      await toss.requestPayment('카드', {
-        amount: quote.grandTotal,
-        orderId,
-        orderName: `일기 제본 ${quote.volumes.length}권 (${stats.name})`,
-        customerName: shipping.recipientName,
-        customerMobilePhone: shipping.recipientPhone.replace(/\D/g, ''),
-        successUrl: `${window.location.origin}/print`,
-        failUrl: `${window.location.origin}/print?payfail=1`,
-      });
-    } catch (e: unknown) {
-      const code = (e as { code?: string })?.code;
-      if (code !== 'USER_CANCEL') {
-        toast.error('결제 창을 여는 중 오류가 발생했습니다.');
-        console.error(e);
-      }
-      sessionStorage.removeItem(PENDING_KEY);
-      setOrdering(false);
-    }
-  }
-
-  /** 결제 후 돌아왔을 때 — 승인 + 제작 주문을 한 번에 처리한다. */
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('payfail')) {
-      toast.error('결제가 취소되었거나 실패했습니다.');
-      sessionStorage.removeItem(PENDING_KEY);
-      window.history.replaceState({}, '', '/print');
-      return;
-    }
-    const paymentKey = params.get('paymentKey');
-    const orderId = params.get('orderId');
-    const amount = params.get('amount');
-    if (!paymentKey || !orderId || !amount) return;
-
-    const raw = sessionStorage.getItem(PENDING_KEY);
-    window.history.replaceState({}, '', '/print');
-    if (!raw) {
-      toast.error('주문 정보를 찾지 못했습니다. 결제 내역을 확인해 주세요.');
-      return;
-    }
-    const pending = JSON.parse(raw) as {
-      orderId: string; bookUids: string[]; shipping: ShippingInput; amount: number;
-    };
-    if (pending.orderId !== orderId) {
-      toast.error('주문 정보가 일치하지 않습니다.');
-      return;
-    }
-
-    setOrdering(true);
-    placeOrder({
-      bookUids: pending.bookUids,
-      shipping: pending.shipping,
-      paymentKey, orderId, amount: Number(amount),
-    })
-      .then(res => {
-        sessionStorage.removeItem(PENDING_KEY);
-        setPlaced(res);
-        setShowShipping(false);
-        toast.success('제작 주문이 접수되었습니다.');
-      })
-      .catch(e => {
-        // 결제는 됐는데 주문이 실패했을 수 있다. 메시지를 지우지 않는다.
-        toast.error(e instanceof Error ? e.message : '주문 처리에 실패했습니다.', { duration: 20000 });
-      })
-      .finally(() => setOrdering(false));
-    // 최초 진입 시 한 번만
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function downloadUrl(file: GeneratedFile) {
     // Supabase signed URL에 download 파라미터를 붙이면 브라우저가 저장한다.
@@ -507,6 +403,16 @@ export default function Print() {
             {/* ── 3단계: 현황 + 견적 ──────────────────────────────── */}
             {stats && (
               <>
+                <p className="text-base">
+                  <span className="font-semibold">{stats.name}</span>
+                  <span className="text-muted-foreground">님이 작성한 글 </span>
+                  <span className="font-semibold tabular">{stats.renderable}</span>
+                  <span className="text-muted-foreground">개입니다.</span>
+                  {stats.name !== stats.username && (
+                    <span className="text-xs text-muted-foreground ml-2">({stats.username})</span>
+                  )}
+                </p>
+
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <StatCard title="일기 수" value={`${stats.renderable}편`}
                     icon={<BookOpen className="h-5 w-5" />}
@@ -920,49 +826,22 @@ export default function Print() {
                               <Button variant="outline" className="flex-1"
                                 onClick={() => setShowShipping(false)} disabled={ordering}>취소</Button>
                               <Button className="flex-[2]"
-                                onClick={estimate?.env === 'live' ? startPayment : placeWithoutPayment}
+                                onClick={() => {
+                                  const miss = (['recipientName', 'recipientPhone', 'postalCode', 'address1'] as const)
+                                    .filter(k => !shipping[k].trim());
+                                  if (miss.length) {
+                                    toast.error('받는 분, 연락처, 우편번호, 주소를 입력해 주세요.');
+                                    return;
+                                  }
+                                  setConfirming(true);
+                                }}
                                 disabled={ordering || !estimate?.creditSufficient}>
-                                {ordering
-                                  ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />처리 중…</>
-                                  : estimate?.env === 'live'
-                                    ? <>결제하고 주문 · {formatWon(quote?.grandTotal ?? 0)}</>
-                                    : <>테스트 주문 (결제 없음)</>}
+                                최종 확인
                               </Button>
                             </div>
                           </div>
                         )}
 
-                        {placed && (
-                          <div className="rounded-xl border-2 border-teal-200 bg-teal-50/50 p-4 space-y-2">
-                            <div className="flex items-center gap-2">
-                              <CheckCircle2 className="h-5 w-5 text-teal-600" />
-                              <p className="font-medium text-sm">제작 주문 접수됨</p>
-                              {placed.env !== 'live' && (
-                                <span className="text-[11px] rounded px-1.5 py-0.5 bg-amber-100 text-amber-800">
-                                  테스트(Sandbox)
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-xs space-y-1">
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">주문번호</span>
-                                <span className="font-mono">{placed.order.orderUid}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">상태</span>
-                                <span>{placed.order.orderStatusDisplay}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">결제</span>
-                                <span className="tabular">{formatWon(placed.payment.totalAmount)}</span>
-                              </div>
-                            </div>
-                            {placed.payment.receiptUrl && (
-                              <a href={placed.payment.receiptUrl} target="_blank" rel="noreferrer"
-                                className="text-xs text-primary underline">영수증 보기</a>
-                            )}
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
@@ -976,6 +855,120 @@ export default function Print() {
           빌드 {__BUILD_INFO__.sha} · {__BUILD_INFO__.env} · {__BUILD_INFO__.at}
         </p>
       </main>
+
+      {/* ── 최종 확인 ── 주문은 되돌릴 수 없으므로 내용을 한 번 더 펼쳐 보여준다 */}
+      <Dialog open={confirming} onOpenChange={o => !ordering && setConfirming(o)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>주문 내용 확인</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 text-sm">
+            {estimate?.env === 'live' && (
+              <p className="rounded-lg bg-rose-50 border border-rose-200 p-2.5 text-xs text-rose-800">
+                주문하면 책이 <b>실제로 인쇄·배송</b>되고 충전금이 차감됩니다. 되돌릴 수 없습니다.
+              </p>
+            )}
+
+            <div>
+              <p className="text-xs text-muted-foreground mb-1.5">주문 내역</p>
+              <div className="rounded-lg border border-border divide-y">
+                {quote?.volumes.map(v => (
+                  <div key={v.volume} className="flex items-center justify-between px-3 py-2">
+                    <span>
+                      {quote.volumes.length > 1 && <b className="mr-1.5">{v.volume}권</b>}
+                      {formatYm(v.from)}{v.from !== v.to && ` ~ ${formatYm(v.to)}`}
+                    </span>
+                    <span className="text-muted-foreground tabular">{v.pages}p</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1.5">
+                {stats?.name}님 · 비밀글 {includeSecret ? '포함' : '제외'}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs text-muted-foreground mb-1.5">배송지</p>
+              <div className="rounded-lg bg-muted/40 p-3 space-y-0.5">
+                <p className="font-medium">
+                  {shipping.recipientName} <span className="text-muted-foreground font-normal">{shipping.recipientPhone}</span>
+                </p>
+                <p className="text-muted-foreground">
+                  ({shipping.postalCode}) {shipping.address1} {shipping.address2}
+                </p>
+                {shipping.memo && <p className="text-xs text-muted-foreground">메모: {shipping.memo}</p>}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border p-3 space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">판매가 ({quote?.volumes.length}권)</span>
+                <span className="tabular font-medium">{formatWon(quote?.grandTotal ?? 0)}</span>
+              </div>
+              {estimate && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">제작 원가 (충전금 차감)</span>
+                  <span className="tabular">{formatWon(estimate.paidCreditAmount)}</span>
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground pt-1 border-t">
+                결제 단계는 지금 생략되어 있습니다. 주문만 접수됩니다.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <Button variant="outline" className="flex-1"
+              onClick={() => setConfirming(false)} disabled={ordering}>돌아가기</Button>
+            <Button className="flex-[2]" onClick={placeFinalOrder} disabled={ordering}>
+              {ordering
+                ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />주문 넣는 중…</>
+                : <>주문 완료하기</>}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── 주문 완료 ── */}
+      <Dialog open={!!placed} onOpenChange={o => !o && setPlaced(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-teal-600" />
+              주문이 완료되었습니다
+            </DialogTitle>
+          </DialogHeader>
+
+          {placed && (
+            <div className="space-y-3 text-sm">
+              {placed.env !== 'live' && (
+                <p className="rounded-lg bg-amber-50 border border-amber-200 p-2 text-xs text-amber-800">
+                  테스트(Sandbox) 주문입니다. 실제로 제작되지 않습니다.
+                </p>
+              )}
+              <div className="rounded-lg bg-muted/40 p-3 space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground text-xs">주문번호</span>
+                  <span className="font-mono text-xs">{placed.order.orderUid}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground text-xs">상태</span>
+                  <span className="text-xs">{placed.order.orderStatusDisplay}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground text-xs">받는 분</span>
+                  <span className="text-xs">{shipping.recipientName}</span>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                제작·배송 진행 상황은 스위트북 파트너 포털에서 확인할 수 있습니다.
+              </p>
+              <Button className="w-full" onClick={() => setPlaced(null)}>확인</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
