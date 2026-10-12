@@ -43,6 +43,8 @@ export default function Print() {
   const [splits, setSplits] = useState<string[]>([]);
   // 자동 분권 방식 — 최저가(기본) / 균등. 분책 경계를 직접 지정하면 무시된다.
   const [splitMode, setSplitMode] = useState<SplitMode>('cheapest');
+  // 비밀글 포함 여부. 기본 포함 — 본인 일기를 본인 책으로 만드는 것이므로.
+  const [includeSecret, setIncludeSecret] = useState(true);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [showSplitEditor, setShowSplitEditor] = useState(false);
@@ -127,14 +129,18 @@ export default function Print() {
   /** 구간·분책 경계·분권 방식이 바뀌면 견적만 다시 계산한다(일기 재조회 없음). */
   async function refreshQuote(
     next: { from: string; to: string }, nextSplits: string[], mode: SplitMode = splitMode,
+    withSecret: boolean = includeSecret,
   ) {
     if (!stats) return;
     setQuoting(true);
     setFiles([]);
     try {
       const inRange = nextSplits.filter(ym => ym >= next.from && ym <= next.to);
+      // 비밀글을 빼면 월별 편수가 달라져 분권·가격이 모두 달라진다.
+      // 서버가 두 집계를 다 내려주므로 일기를 다시 조회하지 않는다.
+      const monthly = withSecret ? stats.monthly : (stats.monthlyPublic ?? stats.monthly);
       const q = await requote(
-        stats.monthly, next.from, next.to, inRange.length ? inRange : undefined, mode,
+        monthly, next.from, next.to, inRange.length ? inRange : undefined, mode,
       );
       setQuote(q);
     } catch (e) {
@@ -169,6 +175,12 @@ export default function Print() {
     if (range) void refreshQuote(range, [], mode);
   }
 
+  function changeIncludeSecret(next: boolean) {
+    if (next === includeSecret) return;
+    setIncludeSecret(next);
+    if (range) void refreshQuote(range, splits, splitMode, next);
+  }
+
   async function handleGenerate() {
     if (!session || !stats || !quote || !quote.printable) return;
     setGenerating(true);
@@ -177,7 +189,9 @@ export default function Print() {
     try {
       for (const v of quote.volumes) {
         setProgress(`${quote.volumes.length}권 중 ${v.volume}권 만드는 중… (${v.pages}페이지)`);
-        const file = await generateVolume(session.token, stats.username, v.from, v.to);
+        const file = await generateVolume(
+          session.token, stats.username, v.from, v.to, includeSecret,
+        );
         made.push(file);
         setFiles([...made]);
       }
@@ -385,6 +399,53 @@ export default function Print() {
                             {w}
                           </p>
                         ))}
+
+                        {/* 비밀글 — 본인 일기를 본인 책으로 만드는 것이므로 기본은 포함.
+                            다만 책은 배송지로 가므로(부모가 사주는 경우가 많다) 끌 수 있어야 한다.
+                            판별이 안 되는 상태면 선택지 자체를 막는다 — 끈 줄 알았는데
+                            인쇄되는 것이 제일 나쁘다. */}
+                        {stats.secret.count > 0 || stats.secret.unknown > 0 || !stats.secret.detectable ? (
+                          <div className="rounded-xl border border-border p-3">
+                            {stats.secret.detectable ? (
+                              <>
+                                <label className="flex items-start gap-2.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={includeSecret}
+                                    onChange={e => changeIncludeSecret(e.target.checked)}
+                                    className="mt-0.5 h-4 w-4 accent-primary"
+                                  />
+                                  <span className="text-sm">
+                                    <span className="font-medium">비밀글 {stats.secret.count}편 포함</span>
+                                    {stats.secret.unknown > 0 && (
+                                      <span className="text-muted-foreground">
+                                        {' '}(공개 여부를 알 수 없는 {stats.secret.unknown}편도 함께)
+                                      </span>
+                                    )}
+                                    <span className="block text-[11px] text-muted-foreground mt-0.5">
+                                      제작된 책은 배송지로 전달됩니다. 가족이 볼 수 있다는 점을 고려해 주세요.
+                                    </span>
+                                  </span>
+                                </label>
+                                {!includeSecret && (
+                                  <p className="text-[11px] text-muted-foreground mt-2 pl-6">
+                                    {stats.secret.count + stats.secret.unknown}편을 빼고 계산했습니다.
+                                    편수가 줄어 분권과 금액이 달라질 수 있습니다.
+                                  </p>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-sm text-amber-900">
+                                비밀글을 가려낼 수 없어 <span className="font-medium">전부 포함</span>해 만듭니다.
+                                {stats.secret.observedFields.length > 0 && (
+                                  <span className="block text-[11px] text-muted-foreground mt-1">
+                                    응답에 들어온 필드: {stats.secret.observedFields.join(', ')}
+                                  </span>
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        ) : null}
 
                         {/* 분권 방식 — 두 안의 금액을 같이 보여주고 고르게 한다.
                             가격이 구간제라 '균등'이 '최저가'보다 비쌀 수 있다. */}

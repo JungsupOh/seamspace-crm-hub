@@ -39,6 +39,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Frame, KeepInFrame, Paragraph
 
+from . import secret
 from .emoji import to_markup
 from .emotions import EMOTION_ICONS
 
@@ -160,19 +161,25 @@ def parse_api_date(value):
         raise ValueError(f"날짜 형식을 알 수 없습니다: {value!r}")
 
 
-def is_renderable(diary):
+def is_renderable(diary, include_secret=True):
     """
     이 일기가 실제로 한 페이지를 만들어내는지.
 
     traffic 이 셋 중 하나가 아니면 원본은 조용히 return 해서 페이지가 안 생겼다.
     그대로 두면 '100페이지로 견적 → 98페이지로 인쇄' 가 되므로,
     견적(stats)과 렌더가 반드시 이 같은 함수로 페이지 수를 센다.
+
+    include_secret=False 면 비밀글을 뺀다. 판별이 안 되는 상태(secret.detectable()
+    가 False)에서 이 값을 넘기면 안 된다 — 호출자가 먼저 막아야 한다.
+    여기서 조용히 통과시키면 '제외'를 고른 사용자의 비밀글이 그대로 인쇄된다.
     """
     if diary.get("traffic") not in TRAFFIC:
         return False
     try:
         parse_api_date(diary.get("date"))
     except ValueError:
+        return False
+    if not include_secret and secret.should_hide(diary):
         return False
     return True
 
@@ -370,7 +377,7 @@ def draw_diary_page(c, diary, alt_state):
     return True
 
 
-def render_volume(diaries, out):
+def render_volume(diaries, out, include_secret=True):
     """
     일기 목록을 PDF 한 권으로 그려 out(파일 경로 또는 file-like)에 쓴다.
 
@@ -385,7 +392,7 @@ def render_volume(diaries, out):
     skipped = []
 
     for diary in diaries:
-        if not is_renderable(diary):
+        if not is_renderable(diary, include_secret):
             skipped.append(
                 {
                     "id": diary.get("id"),

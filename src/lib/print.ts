@@ -58,6 +58,15 @@ export interface Quote {
   warnings: string[];
 }
 
+/** 비밀글(isSecret) 현황. 판별이 안 되면 제외 옵션 자체를 막아야 한다. */
+export interface SecretInfo {
+  detectable: boolean;
+  field: string | null;
+  count: number;      // 확실한 비밀글 수
+  unknown: number;    // 판별 불가(필드 없음) — 제외 시 같이 빠진다
+  observedFields: string[];   // 서버 응답이 바뀌었을 때 원인 추적용 (값은 안 옴)
+}
+
 export interface SkippedEntry {
   id: number | null;
   date: string | null;
@@ -73,6 +82,9 @@ export interface DiaryStats {
   firstDate: string | null;
   lastDate: string | null;
   monthly: MonthCount[];
+  /** 비밀글을 뺀 월별 집계. 토글할 때 일기를 재조회하지 않으려고 같이 받는다. */
+  monthlyPublic: MonthCount[] | null;
+  secret: SecretInfo;
   quote: Quote;
 }
 
@@ -127,8 +139,10 @@ export const SPLIT_MODE_LABEL: Record<SplitMode, string> = {
 };
 
 /** 한 번에 한 권씩 만든다. 여러 권이면 화면이 순서대로 호출한다. */
-export function generateVolume(token: string, username: string, from: string, to: string) {
-  return post<GeneratedFile>('generate', { token, username, from, to });
+export function generateVolume(
+  token: string, username: string, from: string, to: string, includeSecret = true,
+) {
+  return post<GeneratedFile>('generate', { token, username, from, to, includeSecret });
 }
 
 const SESSION_KEY = 'print_session';
