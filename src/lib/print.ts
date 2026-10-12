@@ -105,10 +105,55 @@ export interface DiaryStats {
   lastDate: string | null;
   monthly: MonthCount[];
   /** 비밀글을 뺀 월별 집계. 토글할 때 일기를 재조회하지 않으려고 같이 받는다. */
+  /** 작성자 실제 이름 (diary 응답의 name). 표지에 들어간다. */
+  name: string;
   monthlyPublic: MonthCount[] | null;
   secret: SecretInfo;
   vendors: VendorInfo[];
   quote: Quote;
+}
+
+/** 스위트북에 만들어진 책 한 권 (generate 응답에 실려 온다) */
+export interface SweetbookBook {
+  bookUid: string;
+  spec: string;
+  env: 'sandbox' | 'live';
+  title: string;
+  externalRef: string;
+  coverWidthMm: number;
+  coverHeightMm: number;
+  spineWidthMm: number;
+  spineText: string | null;
+}
+
+export interface ShippingInput {
+  recipientName: string;
+  recipientPhone: string;
+  postalCode: string;
+  address1: string;
+  address2?: string;
+  memo?: string;
+}
+
+/** 스위트북 충전금 차감 예정액. 우리 판매가와는 별개다(원가). */
+export interface SweetbookEstimate {
+  env: 'sandbox' | 'live';
+  productAmount: number;
+  shippingFee: number;
+  boxCount: number;
+  packagingFee: number;
+  totalAmount: number;
+  paidCreditAmount: number;
+  creditBalance: number;
+  creditSufficient: boolean;
+}
+
+export interface PlacedOrder {
+  ok: true;
+  env: 'sandbox' | 'live';
+  order: { orderUid: string; orderStatus: string; orderStatusDisplay: string; totalAmount: number };
+  payment: { orderId: string; method: string | null; approvedAt: string | null;
+             receiptUrl: string | null; totalAmount: number };
 }
 
 export interface GeneratedFile {
@@ -117,6 +162,7 @@ export interface GeneratedFile {
   vendor?: Vendor;
   pages: number;
   blanks?: number;      // 업체 페이지 규칙을 맞추려고 채운 빈 페이지
+  book?: SweetbookBook; // 스위트북 모드일 때만. 이미 FINALIZED 상태다
   bytes: number;
   skipped: { id: number | null; date: string | null; reason: string }[];
 }
@@ -170,8 +216,24 @@ export const SPLIT_MODE_LABEL: Record<SplitMode, string> = {
 export function generateVolume(
   token: string, username: string, from: string, to: string,
   includeSecret = true, vendor?: Vendor,
+  opts?: { volume?: number; volumeCount?: number; name?: string },
 ) {
-  return post<GeneratedFile>('generate', { token, username, from, to, includeSecret, vendor });
+  return post<GeneratedFile>('generate', {
+    token, username, from, to, includeSecret, vendor, ...opts,
+  });
+}
+
+/** 스위트북 충전금 차감 예정액. 결제창을 띄우기 전에 보여준다. */
+export function estimateOrder(bookUids: string[]) {
+  return post<SweetbookEstimate>('order', { action: 'estimate', bookUids });
+}
+
+/** 결제 승인 → 제작 주문. 순서가 바뀌면 안 된다(order.py 주석 참고). */
+export function placeOrder(params: {
+  bookUids: string[]; shipping: ShippingInput;
+  paymentKey: string; orderId: string; amount: number;
+}) {
+  return post<PlacedOrder>('order', { action: 'place', ...params });
 }
 
 const SESSION_KEY = 'print_session';
