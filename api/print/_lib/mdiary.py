@@ -211,6 +211,28 @@ def _dedupe(entries):
     return out
 
 
+def display_name(entries, fallback=""):
+    """
+    일기 응답에서 작성자 실제 이름을 꺼낸다.
+
+    diary API 응답의 각 항목에 username 과 name 이 함께 들어 있다(Postman 컬렉션 확인).
+    별도 조회 API 가 필요 없다 — user_info 는 토큰 주체 본인 정보만 주므로 쓸 수 없다.
+
+    표지에 들어갈 값이라 비어 있으면 아이디로 떨어뜨린다. 여러 값이 섞여 있으면
+    가장 많이 나온 이름을 쓴다(한 사용자의 일기만 받으므로 사실상 하나다).
+    """
+    counts = {}
+    for e in entries or []:
+        if not isinstance(e, dict):
+            continue
+        nm = (e.get("name") or "").strip()
+        if nm:
+            counts[nm] = counts.get(nm, 0) + 1
+    if not counts:
+        return fallback
+    return max(counts, key=counts.get)
+
+
 def month_range(ym):
     """'2026-03' -> (date시작, date끝) 문자열."""
     year, month = (int(x) for x in ym.split("-"))

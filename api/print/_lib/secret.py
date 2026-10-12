@@ -32,7 +32,7 @@ import os
 KNOWN_FIELDS = frozenset(
     {
         "id", "date", "topic", "content", "emotions", "emotions_score",
-        "mbti", "traffic", "SeamTalk", "isSecret",
+        "mbti", "traffic", "SeamTalk", "isSecret", "username", "name",
     }
 )
 

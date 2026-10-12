@@ -70,6 +70,8 @@ class handler(BaseHTTPRequestHandler):
                 self,
                 {
                     "username": username,
+                    # 표지에 들어갈 실제 이름. diary 응답에 username 과 함께 들어 있다.
+                    "name": mdiary.display_name(entries, username),
                     "total": len(entries),
                     "renderable": len(renderable),
                     "skipped": skipped[:50],
