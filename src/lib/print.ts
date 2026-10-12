@@ -231,7 +231,8 @@ export function estimateOrder(bookUids: string[]) {
 /** 결제 승인 → 제작 주문. 순서가 바뀌면 안 된다(order.py 주석 참고). */
 export function placeOrder(params: {
   bookUids: string[]; shipping: ShippingInput;
-  paymentKey: string; orderId: string; amount: number;
+  // Sandbox 에서는 결제를 받지 않는다(order.py 가 서버에서도 막는다)
+  paymentKey?: string; orderId?: string; amount?: number;
 }) {
   return post<PlacedOrder>('order', { action: 'place', ...params });
 }

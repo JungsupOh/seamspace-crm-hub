@@ -288,6 +288,31 @@ export default function Print() {
     }
   }
 
+  /**
+   * Sandbox 전용 — 결제 없이 주문만 넣는다.
+   * 책이 실제로 만들어지지 않는데 돈만 진짜로 빠지는 조합을 막기 위한 것이고,
+   * 서버(order.py)에서도 같은 조건으로 막는다.
+   */
+  async function placeWithoutPayment() {
+    const miss = (['recipientName', 'recipientPhone', 'postalCode', 'address1'] as const)
+      .filter(k => !shipping[k].trim());
+    if (miss.length) {
+      toast.error('받는 분, 연락처, 우편번호, 주소를 입력해 주세요.');
+      return;
+    }
+    setOrdering(true);
+    try {
+      const res = await placeOrder({ bookUids, shipping });
+      setPlaced(res);
+      setShowShipping(false);
+      toast.success('테스트 주문이 접수되었습니다 (결제 없음).');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '주문에 실패했습니다.');
+    } finally {
+      setOrdering(false);
+    }
+  }
+
   /** 토스 결제창. 리다이렉트로 돌아오므로 주문에 필요한 값은 sessionStorage 에 둔다. */
   async function startPayment() {
     if (!quote || !stats) return;
@@ -840,7 +865,7 @@ export default function Print() {
                                 <span className={`text-[11px] rounded px-1.5 py-0.5 ${
                                   estimate.env === 'live'
                                     ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
-                                  {estimate.env === 'live' ? '운영(실제 제작)' : '테스트(Sandbox)'}
+                                  {estimate.env === 'live' ? '운영 · 실제 제작·결제' : '테스트(Sandbox) · 결제 없음'}
                                 </span>
                               )}
                             </div>
@@ -866,6 +891,11 @@ export default function Print() {
                             <Input placeholder="배송 메모 (선택)" value={shipping.memo ?? ''}
                               onChange={e => setShipping(p => ({ ...p, memo: e.target.value }))} />
 
+                            {estimate?.env === 'live' && (
+                              <p className="rounded-lg bg-rose-50 border border-rose-200 p-2.5 text-xs text-rose-800">
+                                운영 환경입니다. 결제가 <b>실제로 승인</b>되고 책이 <b>인쇄·배송</b>됩니다.
+                              </p>
+                            )}
                             {estimate && (
                               <div className="rounded-lg bg-muted/50 p-3 text-xs space-y-1">
                                 <div className="flex justify-between">
@@ -889,11 +919,14 @@ export default function Print() {
                             <div className="flex gap-2">
                               <Button variant="outline" className="flex-1"
                                 onClick={() => setShowShipping(false)} disabled={ordering}>취소</Button>
-                              <Button className="flex-[2]" onClick={startPayment}
+                              <Button className="flex-[2]"
+                                onClick={estimate?.env === 'live' ? startPayment : placeWithoutPayment}
                                 disabled={ordering || !estimate?.creditSufficient}>
                                 {ordering
                                   ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />처리 중…</>
-                                  : <>결제하고 주문</>}
+                                  : estimate?.env === 'live'
+                                    ? <>결제하고 주문 · {formatWon(quote?.grandTotal ?? 0)}</>
+                                    : <>테스트 주문 (결제 없음)</>}
                               </Button>
                             </div>
                           </div>

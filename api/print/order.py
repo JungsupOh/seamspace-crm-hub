@@ -8,6 +8,10 @@ PDF 생성 단계(generate)에서 권마다 스위트북 책을 FINALIZED 까지
   action=estimate  충전금 차감 예정액 조회. 결제창을 띄우기 전에 보여준다
   action=place     ① 토스 결제 승인 → ② 스위트북 주문 생성
 
+**Sandbox 에서는 결제를 받지 않는다.** 책이 실제로 만들어지지 않는데 돈만 진짜로
+빠져나가는 조합이 제일 나쁘다. 운영 토스 키가 꽂혀 있는 상태에서 Sandbox 를 돌리다
+실결제가 일어난 적이 있어, 아예 서버에서 막는다 — 화면 조건만으로는 부족하다.
+
 결제 승인은 Supabase Edge Function(confirm-toss)에 맡긴다. TOSS_SECRET_KEY 가 거기에만
 있고 되읽을 수 없어서인데, 결제 시크릿을 Vercel 에 한 벌 더 두지 않는 쪽이 낫기도 하다.
 
@@ -101,14 +105,29 @@ class handler(BaseHTTPRequestHandler):
             payment_key = body.get("paymentKey")
             order_id = body.get("orderId")
             amount = body.get("amount")
-            if not (payment_key and order_id and amount):
-                return send_json(self, {"error": "결제 정보가 없습니다."}, 400)
+            live = sweetbook.is_live()
 
-            # ① 결제 승인 — 실패하면 주문을 넣지 않는다
-            try:
-                payment = _toss_confirm(payment_key, order_id, int(amount))
-            except Exception as e:  # noqa: BLE001
-                return send_json(self, {"error": f"결제 승인 실패: {e}"}, 402)
+            # Sandbox 는 결제를 받지 않는다. 책이 안 만들어지는데 돈만 빠지는 조합이다.
+            if not live:
+                if payment_key:
+                    return send_json(
+                        self,
+                        {
+                            "error": "테스트(Sandbox) 환경에서는 결제를 받지 않습니다. "
+                            "결제 없이 주문만 넣어 주세요.",
+                        },
+                        400,
+                    )
+                payment = None
+                order_id = order_id or f"SANDBOX-{int(__import__('time').time() * 1000)}"
+            else:
+                if not (payment_key and order_id and amount):
+                    return send_json(self, {"error": "결제 정보가 없습니다."}, 400)
+                # ① 결제 승인 — 실패하면 주문을 넣지 않는다
+                try:
+                    payment = _toss_confirm(payment_key, order_id, int(amount))
+                except Exception as e:  # noqa: BLE001
+                    return send_json(self, {"error": f"결제 승인 실패: {e}"}, 402)
 
             # ② 스위트북 주문 — 실패해도 결제는 그대로 둔다(수동 처리)
             try:
@@ -131,14 +150,15 @@ class handler(BaseHTTPRequestHandler):
                 self,
                 {
                     "ok": True,
-                    "env": "live" if sweetbook.is_live() else "sandbox",
+                    "env": "live" if live else "sandbox",
                     "order": order,
                     "payment": {
                         "orderId": order_id,
-                        "method": payment.get("method"),
-                        "approvedAt": payment.get("approvedAt"),
-                        "receiptUrl": payment.get("receiptUrl"),
-                        "totalAmount": payment.get("totalAmount"),
+                        "method": payment.get("method") if payment else None,
+                        "approvedAt": payment.get("approvedAt") if payment else None,
+                        "receiptUrl": payment.get("receiptUrl") if payment else None,
+                        "totalAmount": payment.get("totalAmount") if payment else 0,
+                        "skipped": payment is None,
                     },
                 },
             )
