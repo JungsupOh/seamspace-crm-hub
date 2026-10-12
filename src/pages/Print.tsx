@@ -48,6 +48,8 @@ export default function Print() {
   const [vendor, setVendor] = useState<Vendor>('ddukddak');
   // 비밀글 포함 여부. 기본 포함 — 본인 일기를 본인 책으로 만드는 것이므로.
   const [includeSecret, setIncludeSecret] = useState(true);
+  // 로그인 계정 본인의 일기인지. 남의 일기면 비밀글 기본값과 안내 문구가 달라진다.
+  const [isOwnDiary, setIsOwnDiary] = useState(true);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [showSplitEditor, setShowSplitEditor] = useState(false);
@@ -115,6 +117,11 @@ export default function Print() {
     try {
       const s = await fetchStats(session.token, target.trim(), splitMode, vendor);
       setStats(s);
+      // 비밀글 기본값은 '포함'. 남의 일기를 뽑는 경우(슈퍼유저 권한)에도 기본은 같고,
+      // 대신 안내 문구를 바꿔 포함 여부를 의식적으로 고르게 한다.
+      setIsOwnDiary(
+        s.username.trim().toLowerCase() === session.username.trim().toLowerCase(),
+      );
       if (s.monthly.length > 0) {
         setRange({ from: s.monthly[0].ym, to: s.monthly[s.monthly.length - 1].ym });
         setQuote(s.quote);
@@ -462,8 +469,10 @@ export default function Print() {
                                         {' '}(공개 여부를 알 수 없는 {stats.secret.unknown}편도 함께)
                                       </span>
                                     )}
-                                    <span className="block text-[11px] text-muted-foreground mt-0.5">
-                                      제작된 책은 배송지로 전달됩니다. 가족이 볼 수 있다는 점을 고려해 주세요.
+                                    <span className={`block text-[11px] mt-0.5 ${isOwnDiary ? 'text-muted-foreground' : 'text-amber-700'}`}>
+                                      {isOwnDiary
+                                        ? '제작된 책은 배송지로 전달됩니다. 가족이 볼 수 있다는 점을 고려해 주세요.'
+                                        : '본인이 아닌 사용자의 일기입니다. 비밀글은 혼자 보려고 쓴 글이므로, 본인 동의 없이 포함하지 마세요.'}
                                     </span>
                                   </span>
                                 </label>
