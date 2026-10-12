@@ -1,5 +1,5 @@
 """
-POST /api/print/generate  {token, username, from, to, includeSecret?}
+POST /api/print/generate  {token, username, from, to, includeSecret?, vendor?}
   -> {name, url, pages, bytes, skipped}
 
 한 번에 한 권씩 만든다. 여러 권이면 화면이 이 엔드포인트를 순서대로 호출한다 —
@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from _lib import mdiary, secret, storage
+from _lib import mdiary, pricing, secret, storage
 from _lib.http import read_json, send_json
 from _lib.render import is_renderable, parse_api_date, render_volume
 
@@ -29,6 +29,7 @@ class handler(BaseHTTPRequestHandler):
             ym_to = (body.get("to") or "").strip()
             # 기본은 포함. 사용자가 끄면 비밀글을 빼고 만든다.
             include_secret = body.get("includeSecret", True) is not False
+            vendor = pricing.resolve_vendor(body.get("vendor"))
 
             if not token:
                 return send_json(self, {"error": "로그인이 필요합니다."}, 401)
@@ -59,8 +60,12 @@ class handler(BaseHTTPRequestHandler):
                     self, {"error": "선택한 구간에 인쇄할 일기가 없습니다."}, 400
                 )
 
+            # 업체의 페이지 규칙(최소 페이지·짝수)에 맞춰 빈 페이지를 채운다.
+            # 견적이 매긴 인쇄 페이지 수와 실제 PDF 가 달라지면 업로드가 거부되거나
+            # 견적 금액과 실물이 어긋난다.
+            pad_to = pricing.printed_pages(len(selected), vendor)
             buf = io.BytesIO()
-            result = render_volume(selected, buf, include_secret)
+            result = render_volume(selected, buf, include_secret, pad_to)
             data = buf.getvalue()
 
             stamp = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -72,7 +77,9 @@ class handler(BaseHTTPRequestHandler):
                 {
                     "name": name,
                     "url": url,
+                    "vendor": vendor,
                     "pages": result["pages"],
+                    "blanks": result.get("blanks", 0),
                     "bytes": len(data),
                     "skipped": result["skipped"],
                 },

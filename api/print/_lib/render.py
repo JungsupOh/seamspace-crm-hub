@@ -377,12 +377,16 @@ def draw_diary_page(c, diary, alt_state):
     return True
 
 
-def render_volume(diaries, out, include_secret=True):
+def render_volume(diaries, out, include_secret=True, pad_to=0):
     """
     일기 목록을 PDF 한 권으로 그려 out(파일 경로 또는 file-like)에 쓴다.
 
     diaries 는 날짜 오름차순으로 정렬되어 있어야 한다.
-    반환: {'pages': 그린 페이지 수, 'skipped': 건너뛴 일기 목록}
+    pad_to 를 주면 그 페이지 수가 될 때까지 뒤에 빈 페이지를 채운다. 업체가 요구하는
+    최소 페이지·짝수 규칙을 맞추기 위한 것이고, 견적이 매긴 인쇄 페이지 수와 실제 PDF
+    페이지 수가 달라지면 업로드가 거부되거나 견적과 실물이 어긋나므로 반드시 맞춘다.
+
+    반환: {'pages': 전체 페이지 수, 'blanks': 채운 빈 페이지 수, 'skipped': 건너뛴 일기}
     """
     ensure_fonts()
 
@@ -407,5 +411,11 @@ def render_volume(diaries, out, include_secret=True):
         c.showPage()  # 다음 일기는 새 페이지에. 마지막 호출까지 해야 페이지가 확정된다.
         pages += 1
 
+    blanks = 0
+    while pages < pad_to:
+        c.showPage()      # 아무것도 그리지 않은 페이지 = 백지
+        pages += 1
+        blanks += 1
+
     c.save()
-    return {"pages": pages, "skipped": skipped}
+    return {"pages": pages, "blanks": blanks, "skipped": skipped}

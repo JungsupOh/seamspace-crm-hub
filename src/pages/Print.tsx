@@ -23,6 +23,7 @@ import {
   requote, saveSession, SPLIT_MODE_LABEL,
   type DiaryStats, type GeneratedFile, type PrintSession, type Quote,
   type SplitMode,
+  type Vendor,
 } from '@/lib/print';
 
 export default function Print() {
@@ -43,6 +44,8 @@ export default function Print() {
   const [splits, setSplits] = useState<string[]>([]);
   // 자동 분권 방식 — 최저가(기본) / 균등. 분책 경계를 직접 지정하면 무시된다.
   const [splitMode, setSplitMode] = useState<SplitMode>('cheapest');
+  // 제작 업체. 페이지 규칙과 단가가 다르므로 바꾸면 견적을 다시 계산한다.
+  const [vendor, setVendor] = useState<Vendor>('ddukddak');
   // 비밀글 포함 여부. 기본 포함 — 본인 일기를 본인 책으로 만드는 것이므로.
   const [includeSecret, setIncludeSecret] = useState(true);
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -110,7 +113,7 @@ export default function Print() {
     setLoading(true);
     resetQuery();
     try {
-      const s = await fetchStats(session.token, target.trim());
+      const s = await fetchStats(session.token, target.trim(), splitMode, vendor);
       setStats(s);
       if (s.monthly.length > 0) {
         setRange({ from: s.monthly[0].ym, to: s.monthly[s.monthly.length - 1].ym });
@@ -129,7 +132,7 @@ export default function Print() {
   /** 구간·분책 경계·분권 방식이 바뀌면 견적만 다시 계산한다(일기 재조회 없음). */
   async function refreshQuote(
     next: { from: string; to: string }, nextSplits: string[], mode: SplitMode = splitMode,
-    withSecret: boolean = includeSecret,
+    withSecret: boolean = includeSecret, nextVendor: Vendor = vendor,
   ) {
     if (!stats) return;
     setQuoting(true);
@@ -140,7 +143,7 @@ export default function Print() {
       // 서버가 두 집계를 다 내려주므로 일기를 다시 조회하지 않는다.
       const monthly = withSecret ? stats.monthly : (stats.monthlyPublic ?? stats.monthly);
       const q = await requote(
-        monthly, next.from, next.to, inRange.length ? inRange : undefined, mode,
+        monthly, next.from, next.to, inRange.length ? inRange : undefined, mode, nextVendor,
       );
       setQuote(q);
     } catch (e) {
@@ -175,6 +178,14 @@ export default function Print() {
     if (range) void refreshQuote(range, [], mode);
   }
 
+  function changeVendor(next: Vendor) {
+    if (next === vendor) return;
+    setVendor(next);
+    // 업체마다 페이지 상한이 달라 분책 경계가 그대로면 범위를 벗어날 수 있다.
+    setSplits([]);
+    if (range) void refreshQuote(range, [], splitMode, includeSecret, next);
+  }
+
   function changeIncludeSecret(next: boolean) {
     if (next === includeSecret) return;
     setIncludeSecret(next);
@@ -190,7 +201,7 @@ export default function Print() {
       for (const v of quote.volumes) {
         setProgress(`${quote.volumes.length}권 중 ${v.volume}권 만드는 중… (${v.pages}페이지)`);
         const file = await generateVolume(
-          session.token, stats.username, v.from, v.to, includeSecret,
+          session.token, stats.username, v.from, v.to, includeSecret, vendor,
         );
         made.push(file);
         setFiles([...made]);
@@ -399,6 +410,35 @@ export default function Print() {
                             {w}
                           </p>
                         ))}
+
+                        {/* 제작 업체 — 페이지 규칙과 단가가 다르다.
+                            바꾸면 분권·금액이 모두 다시 계산된다. */}
+                        {stats.vendors?.length > 1 && (
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1.5">제작 업체</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              {stats.vendors.map(v => {
+                                const active = vendor === v.vendor;
+                                return (
+                                  <button key={v.vendor} type="button"
+                                    onClick={() => changeVendor(v.vendor)}
+                                    className={`relative rounded-xl border-2 p-3 text-left transition-all
+                                      ${active ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/40'}`}>
+                                    <p className="font-semibold text-sm">{v.label}</p>
+                                    <p className="text-[11px] text-muted-foreground mt-0.5 tabular">
+                                      {v.pageMin}~{v.pageMax}p
+                                      {v.pageIncrement > 1 && ` · ${v.pageIncrement}의 배수`}
+                                    </p>
+                                    <p className="text-[11px] text-muted-foreground tabular">
+                                      {formatWon(v.bands[0].price)}부터 · 배송 {formatWon(v.shippingFee)}
+                                    </p>
+                                    {active && <CheckCircle2 className="absolute top-3 right-3 h-4 w-4 text-primary" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
 
                         {/* 비밀글 — 본인 일기를 본인 책으로 만드는 것이므로 기본은 포함.
                             다만 책은 배송지로 가므로(부모가 사주는 경우가 많다) 끌 수 있어야 한다.

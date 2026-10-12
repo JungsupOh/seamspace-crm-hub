@@ -1,5 +1,5 @@
 """
-POST /api/print/quote  {monthly[], from?, to?, splits?, mode?} -> 견적
+POST /api/print/quote  {monthly[], from?, to?, splits?, mode?, vendor?} -> 견적
 
 화면이 인쇄 구간이나 분책 경계를 바꿀 때마다 부르는 순수 계산 엔드포인트다.
 일기를 다시 조회하지 않고 클라이언트가 이미 들고 있는 월별 집계만 받아 계산한다.
@@ -36,10 +36,11 @@ class handler(BaseHTTPRequestHandler):
             ]
 
             splits = body.get("splits")
+            vendor = body.get("vendor") or pricing.DEFAULT_VENDOR
             result = (
-                pricing.plan_with_splits(selected, splits)
+                pricing.plan_with_splits(selected, splits, vendor)
                 if splits
-                else pricing.plan_volumes(selected, body.get("mode") or pricing.DEFAULT_MODE)
+                else pricing.plan_volumes(selected, body.get("mode") or pricing.DEFAULT_MODE, vendor)
             )
             return send_json(self, result)
         except Exception as e:  # noqa: BLE001

@@ -1,5 +1,5 @@
 """
-POST /api/print/stats  {token, username, mode?}
+POST /api/print/stats  {token, username, mode?, vendor?}
   -> {total, renderable, skipped[], firstDate, lastDate, monthly[], monthlyPublic[], secret{}, quote}
 
 일기를 전부 받아 월별로 집계하고 견적을 낸다.
@@ -63,6 +63,7 @@ class handler(BaseHTTPRequestHandler):
 
             dates = sorted(parse_api_date(e["date"]) for e in renderable)
             mode = body.get("mode") or pricing.DEFAULT_MODE
+            vendor = body.get("vendor") or pricing.DEFAULT_VENDOR
             monthly = _monthly(renderable)
 
             return send_json(
@@ -86,7 +87,8 @@ class handler(BaseHTTPRequestHandler):
                         # 필드명을 알아내기 위한 진단. 값은 싣지 않는다(일기 본문 유출 방지).
                         "observedFields": secret.observed_fields(entries),
                     },
-                    "quote": pricing.plan_volumes(monthly, mode),
+                    "vendors": pricing.vendor_list(),
+                    "quote": pricing.plan_volumes(monthly, mode, vendor),
                 },
             )
         except mdiary.MDiaryError as e:

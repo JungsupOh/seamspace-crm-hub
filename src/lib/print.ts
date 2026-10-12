@@ -29,6 +29,27 @@ export interface Volume {
   price: number | null;
 }
 
+/** 제작 업체. 페이지 규칙과 단가가 업체마다 다르다. */
+export type Vendor = 'ddukddak' | 'sweetbook';
+
+export interface PriceBand {
+  from: number;
+  to: number;
+  price: number;
+}
+
+export interface VendorInfo {
+  vendor: Vendor;
+  label: string;
+  spec: string | null;      // 스위트북 판형 코드 (뚝딱샵은 null)
+  pageMin: number;
+  pageMax: number;
+  pageIncrement: number;    // 1이면 페이지 수 제약 없음
+  minDiaries: number;
+  shippingFee: number;
+  bands: PriceBand[];
+}
+
 /** 자동 분권 방식. 가격이 구간제라 균등이 최저가보다 비쌀 수 있다. */
 export type SplitMode = 'cheapest' | 'balanced';
 
@@ -47,6 +68,7 @@ export interface SplitOption {
 export interface Quote {
   printable: boolean;
   reason?: string;
+  vendor: VendorInfo;
   mode?: SplitMode;
   options?: SplitOption[];
   totalDiaries: number;
@@ -85,13 +107,16 @@ export interface DiaryStats {
   /** 비밀글을 뺀 월별 집계. 토글할 때 일기를 재조회하지 않으려고 같이 받는다. */
   monthlyPublic: MonthCount[] | null;
   secret: SecretInfo;
+  vendors: VendorInfo[];
   quote: Quote;
 }
 
 export interface GeneratedFile {
   name: string;
   url: string;
+  vendor?: Vendor;
   pages: number;
+  blanks?: number;      // 업체 페이지 규칙을 맞추려고 채운 빈 페이지
   bytes: number;
   skipped: { id: number | null; date: string | null; reason: string }[];
 }
@@ -122,15 +147,18 @@ export function login(username: string, password: string) {
   return post<PrintSession>('login', { username, password });
 }
 
-export function fetchStats(token: string, username: string, mode?: SplitMode) {
-  return post<DiaryStats>('stats', { token, username, mode });
+export function fetchStats(
+  token: string, username: string, mode?: SplitMode, vendor?: Vendor,
+) {
+  return post<DiaryStats>('stats', { token, username, mode, vendor });
 }
 
 /** 인쇄 구간·분책 경계·분권 방식이 바뀔 때 견적만 다시 계산한다(일기 재조회 없음). */
 export function requote(
-  monthly: MonthCount[], from: string, to: string, splits?: string[], mode?: SplitMode,
+  monthly: MonthCount[], from: string, to: string,
+  splits?: string[], mode?: SplitMode, vendor?: Vendor,
 ) {
-  return post<Quote>('quote', { monthly, from, to, splits, mode });
+  return post<Quote>('quote', { monthly, from, to, splits, mode, vendor });
 }
 
 export const SPLIT_MODE_LABEL: Record<SplitMode, string> = {
@@ -140,9 +168,10 @@ export const SPLIT_MODE_LABEL: Record<SplitMode, string> = {
 
 /** 한 번에 한 권씩 만든다. 여러 권이면 화면이 순서대로 호출한다. */
 export function generateVolume(
-  token: string, username: string, from: string, to: string, includeSecret = true,
+  token: string, username: string, from: string, to: string,
+  includeSecret = true, vendor?: Vendor,
 ) {
-  return post<GeneratedFile>('generate', { token, username, from, to, includeSecret });
+  return post<GeneratedFile>('generate', { token, username, from, to, includeSecret, vendor });
 }
 
 const SESSION_KEY = 'print_session';
