@@ -54,8 +54,8 @@ def invariants(plan, label, vendor):
         check(p >= x["diaries"], f"[{label}] {x['volume']}권 인쇄 {p}p < 일기 {x['diaries']}편")
         check(x["blanks"] == p - x["diaries"], f"[{label}] {x['volume']}권 blanks 불일치")
         check(
-            x["price"] == pricing.price_for(p, vendor),
-            f"[{label}] {x['volume']}권 가격이 구간과 불일치",
+            x["price"] == pricing.price_for(p, vendor, first=(x["volume"] == 1)),
+            f"[{label}] {x['volume']}권 가격이 가격표와 불일치",
         )
     check(
         plan["productTotal"] == sum(x["price"] for x in plan["volumes"]),
@@ -101,10 +101,46 @@ for pages, expect in [(36, 26000), (100, 26000), (101, 29000), (150, 29000),
                       (35, None), (301, None)]:
     got = pricing.price_for(pages, "ddukddak")
     check(got == expect, f"뚝딱샵 price_for({pages}) = {got}, 기대 {expect}")
-for pages, expect in [(50, 27000), (100, 27000), (102, 32000), (150, 32000),
-                      (152, 37000), (200, 37000), (48, None), (202, None)]:
-    got = pricing.price_for(pages, "sweetbook")
-    check(got == expect, f"스위트북 price_for({pages}) = {got}, 기대 {expect}")
+# 스위트북 — 기본료 + 10p 블록. 1권째와 2권째 기본료가 다르다.
+for pages, first, extra in [(50, 22000, 14300), (60, 23100, 15400), (100, 27500, 19800),
+                            (150, 33000, 25300), (200, 38500, 30800)]:
+    g1 = pricing.price_for(pages, "sweetbook", True)
+    g2 = pricing.price_for(pages, "sweetbook", False)
+    check(g1 == first, f"스위트북 1권째 price_for({pages}) = {g1}, 기대 {first}")
+    check(g2 == extra, f"스위트북 2권째 price_for({pages}) = {g2}, 기대 {extra}")
+for pages in (48, 202, 0):
+    for f in (True, False):
+        check(pricing.price_for(pages, "sweetbook", f) is None,
+              f"스위트북 범위 밖 {pages}p 가 None 이 아님")
+
+# 10p 단위로 올림한다 — 51~60p 는 전부 60p 값
+for p in range(52, 61, 2):
+    check(pricing.price_for(p, "sweetbook", True) == 23100, f"{p}p 가 23,100 이 아님")
+check(pricing.price_for(50, "sweetbook", True) == 22000, "50p 만 22,000 이어야 한다")
+
+# 공급가가 전 구간 천 단위인지 — 부동소수 아닌 정수로 검사
+for p in range(50, 201, 2):
+    for f, base in ((True, 20000), (False, 13000)):
+        import math as _m
+        supply = base + _m.ceil((p - 50) / 10) * 1000
+        check(supply % 1000 == 0, f"{p}p(first={f}) 공급가 {supply} 가 천 단위 아님")
+        check(pricing.price_for(p, "sweetbook", f) == supply * 11 // 10,
+              f"{p}p(first={f}) VAT 계산 불일치")
+
+# 마진 — 스위트북 원가(공급가 11,900 + 페이지당 100)와 대조.
+# 10페이지 블록으로 올림하므로 경계(50,60,70…)에서는 정확히 8,910/1,210 이고,
+# 그 사이는 못 쓴 페이지만큼(최대 8p × 110원) 더 붙는다. 손해 보는 쪽은 없어야 한다.
+for p in range(50, 201, 2):
+    cost = (11900 + (p - 50) * 100) * 11 // 10
+    m1 = pricing.price_for(p, "sweetbook", True) - cost
+    m2 = pricing.price_for(p, "sweetbook", False) - cost
+    if (p - 50) % 10 == 0:
+        check(m1 == 8910, f"{p}p 1권째 마진 {m1:,} (블록 경계라 8,910 이어야)")
+        check(m2 == 1210, f"{p}p 2권째 마진 {m2:,} (블록 경계라 1,210 이어야)")
+    else:
+        check(8910 < m1 <= 8910 + 880, f"{p}p 1권째 마진 {m1:,} 가 범위 밖")
+        check(1210 < m2 <= 1210 + 880, f"{p}p 2권째 마진 {m2:,} 가 범위 밖")
+    check(m2 > 0, f"{p}p 2권째가 역마진 ({m2:,})")
 
 # ── 4. 최소 편수 미만 ──────────────────────────────
 for vendor in VENDORS:
@@ -133,7 +169,7 @@ plan = pricing.plan_volumes(months(20, 20), vendor="sweetbook")  # 40편
 invariants(plan, "스위트북 40편", "sweetbook")
 check(plan["volumes"][0]["pages"] == 50, "스위트북 40편 → 50p 패딩 안 됨")
 check(plan["volumes"][0]["blanks"] == 10, "스위트북 40편 빈 페이지 10장이 아님")
-check(plan["grandTotal"] == 27000 + 3000, f"스위트북 40편 총액 {plan['grandTotal']:,}")
+check(plan["grandTotal"] == 22000 + 3000, f"스위트북 40편 총액 {plan['grandTotal']:,}")
 
 plan = pricing.plan_volumes(months(31, 30, 30, 30), vendor="sweetbook")  # 121편
 invariants(plan, "스위트북 121편", "sweetbook")
@@ -160,16 +196,15 @@ check(
     [len(x["months"]) for x in sb["volumes"]] in ([4, 3], [3, 4]),
     f"스위트북 210편 월 구성 {[len(x['months']) for x in sb['volumes']]} (기대 4+3)",
 )
-check(sb["grandTotal"] == 59000 + 3000, f"스위트북 210편 총액 {sb['grandTotal']:,}")
+check(sb["grandTotal"] == 29700 + 18700 + 3000, f"스위트북 210편 총액 {sb['grandTotal']:,}")
 
 # ── 8. 앞에서부터 채우면 깨지는 케이스 ─────────────
 plan = pricing.plan_volumes(months(*([23] * 10)), vendor="sweetbook")  # 230편
 invariants(plan, "스위트북 230편", "sweetbook")
-check(plan["productTotal"] == 59000, f"230편 상품가 {plan['productTotal']:,} (기대 59,000)")
-check(
-    sorted(x["diaries"] for x in plan["volumes"]) == [92, 138],
-    f"230편 분권 {[x['diaries'] for x in plan['volumes']]} (기대 92/138)",
-)
+# 선형 가격이라 구간 절벽이 없다 — 동점이면 권수 적은 쪽 → 두꺼운 권이 얇은 쪽
+check(len(plan["volumes"]) == 2, f"230편이 {len(plan['volumes'])}권")
+check(plan["volumes"][0]["price"] > plan["volumes"][1]["price"],
+      "1권째가 2권째보다 비싸야 한다(기본료 차이)")
 
 # ── 9. 수동 분책 경계 ──────────────────────────────
 ms = months(*([30] * 10))  # 300편
@@ -177,7 +212,7 @@ plan = pricing.plan_with_splits(ms, ["2026-05"], "sweetbook")  # 150 / 150
 invariants(plan, "수동분책", "sweetbook")
 check(plan["mode"] == "manual", "수동 분책 mode 가 manual 이 아님")
 check([x["diaries"] for x in plan["volumes"]] == [150, 150], "수동 분책 150/150 이 아님")
-check(plan["grandTotal"] == 32000 * 2 + 3000, f"수동 분책 총액 {plan['grandTotal']:,}")
+check(plan["grandTotal"] == 33000 + 25300 + 3000, f"수동 분책 총액 {plan['grandTotal']:,}")
 check(len(plan["options"]) == 2, "수동 분책에 자동 옵션이 안 실림")
 
 bad = pricing.plan_with_splits(ms, ["2026-08"], "sweetbook")  # 240 / 60 → 범위 밖
@@ -214,7 +249,7 @@ def brute_force(counts, vendor):
     cap = pricing.VENDORS[vendor]["page_max"]
     best = [None]
 
-    def rec(i, acc):
+    def rec(i, acc, first):
         if best[0] is not None and acc >= best[0]:
             return
         if i == n:
@@ -225,12 +260,13 @@ def brute_force(counts, vendor):
             run += counts[j]
             if run > cap:
                 break
-            pr = pricing.price_for(pricing.printed_pages(run, vendor), vendor)
+            # 1권째만 기본료가 비싼 모델이 있다 — 완전탐색도 같은 기준으로 매긴다
+            pr = pricing.price_for(pricing.printed_pages(run, vendor), vendor, first=first)
             if pr is None:
                 continue
-            rec(j + 1, acc + pr)
+            rec(j + 1, acc + pr, False)
 
-    rec(0, 0)
+    rec(0, 0, True)
     return best[0]
 
 
@@ -310,11 +346,8 @@ ms230 = months(*([23] * 10))
 cheap = pricing.plan_volumes(ms230, "cheapest", "sweetbook")
 bal = pricing.plan_volumes(ms230, "balanced", "sweetbook")
 check(cheap["mode"] == "cheapest" and bal["mode"] == "balanced", "mode 가 응답에 안 실림")
-check([x["pages"] for x in cheap["volumes"]] == [138, 92],
-      f"최저가 {[x['pages'] for x in cheap['volumes']]}")
-check([x["pages"] for x in bal["volumes"]] == [116, 116],
-      f"균등 {[x['pages'] for x in bal['volumes']]}")
-check(cheap["grandTotal"] == 62000 and bal["grandTotal"] == 67000, "두 방식 총액")
+check(len(cheap["volumes"]) == 2 and len(bal["volumes"]) == 2, "230편이 2권이 아님")
+check(cheap["grandTotal"] <= bal["grandTotal"], "최저가가 균등보다 비쌈")
 for plan in (cheap, bal):
     check([o["mode"] for o in plan["options"]] == list(pricing.MODES), "options 에 두 방식이 다 없음")
 check(pricing.plan_volumes(ms230, "weird", "sweetbook")["mode"] == pricing.DEFAULT_MODE,
@@ -335,6 +368,29 @@ for v in VENDORS:
     check(info["trimHeightMm"] == pricing.trim_size(v)[1], f"[{v}] vendor_info 재단 세로 불일치")
     check(bool(info["trimLabel"]), f"[{v}] trimLabel 비어 있음")
 
+# ── 14. 1권으로 가능하면 절대 분권되지 않는다 ──────
+# 기본료가 권마다 붙으므로 분권은 항상 더 비싸다. DP 가 이걸 알아서 피해야 한다.
+for total in range(50, 201, 2):
+    n = total // 4
+    counts = [n, n, n, total - 3 * n]
+    plan = pricing.plan_volumes(months(*counts), vendor="sweetbook")
+    if not plan["printable"]:
+        continue
+    check(len(plan["volumes"]) == 1,
+          f"{total}편(1권 가능)인데 {len(plan['volumes'])}권으로 쪼갬")
+    for mode in pricing.MODES:
+        p2 = pricing.plan_volumes(months(*counts), mode, "sweetbook")
+        check(len(p2["volumes"]) == 1, f"{total}편 {mode} 가 쪼갬")
+
+# 분권되면 1권째만 기본료가 비싸다
+plan = pricing.plan_volumes(months(*([50] * 6)), vendor="sweetbook")  # 300편
+invariants(plan, "스위트북 300편", "sweetbook")
+check(len(plan["volumes"]) == 2, f"300편이 {len(plan['volumes'])}권")
+check([x["pages"] for x in plan["volumes"]] == [150, 150], "300편이 150/150 이 아님")
+check([x["price"] for x in plan["volumes"]] == [33000, 25300],
+      f"300편 권별 가격 {[x['price'] for x in plan['volumes']]} (기대 33,000/25,300)")
+check(plan["grandTotal"] == 61300, f"300편 총액 {plan['grandTotal']:,} (기대 61,300)")
+
 # ── 결과 ───────────────────────────────────────────
 if FAIL:
     print(f"✗ {len(FAIL)}건 실패\n")
@@ -350,6 +406,15 @@ for key in VENDORS:
     mark = " (기본)" if key == pricing.DEFAULT_VENDOR else ""
     inc = f", {v['page_increment']}의 배수" if v["page_increment"] > 1 else ""
     print(f"\n  {v['label']}{mark}  {v['page_min']}~{v['page_max']}p{inc}")
-    for lo, hi, pr in v["bands"]:
-        print(f"    {lo:>3}~{hi:>3}p   {pr:,}원")
+    if v["pricing"] == "bands":
+        for lo, hi, pr in v["bands"]:
+            print(f"    {lo:>3}~{hi:>3}p   {pr:,}원")
+    else:
+        info = pricing.vendor_info(key)
+        print(f"    1권째     {info['basePrice']:,}원 + {info['blockPages']}p당 "
+              f"{info['blockPrice']:,}원")
+        print(f"    2권째~    {info['extraBasePrice']:,}원 + 동일")
+        for p in (50, 100, 150, 200):
+            print(f"      {p:>3}p   {pricing.price_for(p, key, True):>7,}  "
+                  f"(2권째 {pricing.price_for(p, key, False):,})")
     print(f"    배송비     {v['shipping_fee']:,}원")

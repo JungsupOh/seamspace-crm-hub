@@ -50,6 +50,7 @@ VENDORS = {
         "page_max": 300,             # 초과는 분권 대상
         "page_increment": 1,         # 페이지 수 제약 없음
         "min_diaries": 36,           # 판매 최소 편수
+        "pricing": "bands",
         "bands": (
             (36, 100, 26000),
             (101, 150, 29000),
@@ -71,11 +72,21 @@ VENDORS = {
         # 판형 최소(50p)보다 낮게 받고 모자란 만큼 빈 페이지로 채운다.
         # 36~49편도 50p 가격을 그대로 내므로 손해는 없고 안내를 바꾸지 않아도 된다.
         "min_diaries": 36,
-        "bands": (
-            (50, 100, 27000),
-            (101, 150, 32000),
-            (151, 200, 37000),
-        ),
+        # 원가가 페이지당 100원 선형이라 가격도 선형으로 간다. 구간제는 구간 안에서
+        # 마진이 반토막 나고(50p 51% / 200p 20%), 한 장 차이로 5,000원이 뛰는 걸
+        # 고객에게 설명할 수 없다.
+        #
+        # 공급가(VAT 제외)를 천 단위로 맞추고 화면에는 VAT 포함가를 보여준다.
+        # 스위트북 원가가 마침 10페이지당 정확히 1,000원(공급가)이라 떨어진다.
+        # 추가 페이지는 원가 그대로 받고 마진은 기본료에만 넣는다.
+        #
+        # 2권째부터 기본료를 낮춘다 — 분권은 고객이 원해서 하는 게 아니라 판형 상한
+        # 때문에 강제되는 것이라, 1권째와 같은 마진을 또 받으면 부담이 급등한다.
+        "pricing": "blocks",
+        "base_supply": 20000,          # 1권째 (50p 포함). 원가 11,900 + 마진 8,100
+        "extra_base_supply": 13000,    # 2권째~.  원가 11,900 + 마진 1,100
+        "block_pages": 10,
+        "block_supply": 1000,          # 10p당 — 스위트북 원가와 동일
         # 스위트북 배송비는 박스당 3,000원이고 A5 는 150권/박스라 분권해도 한 박스다.
         "shipping_fee": 3000,
     },
@@ -86,6 +97,9 @@ DEFAULT_VENDOR = "ddukddak"
 # 자동 분권 방식. 화면에서 고객이 고른다.
 #   cheapest — 총 제작비가 가장 싼 월 경계 (기본값)
 #   balanced — 권 두께를 고르게 (가격이 구간제라 더 비쌀 수 있다)
+VAT_NUM, VAT_DEN = 11, 10      # 부가세 10%. 정수로 계산한다 —
+                               # 20000 * 1.1 은 22000.000000000004 가 되어 절삭 사고가 난다
+
 MODES = ("cheapest", "balanced")
 DEFAULT_MODE = "cheapest"
 
@@ -99,7 +113,7 @@ def vendor_info(name=None):
     """화면에 뿌릴 업체 정보 (가격표 포함)."""
     key = resolve_vendor(name)
     v = VENDORS[key]
-    return {
+    out = {
         "vendor": key,
         "label": v["label"],
         "spec": v["spec"],
@@ -111,8 +125,16 @@ def vendor_info(name=None):
         "trimWidthMm": v["trim"][0],
         "trimHeightMm": v["trim"][1],
         "trimLabel": v["trim_label"],
-        "bands": [{"from": lo, "to": hi, "price": pr} for lo, hi, pr in v["bands"]],
+        "pricing": v["pricing"],
     }
+    if v["pricing"] == "bands":
+        out["bands"] = [{"from": lo, "to": hi, "price": pr} for lo, hi, pr in v["bands"]]
+    else:
+        out["basePrice"] = _vat(v["base_supply"])
+        out["extraBasePrice"] = _vat(v["extra_base_supply"])
+        out["blockPages"] = v["block_pages"]
+        out["blockPrice"] = _vat(v["block_supply"])
+    return out
 
 
 def vendor_list():
@@ -150,12 +172,29 @@ def printed_pages(diaries, vendor=DEFAULT_VENDOR):
     return pages
 
 
-def price_for(pages, vendor=DEFAULT_VENDOR):
-    """인쇄 페이지 수에 해당하는 권당 가격. 구간 밖이면 None."""
-    for low, high, price in VENDORS[resolve_vendor(vendor)]["bands"]:
-        if low <= pages <= high:
-            return price
-    return None
+def _vat(supply):
+    """공급가 → VAT 포함가. 정수 연산."""
+    return supply * VAT_NUM // VAT_DEN
+
+
+def price_for(pages, vendor=DEFAULT_VENDOR, first=True):
+    """
+    인쇄 페이지 수에 해당하는 권당 가격(VAT 포함). 범위 밖이면 None.
+
+    first=False 는 분권의 2권째 이후다 — 기본료가 낮다.
+    """
+    v = VENDORS[resolve_vendor(vendor)]
+    if v["pricing"] == "bands":
+        for low, high, price in v["bands"]:
+            if low <= pages <= high:
+                return price
+        return None
+
+    if not (v["page_min"] <= pages <= v["page_max"]):
+        return None
+    base = v["base_supply"] if first else v["extra_base_supply"]
+    blocks = math.ceil((pages - v["page_min"]) / v["block_pages"])
+    return _vat(base + blocks * v["block_supply"])
 
 
 def shipping_fee(vendor=DEFAULT_VENDOR):
@@ -258,6 +297,11 @@ def _cheapest_groups(counts, vendor):
     None 을 돌려준다(호출자가 그 달을 짚어 안내한다).
 
     동점이면 권수가 적은 쪽, 그다음 가장 두꺼운 권이 얇은 쪽을 고른다.
+
+    가격 모델이 '1권째만 기본료가 비싼' 구조일 때도 이 DP 를 그대로 쓴다.
+    전부 2권째 가격(first=False)으로 비교하면 되는데, 어떤 해를 고르든 첫 권 하나에만
+    같은 차액이 더해지므로 **총액 순위가 바뀌지 않기 때문**이다. 실제 금액은
+    _build() 가 첫 권만 first=True 로 다시 매긴다.
     """
     page_max = VENDORS[resolve_vendor(vendor)]["page_max"]
     n = len(counts)
@@ -273,7 +317,7 @@ def _cheapest_groups(counts, vendor):
             if dp[j] is None:
                 continue
             pages = printed_pages(run, vendor)
-            price = price_for(pages, vendor)
+            price = price_for(pages, vendor, first=False)
             if price is None:
                 continue
             cand = (dp[j][0] + price, dp[j][1] + 1, max(dp[j][2], pages), j)
@@ -304,7 +348,8 @@ def _build(months, groups, vendor):
         span = months[start : end + 1]
         diaries = sum(m["count"] for m in span)
         pages = printed_pages(diaries, vendor)
-        price = price_for(pages, vendor)
+        # 1권째만 기본료를 제값으로 받는다(blocks 모델). bands 모델은 first 를 무시한다.
+        price = price_for(pages, vendor, first=(idx == 1))
         blanks = pages - diaries
 
         if price is None:

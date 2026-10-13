@@ -50,7 +50,24 @@ export interface VendorInfo {
   trimWidthMm: number;    // 재단 크기. 인쇄 캔버스는 여기에 도련 3mm 를 더한다
   trimHeightMm: number;
   trimLabel: string;      // '신국판 152×225' 처럼 화면에 그대로 쓴다
-  bands: PriceBand[];
+
+  /** 가격 모델. 업체마다 다르다 — 둘 중 하나의 필드 묶음만 채워진다. */
+  pricing: 'bands' | 'blocks';
+  bands?: PriceBand[];        // pricing='bands' (뚝딱샵)
+  basePrice?: number;         // pricing='blocks' (스위트북) — 1권째 기본료, VAT 포함
+  extraBasePrice?: number;    // 2권째부터의 기본료
+  blockPages?: number;        // 추가 단위 (10p)
+  blockPrice?: number;        // 추가 단위당 가격, VAT 포함
+}
+
+/** 업체 카드에 쓸 한 줄 요약. 모델이 둘이라 분기가 필요하다. */
+export function vendorPriceSummary(v: VendorInfo): string {
+  if (v.pricing === 'blocks' && v.basePrice != null) {
+    return `${v.basePrice.toLocaleString('ko-KR')}원 + ${v.blockPages}p당 `
+      + `${(v.blockPrice ?? 0).toLocaleString('ko-KR')}원`;
+  }
+  const from = v.bands?.[0]?.price ?? 0;
+  return `${from.toLocaleString('ko-KR')}원부터`;
 }
 
 /** 자동 분권 방식. 가격이 구간제라 균등이 최저가보다 비쌀 수 있다. */

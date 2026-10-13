@@ -24,7 +24,7 @@ import {
   fetchStats, formatWon, formatYm, generateVolume, loadSession, login,
   requote, saveSession, SPLIT_MODE_LABEL,
   type DiaryStats, type GeneratedFile, type PrintSession, type Quote,
-  estimateOrder, placeOrder,
+  estimateOrder, placeOrder, vendorPriceSummary,
   type SplitMode,
   type Vendor,
   type ShippingInput,
@@ -525,7 +525,7 @@ export default function Print() {
                                       {v.pageIncrement > 1 && ` · ${v.pageIncrement}의 배수`}
                                     </p>
                                     <p className="text-[11px] text-muted-foreground tabular">
-                                      {formatWon(v.bands[0].price)}부터 · 배송 {formatWon(v.shippingFee)}
+                                      {vendorPriceSummary(v)} · 배송 {formatWon(v.shippingFee)}
                                     </p>
                                     {active && <CheckCircle2 className="absolute top-3 right-3 h-4 w-4 text-primary" />}
                                   </button>
