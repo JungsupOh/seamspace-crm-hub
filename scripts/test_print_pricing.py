@@ -321,12 +321,14 @@ check(pricing.plan_volumes(ms230, "weird", "sweetbook")["mode"] == pricing.DEFAU
       "잘못된 모드가 기본값으로 안 떨어짐")
 
 # ── 13. 업체별 판형 ────────────────────────────────
-check(pricing.trim_size("ddukddak") == (152.0, 225.0), f"뚝딱샵 재단 {pricing.trim_size('ddukddak')}")
-check(pricing.trim_size("sweetbook") == (148.0, 210.0), f"스위트북 재단 {pricing.trim_size('sweetbook')}")
-check(pricing.page_size("ddukddak") == (158.0, 231.0), f"뚝딱샵 캔버스 {pricing.page_size('ddukddak')}")
-check(pricing.page_size("sweetbook") == (154.0, 216.0), f"스위트북 캔버스 {pricing.page_size('sweetbook')}")
-# 스위트북 캔버스는 렌더러 기본 좌표계(154×216)와 같아야 한다 — 늘리기가 일어나지 않는다
-check(pricing.page_size("sweetbook") == (148.0 + 6, 210.0 + 6), "스위트북 도련 계산")
+# 두 업체 모두 A5. 뚝딱샵은 AI출판>셀프디자인(13889)에 A5 가 있다.
+for v in VENDORS:
+    check(pricing.trim_size(v) == (148.0, 210.0), f"[{v}] 재단 {pricing.trim_size(v)}")
+    check(pricing.page_size(v) == (154.0, 216.0), f"[{v}] 캔버스 {pricing.page_size(v)}")
+# 캔버스는 재단 + 도련 3mm 양쪽
+for v in VENDORS:
+    w, h = pricing.trim_size(v)
+    check(pricing.page_size(v) == (w + 6, h + 6), f"[{v}] 도련 계산")
 for v in VENDORS:
     info = pricing.vendor_info(v)
     check(info["trimWidthMm"] == pricing.trim_size(v)[0], f"[{v}] vendor_info 재단 가로 불일치")

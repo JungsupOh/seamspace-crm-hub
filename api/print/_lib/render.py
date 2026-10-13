@@ -77,6 +77,10 @@ def ensure_fonts():
 # ─── 페이지 규격 ────────────────────────────────────────────────────────────
 PAGE_SIZE = (154 * mm, 216 * mm)
 
+# 배경 아트의 아래쪽 단색. 판형이 달라 남는 자리를 이 색으로 채운다.
+# 세 배경(bgDayGoodAll/SosoAll/BadAll) 모두 맨 아래가 이 색이다.
+PAGE_FILL = (251 / 255, 250 / 255, 246 / 255)
+
 # 신호등별 배경·글자색·표기. 원본 292-309줄.
 TRAFFIC = {
     "GREEN": {"bg": "bgImage/bgDayGoodAll.png", "color": "#648A61", "label": "초록불"},
@@ -388,13 +392,20 @@ def render_volume(diaries, out, include_secret=True, pad_to=0, page=None):
 
     page=(가로mm, 세로mm) 로 다른 판형에 맞출 수 있다. 이 모듈의 모든 좌표는
     154×216mm(A5+도련) 기준으로 짜여 있고 배경 이미지도 그 비율(1820×2552px)이다.
-    다른 판형은 **좌표계를 그대로 두고 캔버스에 맞춰 늘린다**(c.scale).
 
-    왜 재조판이 아니라 늘리기인가: 좌표·색상·폰트 크기가 인쇄 템플릿 값이고 배경
-    일러스트가 전면이라, 판형마다 다시 잡으면 배경 아트도 새로 만들어야 한다.
-    늘리기는 배경과 내용이 **같은 비율로** 움직여 정렬이 깨지지 않는다.
-    대가는 종횡비 차이만큼의 왜곡이다 — 신국판(158×231)은 세로가 4.2% 더 늘어난다.
-    글자도 그만큼 길어 보이므로, 판형을 상시로 쓸 거면 배경 아트를 새로 받는 게 맞다.
+    **가로/세로를 따로 늘리지 않는다.** 그러면 원형 아이콘이 타원이 되고 글자가
+    길어진다(신국판은 세로가 4.2% 더 늘어난다). 대신 **한 배율로만 키우고**,
+    남는 자리는 배경 아래쪽 색으로 채운다.
+
+      배율 s  = 가로를 꽉 채우는 값. 그래도 세로가 넘치면 세로 기준으로 떨어진다
+      가로    남으면 좌우 균등하게 둔다
+      세로    남는 만큼 **아래**로 몬다 — 상단 색 띠가 재단선까지 닿아야 하기 때문
+
+    배경 아트의 아래쪽이 평평한 크림색(#FBFAF6)으로 끝나서 이어 칠해도 이음새가 없다.
+    세 배경(Good/Soso/Bad) 모두 맨 아래 80px 이상이 단색인 것을 확인했다.
+
+    판형을 상시로 쓸 거면 배경 아트를 그 비율로 새로 받는 게 맞다. 그러면 s 가 정확히
+    맞아떨어져 남는 자리 자체가 없어진다.
 
     반환: {'pages': 전체 페이지 수, 'blanks': 채운 빈 페이지 수, 'skipped': 건너뛴 일기}
     """
@@ -402,8 +413,13 @@ def render_volume(diaries, out, include_secret=True, pad_to=0, page=None):
 
     size = PAGE_SIZE if not page else (page[0] * mm, page[1] * mm)
     c = canvas.Canvas(out, pagesize=size)
-    sx = size[0] / PAGE_SIZE[0]
-    sy = size[1] / PAGE_SIZE[1]
+
+    scale = size[0] / PAGE_SIZE[0]
+    if PAGE_SIZE[1] * scale > size[1]:
+        scale = size[1] / PAGE_SIZE[1]
+    off_x = (size[0] - PAGE_SIZE[0] * scale) / 2
+    off_y = size[1] - PAGE_SIZE[1] * scale     # 남는 세로는 아래로
+    fitted = scale != 1 or off_x or off_y
     alt_state = {"GREEN": 1, "YELLOW": 1, "RED": 1}
     pages = 0
     skipped = []
@@ -420,11 +436,15 @@ def render_volume(diaries, out, include_secret=True, pad_to=0, page=None):
                 }
             )
             continue
-        if sx != 1 or sy != 1:
+        if fitted:
+            # 남는 자리를 배경 아래쪽 색으로 먼저 채운다 (재단 오차로 흰 띠가 생기지 않게)
+            c.setFillColorRGB(*PAGE_FILL)
+            c.rect(0, 0, size[0], size[1], stroke=0, fill=1)
             c.saveState()
-            c.scale(sx, sy)
+            c.translate(off_x, off_y)
+            c.scale(scale, scale)
         draw_diary_page(c, diary, alt_state)
-        if sx != 1 or sy != 1:
+        if fitted:
             c.restoreState()
         c.showPage()  # 다음 일기는 새 페이지에. 마지막 호출까지 해야 페이지가 확정된다.
         pages += 1
