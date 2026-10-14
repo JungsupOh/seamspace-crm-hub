@@ -171,10 +171,12 @@ class handler(BaseHTTPRequestHandler):
                 vendor, spec, result["pages"], display_name,
                 ym_from, ym_to, volume, volume_count,
             )
-            cover_name = f"{ym_from}_{ym_to}_{username}_표지.pdf"
+            # 저장 키와 표시용 파일명을 나눈다. Supabase Storage 는 키에 한글을 받지 않는다
+            # (InvalidKey). URL 경로로도 들어가므로 ASCII 로만 만든다.
+            cover_key = f"{username}/{stamp}_{ym_from}_{ym_to}_{username}_cover.pdf"
             out["cover"] = {
-                "name": cover_name,
-                "url": storage.upload_pdf(f"{username}/{stamp}_{cover_name}", cover_pdf),
+                "name": f"{ym_from}_{ym_to}_{username}_표지.pdf",   # 내려받을 때 보일 이름
+                "url": storage.upload_pdf(cover_key, cover_pdf),
                 "bytes": len(cover_pdf),
                 **cover_info,
             }

@@ -10,6 +10,7 @@ PDF 를 응답 본문에 직접 실으면 Vercel 서버리스의 4.5MB 상한에
 """
 
 import os
+import re
 
 import requests
 
@@ -36,8 +37,20 @@ def _config():
     return url.rstrip("/"), key
 
 
+# Supabase Storage 키에 쓸 수 있는 문자. 한글이 들어가면 InvalidKey 로 거부되고,
+# 키가 URL 경로에도 그대로 들어가므로 ASCII 로 제한한다.
+# (표지 파일명에 '표지' 를 붙였다가 업로드가 400 으로 막힌 적이 있다)
+_SAFE_KEY = re.compile(r"[^A-Za-z0-9._/-]")
+
+
+def safe_key(path_in_bucket):
+    """키에서 쓸 수 없는 문자를 '_' 로 바꾼다. 내려받을 때 보일 이름은 별개다."""
+    return _SAFE_KEY.sub("_", path_in_bucket)
+
+
 def upload_pdf(path_in_bucket, data):
     """PDF 바이트를 올리고 signed URL 을 돌려준다."""
+    path_in_bucket = safe_key(path_in_bucket)
     base, key = _config()
     headers = {"Authorization": f"Bearer {key}", "apikey": key}
 
