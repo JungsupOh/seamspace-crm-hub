@@ -179,6 +179,8 @@ export interface SweetbookEstimate {
 export interface PlacedOrder {
   ok: true;
   env: 'sandbox' | 'live';
+  orderRef: string;     // 우리 주문번호. 알림톡·CS 에서 쓰는 값이다
+  saved: boolean;       // 주문 내역을 DB 에 남겼는지 (실패해도 주문 자체는 성립한다)
   order: { orderUid: string; orderStatus: string; orderStatusDisplay: string; totalAmount: number };
   payment: { orderId: string; method: string | null; approvedAt: string | null;
              receiptUrl: string | null; totalAmount: number };
@@ -257,9 +259,26 @@ export function estimateOrder(bookUids: string[]) {
   return post<SweetbookEstimate>('order', { action: 'estimate', bookUids });
 }
 
+/**
+ * 주문과 함께 저장할 맥락.
+ *
+ * 스위트북 웹훅은 orderUid 만 알려 주므로, 이 값들을 남겨 두지 않으면
+ * 나중에 "이게 누구 주문인지" 를 되짚을 수 없어 알림톡을 보낼 수 없다.
+ */
+export interface OrderContext {
+  username: string;
+  name?: string;
+  vendor: Vendor;
+  includeSecret: boolean;
+  volumes: { volume: number; from: string; to: string; pages: number; price: number | null }[];
+  productAmount: number;
+  shippingFee: number;
+  totalAmount: number;
+}
+
 /** 결제 승인 → 제작 주문. 순서가 바뀌면 안 된다(order.py 주석 참고). */
 export function placeOrder(params: {
-  bookUids: string[]; shipping: ShippingInput;
+  bookUids: string[]; shipping: ShippingInput; context: OrderContext;
   // Sandbox 에서는 결제를 받지 않는다(order.py 가 서버에서도 막는다)
   paymentKey?: string; orderId?: string; amount?: number;
 }) {

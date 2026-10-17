@@ -291,7 +291,22 @@ export default function Print() {
   async function placeFinalOrder() {
     setOrdering(true);
     try {
-      const res = await placeOrder({ bookUids, shipping });
+      const res = await placeOrder({
+        bookUids, shipping,
+        // 웹훅이 orderUid 로 들어왔을 때 수신자를 찾으려면 이 맥락이 저장돼 있어야 한다
+        context: {
+          username: stats?.username ?? target.trim(),
+          name: stats?.name || undefined,
+          vendor,
+          includeSecret,
+          volumes: (quote?.volumes ?? []).map(v => ({
+            volume: v.volume, from: v.from, to: v.to, pages: v.pages, price: v.price,
+          })),
+          productAmount: quote?.productTotal ?? 0,
+          shippingFee: quote?.shippingFee ?? 0,
+          totalAmount: quote?.grandTotal ?? 0,
+        },
+      });
       setPlaced(res);
       setConfirming(false);
       setShowShipping(false);

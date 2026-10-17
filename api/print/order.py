@@ -25,12 +25,19 @@ PDF 생성 단계(generate)에서 권마다 스위트북 책을 FINALIZED 까지
 주문이 실패하면 결제건을 그대로 두고 에러를 돌려준다 — 여기서 자동 취소하지 않는다.
 자동 취소가 또 실패하면 상태를 알 수 없게 되므로, 사람이 보고 판단하는 편이 낫다.
 응답에 paymentKey 를 실어 보내 수동 처리가 가능하게 한다.
+
+주문이 들어가면 `print_orders` 에 남긴다. 스위트북 웹훅은 orderUid 만 주므로
+여기서 수령인·금액·권 구성을 저장해 두지 않으면 알림톡을 보낼 수가 없다.
+**저장에 실패해도 주문은 성공으로 응답한다** — 책은 이미 제작에 들어갔고,
+여기서 에러를 내면 화면이 '실패'로 보여 같은 주문을 또 넣게 된다.
 """
 
 import json
 import os
+import random
+import string
 import sys
-import time
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler
 
 import requests
@@ -68,6 +75,61 @@ def _toss_confirm(payment_key, order_id, amount):
     if not res.ok or not data.get("ok"):
         raise RuntimeError(data.get("error") or f"결제 승인 실패 (HTTP {res.status_code})")
     return data
+
+
+KST = timezone(timedelta(hours=9))
+
+
+def _new_order_ref():
+    """우리 주문번호. 고객에게 읽히는 값이라 타임스탬프 대신 날짜+난수로 만든다."""
+    day = datetime.now(KST).strftime("%y%m%d")
+    tail = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    return f"MD{day}-{tail}"
+
+
+def _save_order(order_ref, order, shipping, ctx, live):
+    """
+    주문 내역을 print_orders 에 남긴다. 실패해도 예외를 올리지 않는다 —
+    호출부에서 주문 성공 응답을 막으면 안 되기 때문이다.
+    """
+    base, key = _supabase()
+    volumes = ctx.get("volumes") or []
+    row = {
+        "order_ref": order_ref,
+        "vendor": ctx.get("vendor") or "sweetbook",
+        "vendor_env": "live" if live else "sandbox",
+        "vendor_order_uid": (order or {}).get("orderUid"),
+        "diary_username": ctx.get("username") or "",
+        "diary_name": ctx.get("name"),
+        "recipient_name": shipping.get("recipientName", ""),
+        "recipient_phone": shipping.get("recipientPhone", ""),
+        "postal_code": shipping.get("postalCode"),
+        "address1": shipping.get("address1"),
+        "address2": shipping.get("address2") or None,
+        "shipping_memo": shipping.get("memo") or None,
+        "volumes": volumes,
+        "include_secret": bool(ctx.get("includeSecret", True)),
+        "book_uids": ctx.get("bookUids") or [],
+        "product_amount": int(ctx.get("productAmount") or 0),
+        "shipping_fee": int(ctx.get("shippingFee") or 0),
+        "total_amount": int(ctx.get("totalAmount") or 0),
+        "vendor_cost": (order or {}).get("totalAmount"),
+        "status": (order or {}).get("orderStatus") or "ORDERED",
+        "ordered_at": datetime.now(timezone.utc).isoformat(),
+    }
+    res = requests.post(
+        f"{base}/rest/v1/print_orders",
+        headers={
+            "Authorization": f"Bearer {key}",
+            "apikey": key,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        },
+        data=json.dumps(row),
+        timeout=20,
+    )
+    if not res.ok:
+        raise RuntimeError(f"HTTP {res.status_code}: {res.text[:300]}")
 
 
 def _require_shipping(shipping):
@@ -129,7 +191,7 @@ class handler(BaseHTTPRequestHandler):
                 except Exception as e:  # noqa: BLE001
                     return send_json(self, {"error": f"결제 승인 실패: {e}"}, 402)
             else:
-                order_id = order_id or f"PRINT-{int(time.time() * 1000)}"
+                order_id = order_id or _new_order_ref()
 
             # ② 스위트북 주문 — 실패해도 결제는 그대로 둔다(수동 처리)
             try:
@@ -148,11 +210,24 @@ class handler(BaseHTTPRequestHandler):
                     e.status if e.status >= 400 else 502,
                 )
 
+            # ③ 주문 내역 저장 — 웹훅이 수령인을 되짚는 유일한 경로다.
+            #    실패해도 주문은 성립했으므로 성공으로 응답하고 플래그만 내린다.
+            ctx = dict(body.get("context") or {})
+            ctx["bookUids"] = book_uids
+            saved = True
+            try:
+                _save_order(order_id, order, shipping, ctx, live)
+            except Exception as e:  # noqa: BLE001
+                saved = False
+                print(f"[order] print_orders 저장 실패 ref={order_id}: {e}", file=sys.stderr)
+
             return send_json(
                 self,
                 {
                     "ok": True,
                     "env": "live" if live else "sandbox",
+                    "orderRef": order_id,
+                    "saved": saved,
                     "order": order,
                     "payment": {
                         "orderId": order_id,
