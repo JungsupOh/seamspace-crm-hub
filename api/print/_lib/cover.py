@@ -197,20 +197,19 @@ def render_cover(out, size, name, ym_from, ym_to, volume=None, volume_count=1):
 
 def _spine_parts(name, ym_from, ym_to, volume, volume_count):
     """
-    책등 세 칸: ['HELLO MY SPACE', '{시작월} - {종료월}', '{이름}']
+    책등 세 칸: ['HELLO MY SPACE', '{이름}', '{시작월} - {종료월}']
 
-    세 칸을 책등 전체에 벌려서 배치한다(위 / 가운데 / 아래).
-    이름이 맨 아래인 이유 — 책장에 여러 권을 꽂으면 아래쪽 끝이 눈에 먼저 들어와
-    누구 책인지 찾기 쉽다. 분권이면 이름 뒤에 권 번호를 붙인다.
+    실제 제작본이 이 순서이고, 세 칸을 책등 전체에 벌려서 배치한다.
+    분권이면 이름 뒤에 권 번호를 붙인다 — 책장에서는 책등만 보이기 때문이다.
     """
     parts = ["HELLO MY SPACE"]
-    if ym_from and ym_to:
-        parts.append(f"{ym_from} - {ym_to}" if ym_from != ym_to else ym_from)
     if name:
         label = name
         if volume and volume_count > 1:
             label += f" ({volume}/{volume_count})"
         parts.append(label)
+    if ym_from and ym_to:
+        parts.append(f"{ym_from} - {ym_to}" if ym_from != ym_to else ym_from)
     return parts
 
 
