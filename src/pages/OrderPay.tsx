@@ -7,6 +7,7 @@ import { Loader2, CheckCircle2, AlertTriangle, ArrowLeft, Mail, ShieldCheck } fr
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { resolveLicenseQty } from '@/lib/coupons';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -28,7 +29,9 @@ interface DealQuoteRow {
   org_name: string | null;
   plan: string | null;
   duration: number | string | null;
-  qty: number | string | null;
+  qty: number | string | null;          // 총인원(명) — 장수가 아니다
+  license_qty: number | null;           // 이용권 장수
+  items: { qty?: number | string }[] | null;   // 견적 항목. license_qty 가 비었을 때의 폴백
   unit_price: number | null;
   final_value: number | null;
   supply_price: number | null;
@@ -56,7 +59,7 @@ export default function OrderPay() {
     (async () => {
       try {
         const r = await fetch(
-          `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=eq.${encodeURIComponent(quoteNumber)}&select=quote_number,deal_id,contact_email,contact_phone,buyer_email,buyer_name,buyer_phone,org_name,plan,duration,qty,unit_price,final_value,supply_price,tax_amount&limit=1`,
+          `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=eq.${encodeURIComponent(quoteNumber)}&select=quote_number,deal_id,contact_email,contact_phone,buyer_email,buyer_name,buyer_phone,org_name,plan,duration,qty,license_qty,items,unit_price,final_value,supply_price,tax_amount&limit=1`,
           { headers: HEADERS },
         );
         const rows: (DealQuoteRow & { deal_id?: string })[] = r.ok ? await r.json() : [];
@@ -146,6 +149,7 @@ export default function OrderPay() {
         orgName: quote.org_name || undefined,
         plan: quote.plan || undefined,
         qty: Number(quote.qty || 1),
+        licenseQty: resolveLicenseQty(quote),
         duration: Number(quote.duration || 12),
         quoteNumber: quote.quote_number,
       }));

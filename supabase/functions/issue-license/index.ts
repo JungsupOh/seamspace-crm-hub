@@ -8,6 +8,19 @@
 // 1. quoteNumber로 결제 검증 (order_payments OR deal_licenses)
 // 2. 기존 코드 있으면 재사용 + 알림톡 재발송
 // 3. allowNewIssue=true이고 신규일 때만 create-coupon 호출
+//
+// **알림톡은 코드 장수만큼 보낸다.** 템플릿(TS_6206)이 코드 하나만 담을 수 있어
+// 2장이면 2건이다. 예전에는 coupons[0] 하나만 보내서, 코드는 2장 만들어지고
+// deal_licenses 에도 2행이 남는데 고객은 1장만 받는 사고가 있었다.
+//
+// **장수는 licenseQty 로만 센다.** qty 는 총인원(40·200)이 섞여 들어오므로
+// 폴백으로 쓰면 이용권 200장이 발급된다. 없으면 1장으로 본다.
+//
+// 세 값을 절대 섞지 않는다 — "40명 2개월 2장" 과 "160명 1개월 1장" 은 다른 주문이다.
+//   장수   licenseQty        (몇 장을 발급/발송할지)
+//   인원   플랜 정원          (학급=40, 학년=200 … resolvePlanCapacity)
+//   기간   duration          (개월)
+// qty(총인원)로 장수를 세면 160명 1장짜리가 160장이 된다.
 
 import { notifyWebLicenseTG } from "../_shared/telegram.ts";
 
@@ -19,6 +32,49 @@ const CORS = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+// 한 건으로 발급 가능한 이용권 장수 상한 (실사용 최대 37장).
+// 총인원이 장수 자리로 잘못 들어오는 사고를 여기서 끊는다.
+const MAX_LICENSE_QTY = 100;
+
+const ALIMTOK_COUPON_URL = "http://tebahsoft.iptime.org:8310/main/alimtok_coupon/";
+
+/**
+ * 이용권 코드마다 알림톡을 한 건씩 보낸다. 성공 건수를 돌려준다.
+ * 한 건이 실패해도 나머지는 계속 보낸다 — 일부라도 전달되는 편이 낫다.
+ */
+async function sendCouponAlimtalks(opts: {
+  codes: string[];
+  customerName: string;
+  customerPhone: string;
+  userLimit: string;
+  duration: number | string;
+}): Promise<number> {
+  let sent = 0;
+  for (const code of opts.codes) {
+    try {
+      const res = await fetch(ALIMTOK_COUPON_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          first_name:  opts.customerName,
+          phone:       opts.customerPhone.replace(/\D/g, ""),
+          coupon_code: code,
+          user_limit:  opts.userLimit,
+          duration:    String(opts.duration),
+          tpl_code:    "TS_6206",
+        }),
+      });
+      const text = await res.text().catch(() => "");
+      console.log(`[issue-license] 알림톡 ${res.status} (${code}):`, text.slice(0, 200));
+      if (res.ok) sent++;
+    } catch (e) {
+      console.warn(`[issue-license] 알림톡 발송 실패 (${code}):`, e);
+    }
+  }
+  console.log(`[issue-license] 알림톡 ${sent}/${opts.codes.length}건 발송`);
+  return sent;
+}
 
 // 플랜 → 인원수. 풀 라벨 ("학급 플랜" 등) 정규화 대응.
 const PLAN_CAPACITY: Record<string, number> = {
@@ -72,7 +128,11 @@ Deno.serve(async (req: Request) => {
       allowNewIssue?: boolean;  // admin/계좌이체 수동발급 전용 (사용자 폼에서는 false)
     };
 
-    const count = Math.max(1, licenseQty ?? qty);
+    // 장수는 licenseQty 만 신뢰한다 (qty 는 총인원 — 상단 주석 참고)
+    const count = Math.min(Math.max(1, Math.floor(licenseQty ?? 1)), MAX_LICENSE_QTY);
+    if (licenseQty != null && licenseQty > MAX_LICENSE_QTY) {
+      console.error(`[issue-license] licenseQty=${licenseQty} 가 상한(${MAX_LICENSE_QTY}) 초과 — ${count}장으로 제한`);
+    }
     const planResolved = resolvePlanCapacity(plan);
     const userLimit = String(planResolved.capacity);
     const description = [orgName, plan, `${duration}개월`].filter(Boolean).join(" - ");
@@ -107,19 +167,10 @@ Deno.serve(async (req: Request) => {
               if (codes.length > 0) {
                 console.log("[issue-license] 기존 deal_licenses 재사용:", codes);
 
-                // 알림톡만 재발송 (첫 코드)
-                await fetch("http://tebahsoft.iptime.org:8310/main/alimtok_coupon/", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    first_name: customerName,
-                    phone: customerPhone.replace(/\D/g, ""),
-                    coupon_code: codes[0],
-                    user_limit: userLimit,
-                    duration: String(duration),
-                    tpl_code: "TS_6206",
-                  }),
-                }).catch(e => console.warn("[issue-license] 알림톡 재발송 실패:", e));
+                // 알림톡 재발송 — 보유한 코드 전부 (장수만큼)
+                const resent = await sendCouponAlimtalks({
+                  codes, customerName, customerPhone, userLimit, duration,
+                });
 
                 // 텔레그램 알림 — 재발송
                 await notifyWebLicenseTG({
@@ -131,7 +182,9 @@ Deno.serve(async (req: Request) => {
                   channel: "alimtalk",
                 });
                 return new Response(
-                  JSON.stringify({ ok: true, coupon_codes: codes, already_issued: true }),
+                  JSON.stringify({
+                    ok: true, coupon_codes: codes, already_issued: true, alimtalk_sent: resent,
+                  }),
                   { headers: { "Content-Type": "application/json", ...CORS } }
                 );
               }
@@ -182,19 +235,10 @@ Deno.serve(async (req: Request) => {
           }
         }
 
-        // 알림톡 재발송
-        await fetch("http://tebahsoft.iptime.org:8310/main/alimtok_coupon/", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            first_name: customerName,
-            phone: customerPhone.replace(/\D/g, ""),
-            coupon_code: codes[0],
-            user_limit: userLimit,
-            duration: String(duration),
-            tpl_code: "TS_6206",
-          }),
-        }).catch(e => console.warn("[issue-license] 알림톡 재발송 실패:", e));
+        // 알림톡 재발송 — 보유한 코드 전부 (장수만큼)
+        const resent = await sendCouponAlimtalks({
+          codes, customerName, customerPhone, userLimit, duration,
+        });
 
         // 텔레그램 알림 — 재발송
         await notifyWebLicenseTG({
@@ -207,7 +251,9 @@ Deno.serve(async (req: Request) => {
         });
 
         return new Response(
-          JSON.stringify({ ok: true, coupon_codes: codes, already_issued: true }),
+          JSON.stringify({
+            ok: true, coupon_codes: codes, already_issued: true, alimtalk_sent: resent,
+          }),
           { headers: { "Content-Type": "application/json", ...CORS } }
         );
       }
@@ -248,19 +294,10 @@ Deno.serve(async (req: Request) => {
 
     console.log("[issue-license] 이용권 생성:", coupons);
 
-    // ── AlimTok 발송 (첫 번째 이용권) — iptime 직접 호출 ─────
-    await fetch("http://tebahsoft.iptime.org:8310/main/alimtok_coupon/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        first_name: customerName,
-        phone: customerPhone.replace(/\D/g, ""),
-        coupon_code: coupons[0],
-        user_limit: userLimit,
-        duration: String(duration),
-        tpl_code: "TS_6206",
-      }),
-    }).catch(e => console.warn("[issue-license] AlimTok 발송 실패 (무시):", e));
+    // ── AlimTok 발송 — 발급한 코드 전부 (장수만큼) ─────
+    const alimtalkSent = await sendCouponAlimtalks({
+      codes: coupons, customerName, customerPhone, userLimit, duration,
+    });
 
     // 신규 발급 시에도 deal_licenses에 INSERT (재발송 시 중복 차단)
     if (quoteNumber) {
@@ -353,7 +390,7 @@ Deno.serve(async (req: Request) => {
     });
 
     return new Response(
-      JSON.stringify({ ok: true, coupon_codes: coupons }),
+      JSON.stringify({ ok: true, coupon_codes: coupons, alimtalk_sent: alimtalkSent }),
       { headers: { "Content-Type": "application/json", ...CORS } }
     );
 

@@ -12,6 +12,7 @@ import {
   School, User, Phone, Mail, Building2, Sparkles, Tag,
   FileText, CreditCard, ArrowLeft, Printer, Send, Banknote, Gift,
 } from 'lucide-react';
+import { resolveLicenseQty } from '@/lib/coupons';
 
 const nanoid = (n = 21) => crypto.getRandomValues(new Uint8Array(n)).reduce((s, b) => s + (b & 63).toString(36), '');
 
@@ -303,6 +304,7 @@ interface OrderInfo {
 interface QuoteRecord {
   id: string; deal_id?: string; quote_number: string;
   plan?: string; qty?: number; license_qty?: number; duration?: number;
+  items?: { qty?: number | string | null }[] | null;
   unit_price?: number; supply_price?: number; tax_amount?: number; final_value?: number;
   quote_date?: string; notes?: string; contact_phone?: string; contact_email?: string;
 }
@@ -312,11 +314,14 @@ const DEFAULT_MONTHS = IS_EVENT ? 6 : 12;
 // ── Toss 결제창 섹션 ──────────────────────────────
 function TossPaySection({
   amount, orderName, customerName, customerPhone, customerEmail,
-  orgName, plan, qty, duration, quoteNumber, onBack,
+  orgName, plan, qty, licenseQty, duration, quoteNumber, onBack,
 }: {
   amount: number; orderName: string; customerName: string;
   customerPhone: string; customerEmail?: string;
-  orgName?: string; plan?: string; qty?: number; duration?: number;
+  orgName?: string; plan?: string;
+  qty?: number;          // 총인원(명)
+  licenseQty?: number;   // 이용권 장수 — 발급·알림톡 건수의 기준
+  duration?: number;
   quoteNumber?: string; onBack: () => void;
 }) {
   const [loading, setLoading] = useState(false);
@@ -344,6 +349,7 @@ function TossPaySection({
         orgName: orgName || null,
         plan: plan || null,
         qty: qty ?? 1,
+        licenseQty: licenseQty ?? 1,
         duration: duration ?? 12,
         quoteNumber: quoteNumber || null,
       }));
@@ -1114,7 +1120,8 @@ export default function OrderTest() {
           qty: lQuote.qty ?? 1,
           duration: lQuote.duration ?? 12,
           amount: lQuote.final_value ?? 0,
-          licenseQty: lQuote.license_qty ?? lQuote.qty ?? 1,
+          // qty(총인원)로 폴백하면 160명 1장짜리가 160장이 된다
+          licenseQty: resolveLicenseQty(lQuote),
         }),
       });
       const data: { ok?: boolean; coupon_codes?: string[]; already_issued?: boolean; error?: string } = await res.json();
@@ -2006,6 +2013,7 @@ export default function OrderTest() {
                   customerEmail={pContact.email}
                   plan={pQuote.plan}
                   qty={pQuote.qty ?? 1}
+                  licenseQty={resolveLicenseQty(pQuote)}
                   duration={pQuote.duration ?? 12}
                   quoteNumber={pQuote.quote_number}
                   onBack={() => setPSub('confirm')}

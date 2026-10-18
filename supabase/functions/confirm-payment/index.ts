@@ -1,8 +1,19 @@
 // Supabase Edge Function: confirm-payment
 // 1. Toss 결제 승인 (공통 헬퍼)
-// 2. mDiary 이용권 생성 (create-coupon 재사용)
-// 3. AlimTok 이용권 발송 (send-coupon 재사용)
+// 2. mDiary 이용권 생성 (create-coupon 재사용) — 구매 장수만큼
+// 3. AlimTok 이용권 발송 — 장수만큼 (코드 1개당 1건)
 // 4. order_payments 저장
+//
+// **장수는 licenseQty 로만 센다.** deal_quotes.qty 는 총인원(40·80·200)과
+// 장수(1·2·3)가 섞여 들어와 있어 장수로 쓸 수 없다. qty 로 루프를 돌리면
+// 200명짜리 견적 하나로 이용권 200장이 발급되고 알림톡이 200건 나간다.
+// licenseQty 가 없으면 1장으로 본다 — qty 로 폴백하지 않는다.
+//
+// 세 값을 절대 섞지 않는다 — "40명 2개월 2장" 과 "160명 1개월 1장" 은 다른 주문이다.
+//   장수   licenseQty        (몇 장을 발급/발송할지)
+//   인원   플랜 정원          (학급=40, 학년=200 … resolvePlanCapacity)
+//   기간   duration          (개월)
+// qty(총인원)로 장수를 세면 160명 1장짜리가 160장이 된다.
 
 import { CORS, confirmTossPayment, buildReceiptFields, jsonResponse } from "../_shared/toss.ts";
 import { notifyWebPaymentTG } from "../_shared/telegram.ts";
@@ -10,6 +21,10 @@ import { notifyWebPaymentTG } from "../_shared/telegram.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TOSS_SECRET  = Deno.env.get("TOSS_SECRET_KEY")!;
+
+// 한 결제로 발급 가능한 이용권 장수 상한. 실사용 최대가 37장이라 100이면 넉넉하고,
+// 총인원이 장수 자리로 잘못 들어오는 사고(200·500·1000)는 여기서 걸린다.
+const MAX_LICENSE_QTY = 100;
 
 // 플랜 → 인원수. 키 변형 대응 (예: "학급 플랜", "학급플랜", "학급", "학년 플랜" 등)
 const PLAN_CAPACITY: Record<string, number> = {
@@ -50,6 +65,7 @@ Deno.serve(async (req: Request) => {
       orgName,
       plan,
       qty = 1,
+      licenseQty,
       duration = 12,
       quoteNumber,
     } = await req.json() as {
@@ -61,7 +77,8 @@ Deno.serve(async (req: Request) => {
       customerEmail?: string;
       orgName?: string;
       plan?: string;
-      qty?: number;
+      qty?: number;          // 총인원(명) — 장수로 쓰면 안 된다
+      licenseQty?: number;    // 이용권 장수
       duration?: number;
       quoteNumber?: string;
     };
@@ -81,50 +98,72 @@ Deno.serve(async (req: Request) => {
     console.log(`[confirm-payment] 플랜 매칭: '${plan}' → '${planResolved.key}' (${userLimit}명)`);
     const description = [orgName, plan, `${duration}개월`].filter(Boolean).join(" - ");
 
-    const couponRes = await fetch(`${SUPABASE_URL}/functions/v1/create-coupon`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-      },
-      body: JSON.stringify({
-        description,
-        duration: String(duration),
-        user_limit: userLimit,
-      }),
-    });
+    // 장수. licenseQty 만 신뢰한다 (qty 는 총인원이 섞여 있어 위험 — 상단 주석 참고)
+    const codeCount = Math.min(Math.max(1, Math.floor(licenseQty ?? 1)), MAX_LICENSE_QTY);
+    if (licenseQty != null && licenseQty > MAX_LICENSE_QTY) {
+      console.error(`[confirm-payment] licenseQty=${licenseQty} 가 상한(${MAX_LICENSE_QTY}) 초과 — ${codeCount}장으로 제한`);
+    }
+    console.log(`[confirm-payment] 이용권 ${codeCount}장 발급 예정 (licenseQty=${licenseQty}, qty=${qty})`);
 
-    const couponData = await couponRes.json() as { coupon_code?: string; error?: string };
-    if (!couponRes.ok || couponData.error) {
-      console.error("[confirm-payment] 쿠폰 생성 실패:", couponData.error);
-      // 결제는 됐으므로 에러 반환하되 paymentKey 포함
-      return jsonResponse({ error: "이용권 생성 실패. 고객센터에 문의해 주세요.", paymentKey }, 500);
+    const coupons: string[] = [];
+    for (let i = 0; i < codeCount; i++) {
+      const couponRes = await fetch(`${SUPABASE_URL}/functions/v1/create-coupon`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+        },
+        body: JSON.stringify({
+          description,
+          duration: String(duration),
+          user_limit: userLimit,
+        }),
+      });
+
+      const couponData = await couponRes.json() as { coupon_code?: string; error?: string };
+      if (!couponRes.ok || couponData.error || !couponData.coupon_code) {
+        console.error(`[confirm-payment] 쿠폰 생성 실패 (${i + 1}/${codeCount}):`, couponData.error);
+        // 일부라도 만들어졌으면 그건 살려서 발송한다 — 결제는 이미 끝났으므로
+        // 전부 버리면 고객이 아무것도 못 받는다. 모자란 장수는 로그/응답으로 드러낸다.
+        if (coupons.length === 0) {
+          return jsonResponse({ error: "이용권 생성 실패. 고객센터에 문의해 주세요.", paymentKey }, 500);
+        }
+        break;
+      }
+      coupons.push(couponData.coupon_code);
     }
 
-    const couponCode = couponData.coupon_code!;
-    console.log("[confirm-payment] 쿠폰 생성:", couponCode);
+    const couponCode = coupons[0];   // 단건 호환용 (응답·텔레그램 등)
+    const couponsShort = coupons.length < codeCount;
+    console.log(`[confirm-payment] 쿠폰 생성 ${coupons.length}/${codeCount}:`, coupons);
 
     // ── Step 3: AlimTok 발송 — iptime 직접 호출 (Edge → Edge inner call 이슈 회피) ─
-    try {
-      const sendBody = {
-        first_name: customerName,
-        phone: customerPhone.replace(/\D/g, ""),
-        coupon_code: couponCode,
-        user_limit: userLimit,
-        duration: String(duration),
-        tpl_code: "TS_6206",  // 구매이용권 (이전 send_type='buyer'에 매핑)
-      };
-      console.log("[confirm-payment] 알림톡 요청:", JSON.stringify(sendBody));
-      const sendRes = await fetch("http://tebahsoft.iptime.org:8310/main/alimtok_coupon/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sendBody),
-      });
-      const sendText = await sendRes.text();
-      console.log(`[confirm-payment] 알림톡 응답 ${sendRes.status}:`, sendText);
-    } catch (e) {
-      console.error("[confirm-payment] 알림톡 예외:", e);
+    // 코드 1장당 1건. 템플릿(TS_6206)이 코드 하나만 담을 수 있어 묶어 보낼 수 없다.
+    let alimtokSent = 0;
+    for (const code of coupons) {
+      try {
+        const sendBody = {
+          first_name: customerName,
+          phone: customerPhone.replace(/\D/g, ""),
+          coupon_code: code,
+          user_limit: userLimit,
+          duration: String(duration),
+          tpl_code: "TS_6206",  // 구매이용권 (이전 send_type='buyer'에 매핑)
+        };
+        console.log("[confirm-payment] 알림톡 요청:", JSON.stringify(sendBody));
+        const sendRes = await fetch("http://tebahsoft.iptime.org:8310/main/alimtok_coupon/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sendBody),
+        });
+        const sendText = await sendRes.text();
+        console.log(`[confirm-payment] 알림톡 응답 ${sendRes.status}:`, sendText);
+        if (sendRes.ok) alimtokSent++;
+      } catch (e) {
+        console.error(`[confirm-payment] 알림톡 예외 (${code}):`, e);
+      }
     }
+    console.log(`[confirm-payment] 알림톡 ${alimtokSent}/${coupons.length}건 발송`);
 
     // ── Step 4: order_payments 먼저 저장 ─────────
     // (deals 매칭 실패해도 issue-license 재발송이 fallback할 수 있도록 우선 저장)
@@ -150,7 +189,7 @@ Deno.serve(async (req: Request) => {
           qty,
           duration,
           quote_number:   quoteNumber ?? null,
-          coupon_code:    couponCode,
+          coupon_code:    coupons.join(", "),
           toss_method:    tossData.method ?? null,
           approved_at:    tossData.approvedAt ?? null,
         }),
@@ -224,13 +263,20 @@ Deno.serve(async (req: Request) => {
           console.error(`[confirm-payment] deals PATCH 실패 ${patchRes.status}:`, txt);
         }
 
-        // 2) deal_licenses INSERT — /이용권관리에 노출 (중복 코드 skip)
-        const checkRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/deal_licenses?coupon_code=eq.${encodeURIComponent(couponCode)}&select=id&limit=1`,
-          { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
-        );
-        const dupRows = checkRes.ok ? (await checkRes.json() as { id: string }[]) : [];
-        if (dupRows.length === 0) {
+        // 2) deal_licenses INSERT — 코드마다 1행. /이용권관리에 노출 (중복 코드 skip)
+        let savedRows = 0;
+        for (const code of coupons) {
+          const checkRes = await fetch(
+            `${SUPABASE_URL}/rest/v1/deal_licenses?coupon_code=eq.${encodeURIComponent(code)}&select=id&limit=1`,
+            { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+          );
+          const dupRows = checkRes.ok ? (await checkRes.json() as { id: string }[]) : [];
+          if (dupRows.length > 0) {
+            // 이미 동일 coupon_code의 row 존재 → 저장된 것으로 간주
+            savedRows++;
+            console.log(`[confirm-payment] deal_licenses 이미 존재(중복 skip): ${code}`);
+            continue;
+          }
           const insRes = await fetch(`${SUPABASE_URL}/rest/v1/deal_licenses`, {
             method: "POST",
             headers: {
@@ -241,7 +287,7 @@ Deno.serve(async (req: Request) => {
             },
             body: JSON.stringify({
               deal_id:        dealId,
-              coupon_code:    couponCode,
+              coupon_code:    code,
               contact_name:   customerName,
               contact_phone:  customerPhone,
               // org_name NOT NULL — sessionStorage 누락 시 deals.org_name 으로 fallback
@@ -252,17 +298,15 @@ Deno.serve(async (req: Request) => {
             }),
           });
           if (insRes.ok) {
-            licenseSaved = true;
-            console.log("[confirm-payment] deal_licenses 저장 성공");
+            savedRows++;
           } else {
             const txt = await insRes.text().catch(() => "(read failed)");
-            console.error(`[confirm-payment] deal_licenses 저장 실패 ${insRes.status}:`, txt);
+            console.error(`[confirm-payment] deal_licenses 저장 실패 ${insRes.status} (${code}):`, txt);
           }
-        } else {
-          // 이미 동일 coupon_code의 row 존재 → 저장된 것으로 간주
-          licenseSaved = true;
-          console.log("[confirm-payment] deal_licenses 이미 존재(중복 skip)");
         }
+        // 전부 저장돼야 성공으로 본다 — 한 장이라도 빠지면 /이용권관리에서 누락된다
+        licenseSaved = savedRows === coupons.length;
+        console.log(`[confirm-payment] deal_licenses ${savedRows}/${coupons.length}행 저장`);
       } catch (e) { console.error("[confirm-payment] deal/deal_licenses 업데이트 예외:", e); }
     }
 
@@ -309,12 +353,16 @@ Deno.serve(async (req: Request) => {
       buyerName: customerName,
       amount,
       method: tossData.method ?? "card",
-      couponCode,
+      couponCode: coupons.join(", "),
     });
 
     return jsonResponse({
       ok: true,
-      coupon_code:        couponCode,
+      coupon_code:        couponCode,     // 단건 호환 (구버전 화면)
+      coupon_codes:       coupons,
+      license_qty:        codeCount,
+      coupons_short:      couponsShort,   // 요청 장수보다 적게 발급된 경우 true
+      alimtalk_sent:      alimtokSent,
       customerEmail:      customerEmail ?? null,
       customerName:       customerName ?? null,
       // 진단용 — 프론트가 실패 시 경고 표시 가능

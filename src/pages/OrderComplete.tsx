@@ -15,6 +15,7 @@ export default function OrderComplete() {
 
   const [confirmed, setConfirmed] = useState(false);
   const [couponCode, setCouponCode] = useState<string | null>(null);
+  const [couponCodes, setCouponCodes] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [linkWarning, setLinkWarning] = useState<string | null>(null);
 
@@ -40,6 +41,8 @@ export default function OrderComplete() {
         orgName:       session.orgName       ?? undefined,
         plan:          session.plan          ?? undefined,
         qty:           session.qty           ?? 1,
+        // 발급 장수. 이게 빠지면 2장을 사도 1장만 발급된다
+        licenseQty:    session.licenseQty    ?? 1,
         duration:      session.duration      ?? 12,
         quoteNumber:   session.quoteNumber   ?? undefined,
       }),
@@ -48,7 +51,12 @@ export default function OrderComplete() {
       .then(({ ok, data }) => {
         if (ok && data.coupon_code) {
           setCouponCode(data.coupon_code);
+          setCouponCodes(data.coupon_codes ?? [data.coupon_code]);
           setConfirmed(true);
+          // 요청 장수보다 적게 발급됐으면 고객이 알아야 한다 (일부만 전달됨)
+          if (data.coupons_short) {
+            setLinkWarning(`이용권 ${data.license_qty}장 중 ${data.coupon_codes?.length ?? 1}장만 발급되었습니다 — 고객센터(042-864-5566)로 문의해 주세요.`);
+          }
           // CRM 연동 진단 — 어느 하나라도 실패하면 경고 표시 (재발송 시 코드 중복 발급 위험)
           if (data.license_saved === false || data.deal_quote_updated === false) {
             const reasons: string[] = [];
@@ -155,10 +163,15 @@ export default function OrderComplete() {
                     <span className="font-semibold">{Number(amount).toLocaleString('ko-KR')}원</span>
                   </div>
                 )}
-                {couponCode && (
-                  <div className="flex justify-between border-t pt-2 mt-1">
-                    <span className="text-muted-foreground">이용권 코드</span>
-                    <span className="font-mono font-bold text-teal-700 tracking-wider">{couponCode}</span>
+                {couponCodes.length > 0 && (
+                  <div className="flex justify-between border-t pt-2 mt-1 gap-3">
+                    <span className="text-muted-foreground shrink-0">
+                      이용권 코드{couponCodes.length > 1 && ` (${couponCodes.length}장)`}
+                    </span>
+                    {/* 여러 장이면 전부 보여준다 — 알림톡도 장수만큼 따로 간다 */}
+                    <span className="font-mono font-bold text-teal-700 tracking-wider text-right">
+                      {couponCodes.map(c => <span key={c} className="block">{c}</span>)}
+                    </span>
                   </div>
                 )}
               </div>
