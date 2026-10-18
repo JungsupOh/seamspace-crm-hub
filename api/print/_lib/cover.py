@@ -37,6 +37,14 @@ BG = colors.Color(69 / 255, 62 / 255, 118 / 255)   # #453E76
 
 FRONT_IMG = "cover/front.png"
 BACK_IMG = "cover/back.png"
+# 책등용 한 줄 로고. 앞표지 2줄 로고에서 글자를 떼어 이어 붙인 것이라
+# 폰트와 색(HELLO 노랑 / MY SPACE 흰색)이 원본 그대로다.
+# 보유 폰트에는 이 둥근 서체가 없어서 글자로는 재현할 수 없다.
+SPINE_LOGO_IMG = "cover/spine_logo.png"
+SPINE_LOGO_ASPECT = 865 / 101        # 이미지 가로/세로
+# 이미지 높이 대비 대문자 높이. 위아래 여백과 둥근 글자의 오버슈트가 포함돼 있어
+# 이미지 높이를 그대로 글자 높이로 쓰면 로고만 작아 보인다.
+SPINE_LOGO_CAP_RATIO = 83 / 101
 
 # 이름 — 가로 중앙, 글자 아랫선(baseline)이 상단에서 132.3mm
 NAME_CX = 74.0
@@ -65,6 +73,10 @@ SPINE_MIN_MM = 3.4
 SPINE_SIDE_MARGIN = 0.8
 SPINE_MAX_PT = 11.0
 SPINE_MIN_PT = 5.5
+# 책등 글자를 재단선에서 띄우는 거리. 양끝 항목이 모서리에 붙지 않게 한다.
+SPINE_END_MARGIN = 10.0
+# 항목 사이 최소 간격. 이보다 좁아지면 글자를 줄이고, 그래도 안 되면 한 줄로 합친다.
+SPINE_GAP_MIN = 4.0
 
 
 def _pt_for_height(height_mm):
@@ -163,19 +175,14 @@ def render_cover(out, size, name, ym_from, ym_to, volume=None, volume_count=1):
         c.drawRightString(fx(DATE_RIGHT_X), fy(DATE_BASELINE), ym_to)
 
     # ── 책등 ──
-    spine_text = _spine_text(name, ym_from, ym_to, volume, volume_count)
-    if spine_text and spine_w >= SPINE_MIN_MM:
+    spine_parts = _spine_parts(name, ym_from, ym_to, volume, volume_count)
+    spine_text = _spine_text(spine_parts)
+    if spine_parts and spine_w >= SPINE_MIN_MM:
         usable = spine_w - SPINE_SIDE_MARGIN * 2
         sp_pt = min(SPINE_MAX_PT, usable / HANGUL_RATIO * mm)
         if sp_pt >= SPINE_MIN_PT:
-            sp_pt = _fit(spine_text, sp_pt, total_h - 24, min_pt=SPINE_MIN_PT)
-            c.saveState()
-            c.translate((spine_x + spine_w / 2) * mm, (total_h / 2) * mm)
-            c.rotate(90)
-            c.setFont(FONT, sp_pt)
-            c.setFillColor(colors.white)
-            c.drawCentredString(0, -sp_pt * 0.36, spine_text)
-            c.restoreState()
+            _draw_spine(c, spine_parts, sp_pt,
+                        cx_mm=spine_x + spine_w / 2, cy_mm=total_h / 2)
 
     c.showPage()
     c.save()
@@ -188,22 +195,102 @@ def render_cover(out, size, name, ym_from, ym_to, volume=None, volume_count=1):
     }
 
 
-def _spine_text(name, ym_from, ym_to, volume, volume_count):
+def _spine_parts(name, ym_from, ym_to, volume, volume_count):
     """
-    'HELLO MY SPACE   {이름}   {시작월} - {종료월}'
+    책등 세 칸: ['HELLO MY SPACE', '{이름}', '{시작월} - {종료월}']
 
-    실제 제작본이 이 순서다. 구분자는 넣지 않고 공백으로 띄운다(요청).
-    분권이면 뒤에 권 번호를 붙인다 — 책장에서는 책등만 보이기 때문이다.
+    실제 제작본이 이 순서이고, 세 칸을 책등 전체에 벌려서 배치한다.
+    분권이면 이름 뒤에 권 번호를 붙인다 — 책장에서는 책등만 보이기 때문이다.
     """
     parts = ["HELLO MY SPACE"]
     if name:
-        parts.append(name)
+        label = name
+        if volume and volume_count > 1:
+            label += f" ({volume}/{volume_count})"
+        parts.append(label)
     if ym_from and ym_to:
         parts.append(f"{ym_from} - {ym_to}" if ym_from != ym_to else ym_from)
-    text = "     ".join(parts)          # 넉넉한 공백으로 간격을 준다
-    if volume and volume_count > 1:
-        text += f"     ({volume}/{volume_count})"
-    return text
+    return parts
+
+
+def _spine_text(parts):
+    """기록·응답용 한 줄 표기."""
+    return "     ".join(parts)
+
+
+def _draw_spine(c, parts, size_pt, cx_mm, cy_mm):
+    """
+    책등 글자를 그린다. parts[0] 은 로고 이미지로, 나머지는 글자로.
+
+    **읽는 방향은 위에서 아래다.** 책장에 꽂았을 때 국내 책 표준이고,
+    기존 제작본도 그렇다. reportlab 의 rotate(90) 은 아래→위가 되므로
+    rotate(-90) 이어야 한다 — 예전에 90 으로 둬서 180° 뒤집힌 책이 나왔다.
+
+    항목을 책등 길이에 벌려 놓는다. 3칸이면 위·가운데·아래, 2칸이면 위·아래.
+    겹칠 것 같으면 글자를 줄이고, 그래도 안 되면 전부 가운데로 모은다.
+    """
+    half = TRIM_H / 2 - SPINE_END_MARGIN        # 글자가 놓일 수 있는 범위(±half)
+
+    def logo_size(pt):
+        """로고의 대문자 높이를 옆 글자 높이와 맞춘다. (높이mm, 폭mm)"""
+        h = (pt * HANGUL_RATIO / mm) / SPINE_LOGO_CAP_RATIO
+        return h, h * SPINE_LOGO_ASPECT
+
+    def widths(pt):
+        return [logo_size(pt)[1]] + [stringWidth(x, FONT, pt) / mm for x in parts[1:]]
+
+    def fits(pt):
+        """바깥쪽 정렬된 항목들이 최소 간격을 지키는지."""
+        w = widths(pt)
+        if len(parts) >= 3:
+            return (-w[1] / 2 - (-half + w[0])) >= SPINE_GAP_MIN \
+               and ((half - w[2]) - w[1] / 2) >= SPINE_GAP_MIN
+        if len(parts) == 2:
+            return ((half - w[1]) - (-half + w[0])) >= SPINE_GAP_MIN
+        return w[0] <= half * 2
+
+    pt = size_pt
+    while pt > SPINE_MIN_PT and not fits(pt):
+        pt -= 0.5
+    spread = fits(pt)       # 벌려 놓을 수 있는가. 아니면 가운데로 모은다.
+
+    c.saveState()
+    c.translate(cx_mm * mm, cy_mm * mm)
+    c.rotate(-90)                 # 위 → 아래
+    c.setFillColor(colors.white)
+
+    # 글자 몸통은 baseline 을 -0.36*pt 내리면 로컬 y=0 에 중심이 온다.
+    # 로고도 같은 선에 맞춰야 위아래로 어긋나지 않는다.
+    baseline = -pt * 0.36
+    logo_h, logo_w = logo_size(pt)
+    c.setFont(FONT, pt)
+
+    def put_logo(x_left_mm):
+        c.drawImage(asset(SPINE_LOGO_IMG), x_left_mm * mm, -logo_h / 2 * mm,
+                    width=logo_w * mm, height=logo_h * mm, mask="auto")
+
+    if not spread:
+        # 다 안 들어간다 — 로고와 나머지를 한 덩어리로 가운데 모은다.
+        rest = "  ".join(parts[1:])
+        rest_w = stringWidth(rest, FONT, pt) / mm if rest else 0
+        gap = SPINE_GAP_MIN / 2 if rest else 0
+        total = logo_w + gap + rest_w
+        x = -total / 2
+        put_logo(x)
+        if rest:
+            c.drawString((x + logo_w + gap) * mm, baseline, rest)
+    elif len(parts) >= 3:
+        # 회전 후 로컬 -x 가 책등 '위쪽' 끝이다.
+        put_logo(-half)
+        c.drawCentredString(0, baseline, parts[1])
+        c.drawRightString(half * mm, baseline, parts[2])
+    elif len(parts) == 2:
+        put_logo(-half)
+        c.drawRightString(half * mm, baseline, parts[1])
+    else:
+        put_logo(-logo_w / 2)
+    c.restoreState()
+
 
 def render_single_pages(out, name, ym_from, ym_to, trim=None):
     """
