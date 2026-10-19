@@ -32,118 +32,14 @@ PDF 생성 단계(generate)에서 권마다 스위트북 책을 FINALIZED 까지
 여기서 에러를 내면 화면이 '실패'로 보여 같은 주문을 또 넣게 된다.
 """
 
-import json
 import os
-import random
-import string
 import sys
-from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler
-
-import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from _lib import sweetbook
+from _lib import ordering, sweetbook
 from _lib.http import read_json, send_json
-
-
-def _supabase():
-    url = os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL")
-    key = (
-        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        or os.environ.get("VITE_SUPABASE_SERVICE_ROLE_KEY")
-    )
-    if not url or not key:
-        raise RuntimeError("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 환경변수가 필요합니다.")
-    return url.rstrip("/"), key
-
-
-def _toss_confirm(payment_key, order_id, amount):
-    """confirm-toss Edge Function 으로 승인한다. 서비스롤 키로 호출한다."""
-    base, key = _supabase()
-    res = requests.post(
-        f"{base}/functions/v1/confirm-toss",
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        data=json.dumps({"paymentKey": payment_key, "orderId": order_id, "amount": amount}),
-        timeout=40,
-    )
-    try:
-        data = res.json()
-    except ValueError:
-        raise RuntimeError(f"결제 승인 응답을 읽지 못했습니다 (HTTP {res.status_code})")
-    if not res.ok or not data.get("ok"):
-        raise RuntimeError(data.get("error") or f"결제 승인 실패 (HTTP {res.status_code})")
-    return data
-
-
-KST = timezone(timedelta(hours=9))
-
-
-def _new_order_ref():
-    """우리 주문번호. 고객에게 읽히는 값이라 타임스탬프 대신 날짜+난수로 만든다."""
-    day = datetime.now(KST).strftime("%y%m%d")
-    tail = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    return f"MD{day}-{tail}"
-
-
-def _save_order(order_ref, order, shipping, ctx, live):
-    """
-    주문 내역을 print_orders 에 남긴다. 실패해도 예외를 올리지 않는다 —
-    호출부에서 주문 성공 응답을 막으면 안 되기 때문이다.
-    """
-    base, key = _supabase()
-    volumes = ctx.get("volumes") or []
-    row = {
-        "order_ref": order_ref,
-        "vendor": ctx.get("vendor") or "sweetbook",
-        "vendor_env": "live" if live else "sandbox",
-        "vendor_order_uid": (order or {}).get("orderUid"),
-        "diary_username": ctx.get("username") or "",
-        "diary_name": ctx.get("name"),
-        "recipient_name": shipping.get("recipientName", ""),
-        "recipient_phone": shipping.get("recipientPhone", ""),
-        "postal_code": shipping.get("postalCode"),
-        "address1": shipping.get("address1"),
-        "address2": shipping.get("address2") or None,
-        "shipping_memo": shipping.get("memo") or None,
-        "volumes": volumes,
-        "include_secret": bool(ctx.get("includeSecret", True)),
-        "book_uids": ctx.get("bookUids") or [],
-        "product_amount": int(ctx.get("productAmount") or 0),
-        "shipping_fee": int(ctx.get("shippingFee") or 0),
-        "total_amount": int(ctx.get("totalAmount") or 0),
-        "vendor_cost": (order or {}).get("totalAmount"),
-        "status": (order or {}).get("orderStatus") or "ORDERED",
-        "ordered_at": datetime.now(timezone.utc).isoformat(),
-    }
-    res = requests.post(
-        f"{base}/rest/v1/print_orders",
-        headers={
-            "Authorization": f"Bearer {key}",
-            "apikey": key,
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal",
-        },
-        data=json.dumps(row),
-        timeout=20,
-    )
-    if not res.ok:
-        raise RuntimeError(f"HTTP {res.status_code}: {res.text[:300]}")
-
-
-def _require_shipping(shipping):
-    missing = [
-        label
-        for key, label in (
-            ("recipientName", "받는 분"),
-            ("recipientPhone", "연락처"),
-            ("postalCode", "우편번호"),
-            ("address1", "주소"),
-        )
-        if not (shipping.get(key) or "").strip()
-    ]
-    return missing
 
 
 class handler(BaseHTTPRequestHandler):
@@ -164,7 +60,7 @@ class handler(BaseHTTPRequestHandler):
                 return send_json(self, {"error": f"알 수 없는 action: {action}"}, 400)
 
             shipping = body.get("shipping") or {}
-            missing = _require_shipping(shipping)
+            missing = ordering.require_shipping(shipping)
             if missing:
                 return send_json(self, {"error": f"{', '.join(missing)}을(를) 입력해 주세요."}, 400)
 
@@ -187,11 +83,11 @@ class handler(BaseHTTPRequestHandler):
                 if not (order_id and amount):
                     return send_json(self, {"error": "결제 정보가 부족합니다."}, 400)
                 try:
-                    payment = _toss_confirm(payment_key, order_id, int(amount))
+                    payment = ordering.toss_confirm(payment_key, order_id, int(amount))
                 except Exception as e:  # noqa: BLE001
                     return send_json(self, {"error": f"결제 승인 실패: {e}"}, 402)
             else:
-                order_id = order_id or _new_order_ref()
+                order_id = order_id or ordering.new_order_ref()
 
             # ② 스위트북 주문 — 실패해도 결제는 그대로 둔다(수동 처리)
             try:
@@ -216,7 +112,7 @@ class handler(BaseHTTPRequestHandler):
             ctx["bookUids"] = book_uids
             saved = True
             try:
-                _save_order(order_id, order, shipping, ctx, live)
+                ordering.save_order(order_id, order, shipping, ctx, live)
             except Exception as e:  # noqa: BLE001
                 saved = False
                 print(f"[order] print_orders 저장 실패 ref={order_id}: {e}", file=sys.stderr)

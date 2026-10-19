@@ -39,6 +39,10 @@ import ShopOrderLookup from "./pages/ShopOrderLookup";
 import ShopOrders from "./pages/ShopOrders";
 import ShopLuckySeven from "./pages/ShopLuckySeven";
 import Print from "./pages/Print";
+import PrintStudent from "./pages/PrintStudent";
+import PrintStudentComplete from "./pages/PrintStudentComplete";
+import PrintStudentFail from "./pages/PrintStudentFail";
+import PrintTeacher from "./pages/PrintTeacher";
 import LuckySevenForm from "./pages/LuckySevenForm";
 import LuckySevenPay from "./pages/LuckySevenPay";
 import LuckySevenPayComplete from "./pages/LuckySevenPayComplete";
@@ -178,6 +182,13 @@ function AppRoutes() {
 
       {/* 일기 제본 PDF 생성 (관리자 전용 — 페이지 안에서 일기 서버 관리자 로그인으로 막는다) */}
       <Route path="/print" element={<Print />} />
+
+      {/* 나의 이야기 출력 — 고객용. 학생용/교사용 앱에서 각각 링크로 들어온다.
+          학생은 본인 계정으로 로그인해 자기 일기만 출력할 수 있다(서버가 아이디를 세션에 묶는다). */}
+      <Route path="/shop/print/student" element={<PrintStudent />} />
+      <Route path="/shop/print/student/complete" element={<PrintStudentComplete />} />
+      <Route path="/shop/print/student/fail" element={<PrintStudentFail />} />
+      <Route path="/shop/print/teacher" element={<PrintTeacher />} />
       {/* 레거시 호환 — 과거 /order-test로 이메일 발송된 건 그대로 동작 */}
       <Route path="/order-test" element={<OrderTest />} />
       <Route path="/order-test/complete" element={<OrderComplete />} />

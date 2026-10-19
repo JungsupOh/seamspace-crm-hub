@@ -143,10 +143,14 @@ for p in range(50, 201, 2):
     check(m2 > 0, f"{p}p 2권째가 역마진 ({m2:,})")
 
 # ── 4. 최소 편수 미만 ──────────────────────────────
+# 업체마다 최소가 다르다 (뚝딱샵 36편 / 스위트북 50편 — 판형 최소 페이지와 같게).
 for vendor in VENDORS:
-    plan = pricing.plan_volumes(months(20, 15), vendor=vendor)
-    check(not plan["printable"], f"[{vendor}] 35편인데 인쇄 가능으로 나옴")
-    check("36편" in (plan.get("reason") or ""), f"[{vendor}] 최소 편수 안내가 없음")
+    least = pricing.VENDORS[vendor]["min_diaries"]
+    short = least - 1
+    plan = pricing.plan_volumes(months(short // 2, short - short // 2), vendor=vendor)
+    check(not plan["printable"], f"[{vendor}] {short}편인데 인쇄 가능으로 나옴")
+    check(f"{least}편" in (plan.get("reason") or ""),
+          f"[{vendor}] 최소 편수 안내가 없음: {plan.get('reason')}")
 
 # ── 5. 뚝딱샵 — 패딩 없음, 300p 까지 단권 ──────────
 plan = pricing.plan_volumes(months(20, 20), vendor="ddukddak")  # 40편
@@ -164,12 +168,26 @@ plan = pricing.plan_volumes(months(*([30] * 10), 1), vendor="ddukddak")  # 301�
 invariants(plan, "뚝딱샵 301편", "ddukddak")
 check(len(plan["volumes"]) == 2, f"뚝딱샵 301편이 {len(plan['volumes'])}권")
 
-# ── 6. 스위트북 — 50p 패딩 / 짝수 / 200p 상한 ──────
+# ── 6. 스위트북 — 최소 50편 / 짝수 / 200p 상한 ──────
+# 판형 최소가 50p 다. 그보다 적게 받으면 절반이 백지인 책이 나오므로 아예 막는다.
 plan = pricing.plan_volumes(months(20, 20), vendor="sweetbook")  # 40편
-invariants(plan, "스위트북 40편", "sweetbook")
-check(plan["volumes"][0]["pages"] == 50, "스위트북 40편 → 50p 패딩 안 됨")
-check(plan["volumes"][0]["blanks"] == 10, "스위트북 40편 빈 페이지 10장이 아님")
-check(plan["grandTotal"] == 22000 + 3000, f"스위트북 40편 총액 {plan['grandTotal']:,}")
+check(not plan["printable"], "스위트북 40편이 제작 가능으로 나옴")
+check("50" in (plan.get("reason") or ""), f"스위트북 40편 사유에 최소 편수 없음: {plan.get('reason')}")
+check(plan["volumes"] == [], "스위트북 40편인데 권이 잡힘")
+
+plan = pricing.plan_volumes(months(25, 24), vendor="sweetbook")  # 49편
+check(not plan["printable"], "스위트북 49편이 제작 가능으로 나옴")
+
+plan = pricing.plan_volumes(months(25, 25), vendor="sweetbook")  # 50편 — 경계
+invariants(plan, "스위트북 50편", "sweetbook")
+check(plan["volumes"][0]["pages"] == 50, "스위트북 50편이 50p 가 아님")
+check(plan["volumes"][0]["blanks"] == 0, "스위트북 50편인데 빈 페이지가 들어감")
+check(plan["grandTotal"] == 22000 + 3000, f"스위트북 50편 총액 {plan['grandTotal']:,}")
+
+plan = pricing.plan_volumes(months(26, 25), vendor="sweetbook")  # 51편 — 홀수
+invariants(plan, "스위트북 51편", "sweetbook")
+check(plan["volumes"][0]["pages"] == 52, "스위트북 51편 → 52p 가 아님(짝수 패딩)")
+check(plan["volumes"][0]["blanks"] == 1, "스위트북 51편 빈 페이지 1장이 아님")
 
 plan = pricing.plan_volumes(months(31, 30, 30, 30), vendor="sweetbook")  # 121편
 invariants(plan, "스위트북 121편", "sweetbook")

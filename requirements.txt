@@ -1,3 +1,5 @@
 reportlab>=4.0
 pillow>=10.0
 requests>=2.31
+# 미리보기 PDF→PNG 래스터화 (customer/preview.py). manylinux 휠이라 빌드가 필요 없다.
+pypdfium2>=4.30

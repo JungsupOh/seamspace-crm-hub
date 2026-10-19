@@ -3,10 +3,17 @@
   "buildCommand": "npm run build",
   "installCommand": "npm install",
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ],
   "functions": {
     "api/print/*.py": {
+      "maxDuration": 60,
+      "includeFiles": "api/print/_lib/**"
+    },
+    "api/print/customer/*.py": {
       "maxDuration": 60,
       "includeFiles": "api/print/_lib/**"
     }

@@ -118,6 +118,21 @@ def _inner_w(total_w, spine_w, bleed=3.0):
     return (total_w - spine_w - bleed * 2) / 2
 
 
+def front_rect(size):
+    """
+    펼침면에서 **앞표지만** 차지하는 영역 (x, y, w, h) — 단위 mm, 왼쪽 아래 기준.
+
+    미리보기에서 뒤표지·책등까지 보여주면 책이 아니라 인쇄 원고처럼 보인다.
+    고객에게는 앞표지만 잘라서 보여준다.
+    """
+    total_w = float(size["coverWidthMm"])
+    total_h = float(size["coverHeightMm"])
+    spine_w = float(size["spineWidthMm"])
+    bleed = (total_h - TRIM_H) / 2
+    inner = _inner_w(total_w, spine_w, bleed)
+    return (bleed + inner + spine_w, bleed, inner, TRIM_H)
+
+
 def render_cover(out, size, name, ym_from, ym_to, volume=None, volume_count=1):
     """
     표지 PDF 한 장을 그려 out 에 쓴다.

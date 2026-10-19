@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, ShoppingCart, Minus, Plus, AlertTriangle, X, Truck } from 'lucide-react';
+import { ArrowLeft, ShoppingCart, Minus, Plus, X, Truck, BookOpen, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { getShopProduct, addToCart, getCart, optionLabel, optionPrice, qtyUnitFromLabel,
          type ShopProductOption } from '@/lib/shop';
 import { toast } from 'sonner';
+import { requote, type VendorInfo } from '@/lib/print';
 
 export default function ShopProductDetail() {
   const { id } = useParams<{ id: string }>();
@@ -37,6 +38,19 @@ export default function ShopProductDetail() {
     };
   }, []);
 
+  // '나의 이야기 출력' 단가는 서버(pricing.py)가 정한다. 화면에 숫자를 또 적어 두면
+  // 단가를 바꿀 때 두 군데를 고쳐야 하고, 한쪽을 빠뜨리면 안내와 실제 금액이 어긋난다.
+  const { data: diaryVendor } = useQuery({
+    queryKey: ['print-vendor', 'sweetbook'],
+    queryFn: async (): Promise<VendorInfo> => {
+      // 월별 집계를 비워 보내면 제작 불가로 떨어지지만 업체 정보는 그대로 들어 있다.
+      const q = await requote([], '', '', undefined, undefined, 'sweetbook');
+      return q.vendor;
+    },
+    enabled: id === 'diary',
+    staleTime: 60 * 60 * 1000,
+  });
+
   if (isLoading) return (
     <div className="min-h-screen flex items-center justify-center bg-muted/20">
       <p className="text-muted-foreground">로딩 중...</p>
@@ -51,6 +65,22 @@ export default function ShopProductDetail() {
       </div>
     </div>
   );
+
+  // '나의 이야기 출력' 은 고객이 직접 주문하는 서비스로 바뀌었다. 장바구니에 담는 대신
+  // 전용 주문 흐름(/shop/print/*)으로 보낸다 — 페이지 수와 금액을 거기서 자동으로 계산한다.
+  // shop_products.diary 의 options(뚝딱샵 구간제)는 남겨 둔다. 과거 주문 표시가 걸려 있다.
+  const isDiary = product.id === 'diary';
+
+  // 50p 부터 50p 간격으로 보여 준다. 금액은 서버가 준 공식 그대로 계산한다.
+  const diaryRows = diaryVendor?.pricing === 'blocks'
+    ? [50, 100, 150, 200]
+        .filter(pg => pg >= diaryVendor.pageMin && pg <= diaryVendor.pageMax)
+        .map(pg => ({
+          label: `${pg}p`,
+          price: diaryVendor.basePrice!
+            + Math.ceil((pg - diaryVendor.pageMin) / diaryVendor.blockPages!) * diaryVendor.blockPrice!,
+        }))
+    : [];
 
   const discount = product.original_price ? Math.round((1 - product.price / product.original_price) * 100) : 0;
   const options = (product.options ?? null) as ShopProductOption[] | null;
@@ -153,43 +183,64 @@ export default function ShopProductDetail() {
           </div>
         )}
 
-        {/* 일기 제본: 비용 안내 — 상세 이미지에는 가격표가 없어 본문으로 제공한다
-            (이미지에 박아두면 단가가 바뀔 때마다 이미지를 다시 만들어야 한다) */}
-        {product.id === 'diary' && (
-          <div className="bg-white rounded-2xl border border-border p-5 mb-6">
-            <h2 className="text-base font-bold mb-1">비용 안내</h2>
-            <p className="text-xs text-muted-foreground mb-1">권 당 제작 비용을 안내 드립니다.</p>
-            <p className="text-xs text-muted-foreground mb-4">
-              페이지 수에 따라 제작 비용이 달라집니다.
-              보통은 <strong className="text-foreground">1 페이지에 1개의 일기</strong>가 들어갑니다. (글자 수 1,200자 기준)
-            </p>
-
-            <div className="rounded-xl border border-border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-muted/50 text-xs text-muted-foreground">
-                    <th className="text-left font-medium px-3 py-2">페이지 수</th>
-                    <th className="text-right font-medium px-3 py-2">권 당 제작 비용</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(options ?? []).map(opt => (
-                    <tr key={optionLabel(opt)} className="border-t border-border">
-                      <td className="px-3 py-2">{optionLabel(opt)}</td>
-                      <td className="px-3 py-2 text-right font-medium tabular-nums">
-                        {optionPrice(opt, product.price).toLocaleString()}원
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {/* 나의 이야기 출력: 서비스 안내 + 비용.
+            단가를 이미지에 박아두면 바뀔 때마다 이미지를 다시 만들어야 해서 본문으로 둔다. */}
+        {isDiary && (
+          <div className="bg-white rounded-2xl border border-border p-5 mb-6 space-y-5">
+            <div>
+              <h2 className="text-base font-bold mb-2">어떤 서비스인가요?</h2>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                마음일기에 써 온 글을 모아 <strong className="text-foreground">한 권의 책</strong>으로 만들어 드립니다.
+                인쇄할 기간을 고르면 페이지 수와 금액이 자동으로 계산되고,
+                표지에는 이름과 기간이 들어갑니다.
+              </p>
+              <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+                <li>· 판형 <strong className="text-foreground">A5 (148×210mm)</strong> · 소프트커버 컬러 인쇄</li>
+                <li>· 보통 <strong className="text-foreground">1페이지에 일기 1편</strong>이 들어갑니다 (1,200자 기준)</li>
+                <li>· <strong className="text-foreground">비밀글</strong>은 넣을지 뺄지 주문할 때 고를 수 있습니다</li>
+                <li>· 글이 많으면 <strong className="text-foreground">여러 권으로 나눠</strong> 만듭니다</li>
+              </ul>
             </div>
 
-            <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
-              <li>· 최소 페이지 수 <strong className="text-foreground">36p</strong> 부터 제작 가능합니다.</li>
-              <li>· 배송비 <strong className="text-foreground">3,500원</strong> 별도 (제작 상품이라 무료배송 대상이 아닙니다)</li>
-              <li>· 주문 후 제작에 들어가며, <strong className="text-foreground">배송까지 약 10일</strong> 정도 소요됩니다.</li>
-            </ul>
+            <div>
+              <h2 className="text-base font-bold mb-1">비용 안내</h2>
+              <p className="text-xs text-muted-foreground mb-3">권 당 제작 비용입니다. 페이지 수에 따라 달라집니다.</p>
+              <div className="rounded-xl border border-border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/50 text-xs text-muted-foreground">
+                      <th className="text-left font-medium px-3 py-2">페이지 수</th>
+                      <th className="text-right font-medium px-3 py-2">권 당 제작 비용</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {diaryRows.map(row => (
+                      <tr key={row.label} className="border-t border-border">
+                        <td className="px-3 py-2">{row.label}</td>
+                        <td className="px-3 py-2 text-right font-medium tabular-nums">
+                          {row.price.toLocaleString()}원
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+                {diaryVendor && (
+                  <>
+                    <li>· <strong className="text-foreground">{diaryVendor.pageMin}p</strong> 부터 제작 가능하며,
+                      한 권은 최대 <strong className="text-foreground">{diaryVendor.pageMax}p</strong> 입니다.</li>
+                    <li>· 기본 {diaryVendor.basePrice?.toLocaleString()}원
+                      + {diaryVendor.blockPages}페이지마다 {diaryVendor.blockPrice?.toLocaleString()}원 (VAT 포함)</li>
+                    <li>· 여러 권으로 나뉘면 2권째부터는 기본료가{' '}
+                      <strong className="text-foreground">{diaryVendor.extraBasePrice?.toLocaleString()}원</strong>으로 낮아집니다.</li>
+                    <li>· 배송비 <strong className="text-foreground">{diaryVendor.shippingFee.toLocaleString()}원</strong>
+                      {' '}(주문 당 1회, 무료배송 대상이 아닙니다)</li>
+                  </>
+                )}
+                <li>· 주문 후 제작에 들어가며, <strong className="text-foreground">배송까지 약 10일</strong> 정도 소요됩니다.</li>
+              </ul>
+            </div>
           </div>
         )}
 
@@ -208,7 +259,8 @@ export default function ShopProductDetail() {
               <span className="text-base font-bold text-red-500">{discount}%</span>
             )}
             <span className="text-xl font-bold">
-              {minOptionPrice.toLocaleString()}원{hasPricedOptions && <span className="text-sm font-medium">부터</span>}
+              {(isDiary ? (diaryVendor?.basePrice ?? minOptionPrice) : minOptionPrice).toLocaleString()}원
+              {(hasPricedOptions || isDiary) && <span className="text-sm font-medium">부터</span>}
             </span>
             {product.original_price && product.original_price > product.price && (
               <span className="text-sm text-muted-foreground line-through">{product.original_price.toLocaleString()}원</span>
@@ -219,7 +271,7 @@ export default function ShopProductDetail() {
           </div>
 
           {/* 옵션 — 기본 선택 없음. 고르지 않으면 담기·구매가 막힌다 */}
-          {needsOption && (
+          {needsOption && !isDiary && (
             <div ref={optionRef} className="mb-3">
               {hasPricedOptions && (
                 <p className={`text-[11px] mb-1.5 ${optionError ? 'text-red-600 font-medium' : 'text-muted-foreground'}`}>
@@ -253,7 +305,7 @@ export default function ShopProductDetail() {
           )}
 
           {/* 선택한 옵션 목록 — 옵션마다 수량을 따로 정한다 */}
-          {needsOption && picks.length > 0 && (
+          {needsOption && !isDiary && picks.length > 0 && (
             <div className="mb-3 space-y-1.5 max-h-[164px] overflow-y-auto">
               {picks.map(pk => (
                 <div key={pk.label} className="rounded-lg bg-muted/40 border border-border px-2.5 py-2">
@@ -287,8 +339,8 @@ export default function ShopProductDetail() {
             </div>
           )}
 
-          {/* 합계 */}
-          {needsOption ? (
+          {/* 합계 — 일기 출력은 주문 흐름에서 계산하므로 여기서는 보여주지 않는다 */}
+          {isDiary ? null : needsOption ? (
             picks.length > 0 && (
               <div className="flex items-center justify-between mb-3 pt-2 border-t border-border">
                 <span className="text-xs text-muted-foreground">총 <strong className="text-foreground">{pickCount}{qtyUnit || '개'}</strong></span>
@@ -322,32 +374,31 @@ export default function ShopProductDetail() {
             </p>
           )}
 
-          {/* 일기 제본: 결제 전 필수 확인 — 버튼 위에 둬야 누르기 전에 반드시 눈에 들어온다.
-              아래에 두면 화면 밖으로 밀려 그냥 지나치게 된다 */}
-          {product.id === 'diary' && (
-            <div className="mb-3 rounded-lg border-2 border-amber-400 bg-amber-50 px-3 py-2.5">
-              <p className="flex items-start gap-1.5 text-xs font-bold text-amber-900">
-                <AlertTriangle className="h-4 w-4 shrink-0 mt-px" />
-                주의사항: 반드시, 심스페이스 담당자와 출력 가능한 일기 개수와 가격에 대한 문의 후에 결제해 주세요.
-              </p>
-              <p className="mt-1.5 pl-[22px] text-[11px] text-amber-800">
-                일기 개수에 따라 페이지 수가 달라져 결제 금액이 바뀝니다.
-                문의: <a href="tel:042-864-5566" className="font-medium underline">042-864-5566</a>
-                {' · '}
-                <a href="mailto:sales@tebahsoft.com" className="font-medium underline">sales@tebahsoft.com</a>
+          {/* 버튼 — 일기 출력은 장바구니에 담지 않는다. 누가 주문하는지에 따라
+              필요한 정보가 달라서(본인 로그인 / 학생 명단) 전용 흐름으로 보낸다. */}
+          {isDiary ? (
+            <div className="space-y-2">
+              <Button className="w-full h-12" onClick={() => navigate('/shop/print/student')}>
+                <BookOpen className="h-4 w-4 mr-1.5" />내 일기 출력하기
+              </Button>
+              <Button variant="outline" className="w-full h-12"
+                onClick={() => navigate('/shop/print/teacher')}>
+                <Users className="h-4 w-4 mr-1.5" />우리 반 일기 한번에 출력하기
+              </Button>
+              <p className="text-[11px] text-muted-foreground text-center pt-0.5">
+                마음일기 계정으로 로그인하면 페이지 수와 금액을 바로 확인할 수 있습니다.
               </p>
             </div>
+          ) : (
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1 h-11" onClick={handleAddToCart}>
+                <ShoppingCart className="h-4 w-4 mr-1.5" />장바구니
+              </Button>
+              <Button className="flex-1 h-11" onClick={handleBuyNow}>
+                바로 구매
+              </Button>
+            </div>
           )}
-
-          {/* 버튼 */}
-          <div className="flex gap-2">
-            <Button variant="outline" className="flex-1 h-11" onClick={handleAddToCart}>
-              <ShoppingCart className="h-4 w-4 mr-1.5" />장바구니
-            </Button>
-            <Button className="flex-1 h-11" onClick={handleBuyNow}>
-              바로 구매
-            </Button>
-          </div>
 
           {/* 마음일기: 복합권 안내 */}
           {product.id === 'minddiary' && (
