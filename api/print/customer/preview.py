@@ -37,9 +37,17 @@ def _png(pil_image):
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+class RasterUnavailable(Exception):
+    pass
+
+
 def _render_pdf(pdf_bytes, limit=None, crop_mm=None):
     """PDF 바이트를 PNG data URL 목록으로. crop_mm=(x,y,w,h) 면 그 영역만 자른다."""
-    import pypdfium2 as pdfium
+    try:
+        import pypdfium2 as pdfium
+    except ImportError as e:
+        # 설치 실패를 '미리보기를 만들지 못했습니다' 로 뭉뚱그리면 원인을 못 찾는다.
+        raise RasterUnavailable(f"pypdfium2 를 불러오지 못했습니다: {e}")
 
     out = []
     doc = pdfium.PdfDocument(pdf_bytes)
@@ -110,6 +118,14 @@ class handler(BaseHTTPRequestHandler):
                 # 화면이 "3페이지부터 생략" 안내를 띄우는 근거
                 "truncated": total_pages > len(pages),
             })
+        except RasterUnavailable as e:
+            print(f"[customer/preview] 래스터화 불가: {e}", file=sys.stderr)
+            return send_json(
+                self,
+                {"error": "미리보기 기능을 사용할 수 없습니다. 관리자에게 문의해 주세요.",
+                 "code": "RASTER_UNAVAILABLE"},
+                503,
+            )
         except session.SessionError as e:
             return send_json(self, {"error": str(e)}, e.status)
         except bookbuild.BuildError as e:
