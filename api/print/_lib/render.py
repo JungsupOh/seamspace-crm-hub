@@ -387,19 +387,91 @@ def draw_diary_page(c, diary, alt_state):
 # 제본 특성상 첫 장은 풀칠 쪽이라 글이 안쪽으로 말려 들어간다.
 #
 # 그림은 앞면 오른쪽 아래에만 넣는다. 뒷면은 비워 둔다 — 넘기면 바로 일기가 시작된다.
-# 리플릿에 쓰는 로켓을 떼어 왔고, 시작 페이지라 "출발하는" 느낌으로 코가 오른쪽
-# 위를 향하게 둔다.
+# 시작하는 장이라 코가 오른쪽 위를 향하게 기울여 '출발하는' 방향으로 둔다.
 #
-# Soft 는 원본 색을 종이색 쪽으로 섞어 연하게 만든 것이다. 간지는 본문을 시작하기
-# 전에 숨 고르는 장이라 원색이 그대로 들어가면 표지보다 세진다. 한 가지 색으로
-# 칠해 버리면 창과 지느러미가 뭉개져 로켓 모양이 죽어서, 색은 살리고 톤만 낮췄다.
-# 원색으로 쓰려면 flyleafRocket.png 로 바꾸면 된다.
+# 리플릿의 로켓을 오려 붙이지 않고 **단순한 도형으로 다시 그린다.** 오려 온 그림은
+# 그라데이션과 결이 그대로 따라와 간지에는 과했고, 원본이 벡터라 깔끔히 떼어낼 수도
+# 없었다. 여기서는 몸통·코·날개·창·불꽃 다섯 덩어리면 충분하다.
 FLYLEAF_PAGES = 2              # 종이 1장 = 앞뒤 2면. pricing.front_pages 와 같아야 한다
-FLYLEAF_IMG = "bgImage/flyleafRocketSoft.png"
-FLYLEAF_ASPECT = 560 / 480     # 에셋의 세로/가로
-FLYLEAF_W_MM = 26.0            # 로켓 가로. A5 폭(148)의 약 1/6
-FLYLEAF_RIGHT_MM = 20.0        # 재단선에서 오른쪽 여백
-FLYLEAF_BOTTOM_MM = 24.0       # 재단선에서 아래 여백
+FLYLEAF_W_MM = 26.0            # 로켓 가로 폭(기울인 상태 기준)
+FLYLEAF_RIGHT_MM = 34.0        # 페이지 오른쪽 끝에서 로켓 중심까지
+FLYLEAF_BOTTOM_MM = 40.0       # 페이지 아래 끝에서 로켓 중심까지
+FLYLEAF_ANGLE = -38            # 음수면 시계방향. 코가 오른쪽 위를 향한다
+
+# 로켓 색 — 본문 종이 위에서 튀지 않게 낮춘 톤
+ROCKET_BODY = (0.945, 0.937, 0.961)
+ROCKET_ACCENT = (0.553, 0.522, 0.694)
+ROCKET_PORT = (0.400, 0.369, 0.549)
+ROCKET_FLAME = (0.969, 0.804, 0.639)
+
+_R_BW = 0.165        # 몸통 반폭 (높이 1 기준)
+_R_SHOULDER = 0.68   # 코가 시작되는 높이
+
+
+def draw_rocket(c, cx, cy, h, angle=FLYLEAF_ANGLE):
+    """
+    (cx, cy) 를 중심으로 높이 h 의 로켓을 그린다.
+
+    좌표는 '높이 1' 단위계로 두고 마지막에 scale 한다 — 크기를 바꿔도 비율이 안 깨진다.
+    """
+    c.saveState()
+    c.translate(cx, cy)
+    c.rotate(angle)
+    c.scale(h, h)
+    # 단위계의 세로 범위는 불꽃 -0.13 ~ 코끝 1.0 이다. 그 한가운데를 (cx, cy) 에 둔다 —
+    # 호출부가 '중심'으로 위치를 잡을 수 있어야 여백 계산이 단순해진다.
+    c.translate(0, -0.435)
+
+    def nose_edge(p, sx):
+        """어깨에서 코끝까지의 바깥선. 몸통과 코가 같은 곡선을 쓰도록 모아 둔다."""
+        p.curveTo(sx * _R_BW, 0.84, sx * 0.105, 0.95, 0.0, 1.0)
+
+    # 불꽃
+    p = c.beginPath()
+    p.moveTo(-0.085, 0.16)
+    p.curveTo(-0.075, 0.02, -0.04, -0.06, 0.0, -0.13)
+    p.curveTo(0.04, -0.06, 0.075, 0.02, 0.085, 0.16)
+    p.close()
+    c.setFillColorRGB(*ROCKET_FLAME)
+    c.drawPath(p, stroke=0, fill=1)
+
+    # 날개
+    c.setFillColorRGB(*ROCKET_ACCENT)
+    for sx in (-1, 1):
+        p = c.beginPath()
+        p.moveTo(sx * _R_BW, 0.33)
+        p.curveTo(sx * 0.26, 0.24, sx * 0.33, 0.15, sx * 0.35, 0.05)
+        p.curveTo(sx * 0.27, 0.07, sx * 0.21, 0.09, sx * _R_BW, 0.12)
+        p.close()
+        c.drawPath(p, stroke=0, fill=1)
+
+    # 몸통 (코까지 한 덩어리)
+    p = c.beginPath()
+    p.moveTo(-_R_BW, 0.14)
+    p.lineTo(-_R_BW, _R_SHOULDER)
+    nose_edge(p, -1)
+    p.curveTo(0.105, 0.95, _R_BW, 0.84, _R_BW, _R_SHOULDER)
+    p.lineTo(_R_BW, 0.14)
+    p.curveTo(0.09, 0.10, -0.09, 0.10, -_R_BW, 0.14)
+    p.close()
+    c.setFillColorRGB(*ROCKET_BODY)
+    c.drawPath(p, stroke=0, fill=1)
+
+    # 코 (몸통 위를 덮는 모자)
+    p = c.beginPath()
+    p.moveTo(-_R_BW, _R_SHOULDER)
+    nose_edge(p, -1)
+    p.curveTo(0.105, 0.95, _R_BW, 0.84, _R_BW, _R_SHOULDER)
+    p.curveTo(0.08, 0.645, -0.08, 0.645, -_R_BW, _R_SHOULDER)
+    p.close()
+    c.setFillColorRGB(*ROCKET_ACCENT)
+    c.drawPath(p, stroke=0, fill=1)
+
+    # 창
+    c.setFillColorRGB(*ROCKET_PORT)
+    c.circle(0.0, 0.47, 0.075, stroke=0, fill=1)
+
+    c.restoreState()
 
 
 def _blank_page(c, size):
@@ -411,13 +483,12 @@ def _blank_page(c, size):
 def draw_flyleaf(c, size):
     """맨 앞 간지 한 장(2면). 앞면 오른쪽 아래에 로켓, 뒷면은 비운다."""
     _blank_page(c, size)
-    w = FLYLEAF_W_MM * mm
-    h = w * FLYLEAF_ASPECT
-    c.drawImage(
-        asset(FLYLEAF_IMG),
-        size[0] - FLYLEAF_RIGHT_MM * mm - w,
+    # 기울여 놓으면 가로 폭보다 세로가 길다. 가로 기준으로 받아 높이로 환산한다.
+    draw_rocket(
+        c,
+        size[0] - FLYLEAF_RIGHT_MM * mm,
         FLYLEAF_BOTTOM_MM * mm,
-        width=w, height=h, mask="auto",
+        FLYLEAF_W_MM * mm * 1.45,
     )
     c.showPage()
     _blank_page(c, size)      # 간지 뒷면
