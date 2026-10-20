@@ -386,14 +386,20 @@ def draw_diary_page(c, diary, alt_state):
 # (FLYLEAF_PAGES). 일기가 바로 시작되면 표지를 넘기자마자 본문이라 책 같지 않고,
 # 제본 특성상 첫 장은 풀칠 쪽이라 글이 안쪽으로 말려 들어간다.
 #
-# 모티프는 앞면에만 넣는다. 뒷면은 비워 둔다 — 넘기면 바로 일기가 시작된다.
-# 모티프는 뒤표지의 행성을 떼어 종이색 쪽으로 연하게 섞은 것이다
-# (assets/bgImage/flyleafPlanet.png). 과하지 않게 — 아주 작게, 연하게.
-FLYLEAF_IMG = "bgImage/flyleafPlanet.png"
-FLYLEAF_PAGES = 2            # 종이 1장 = 앞뒤 2면. pricing.front_pages 와 같아야 한다
-FLYLEAF_W_MM = 18.0          # 모티프 가로. A5 폭(148)의 약 1/8
-FLYLEAF_ASPECT = 45 / 69     # 에셋의 세로/가로
-FLYLEAF_CY = 0.56            # 아래에서부터의 비율. 정중앙보다 살짝 위가 안정적으로 보인다
+# 그림은 앞면 오른쪽 아래에만 넣는다. 뒷면은 비워 둔다 — 넘기면 바로 일기가 시작된다.
+# 리플릿에 쓰는 로켓을 떼어 왔고, 시작 페이지라 "출발하는" 느낌으로 코가 오른쪽
+# 위를 향하게 둔다.
+#
+# Soft 는 원본 색을 종이색 쪽으로 섞어 연하게 만든 것이다. 간지는 본문을 시작하기
+# 전에 숨 고르는 장이라 원색이 그대로 들어가면 표지보다 세진다. 한 가지 색으로
+# 칠해 버리면 창과 지느러미가 뭉개져 로켓 모양이 죽어서, 색은 살리고 톤만 낮췄다.
+# 원색으로 쓰려면 flyleafRocket.png 로 바꾸면 된다.
+FLYLEAF_PAGES = 2              # 종이 1장 = 앞뒤 2면. pricing.front_pages 와 같아야 한다
+FLYLEAF_IMG = "bgImage/flyleafRocketSoft.png"
+FLYLEAF_ASPECT = 560 / 480     # 에셋의 세로/가로
+FLYLEAF_W_MM = 26.0            # 로켓 가로. A5 폭(148)의 약 1/6
+FLYLEAF_RIGHT_MM = 20.0        # 재단선에서 오른쪽 여백
+FLYLEAF_BOTTOM_MM = 24.0       # 재단선에서 아래 여백
 
 
 def _blank_page(c, size):
@@ -403,13 +409,14 @@ def _blank_page(c, size):
 
 
 def draw_flyleaf(c, size):
-    """맨 앞 간지 한 장(2면). 앞면에만 작은 모티프, 뒷면은 비운다."""
+    """맨 앞 간지 한 장(2면). 앞면 오른쪽 아래에 로켓, 뒷면은 비운다."""
     _blank_page(c, size)
     w = FLYLEAF_W_MM * mm
     h = w * FLYLEAF_ASPECT
     c.drawImage(
         asset(FLYLEAF_IMG),
-        (size[0] - w) / 2, size[1] * FLYLEAF_CY - h / 2,
+        size[0] - FLYLEAF_RIGHT_MM * mm - w,
+        FLYLEAF_BOTTOM_MM * mm,
         width=w, height=h, mask="auto",
     )
     c.showPage()
