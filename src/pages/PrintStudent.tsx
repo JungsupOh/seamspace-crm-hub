@@ -10,11 +10,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  ArrowLeft, ArrowRight, BookOpen, Loader2, Lock, Package, Truck, CreditCard, Eye,
+  ArrowLeft, ArrowRight, BookOpen, Loader2, Lock, Package, Truck, CreditCard, Eye, Search,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
 import { formatPhone } from '@/lib/utils';
 import {
   customerLogin, fetchCustomerStats, fetchPreview, prepareBooks, placeCustomerOrder,
@@ -283,24 +286,43 @@ export default function PrintStudent() {
 
         {step === 0 && (
           <Section icon={<Lock className="h-4 w-4" />} title="마음일기 계정으로 로그인">
-            <p className="text-sm text-muted-foreground mb-4">
-              내가 쓴 일기로 책을 만듭니다. 평소 쓰던 마음일기 아이디로 로그인해 주세요.
-              <span className="block mt-1">다른 사람의 일기는 볼 수 없습니다.</span>
-            </p>
-            <div className="space-y-3 max-w-sm">
+            {/* 로그인 폼이 좁아 오른쪽이 비었다. 받게 될 책을 바로 보여 주는 쪽이
+                "무엇을 만드는 건지" 설명보다 빠르다. 좁은 화면에서는 숨긴다. */}
+            <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_240px] md:items-center">
               <div>
-                <Label htmlFor="id">아이디</Label>
-                <Input id="id" value={id} onChange={e => setId(e.target.value)} autoComplete="username" />
+                <p className="text-sm text-muted-foreground mb-4">
+                  내가 쓴 일기로 책을 만듭니다. 평소 쓰던 마음일기 아이디로 로그인해 주세요.
+                  <span className="block mt-1">다른 사람의 일기는 볼 수 없습니다.</span>
+                </p>
+                <div className="space-y-3 max-w-sm">
+                  <div>
+                    <Label htmlFor="id">아이디</Label>
+                    <Input id="id" value={id} onChange={e => setId(e.target.value)} autoComplete="username" />
+                  </div>
+                  <div>
+                    <Label htmlFor="pw">비밀번호</Label>
+                    <Input id="pw" type="password" value={pw} autoComplete="current-password"
+                      onChange={e => setPw(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') void handleLogin(); }} />
+                  </div>
+                  <Button onClick={handleLogin} disabled={busy} className="w-full">
+                    {busy ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />확인 중…</> : '로그인'}
+                  </Button>
+                </div>
               </div>
-              <div>
-                <Label htmlFor="pw">비밀번호</Label>
-                <Input id="pw" type="password" value={pw} autoComplete="current-password"
-                  onChange={e => setPw(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') void handleLogin(); }} />
-              </div>
-              <Button onClick={handleLogin} disabled={busy} className="w-full">
-                {busy ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />확인 중…</> : '로그인'}
-              </Button>
+
+              <figure className="hidden md:block text-center">
+                <img
+                  src="/book-sample.png"
+                  alt="제작 예시 — HELLO MY SPACE 표지의 일기책"
+                  className="w-full max-w-[220px] mx-auto drop-shadow-sm"
+                  loading="lazy" decoding="async"
+                />
+                <figcaption className="text-[11px] text-muted-foreground mt-2">
+                  이런 책이 만들어집니다
+                  <span className="block">표지에 이름과 기간이 들어갑니다</span>
+                </figcaption>
+              </figure>
             </div>
           </Section>
         )}
@@ -436,6 +458,11 @@ export default function PrintStudent() {
                     {previewing ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />만드는 중…</>
                       : <><Eye className="h-4 w-4 mr-1" />미리보기</>}
                   </Button>
+                  {!preview && !previewing && (
+                    <p className="text-[11px] text-muted-foreground mt-2">
+                      표지와 본문 앞부분을 미리 볼 수 있습니다.
+                    </p>
+                  )}
                   {preview && <Preview preview={preview} />}
                 </div>
               </div>
@@ -448,8 +475,8 @@ export default function PrintStudent() {
 
         {step === 3 && (
           <Section icon={<Truck className="h-4 w-4" />} title="배송지">
-            <div className="space-y-3 max-w-lg">
-              <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <Label>받는 분</Label>
                   <Input value={shipping.recipientName}
@@ -461,27 +488,34 @@ export default function PrintStudent() {
                     onChange={e => setShipping(p => ({ ...p, recipientPhone: formatPhone(e.target.value) }))} />
                 </div>
               </div>
-              <div>
-                <Label>우편번호</Label>
-                <div className="flex gap-2">
-                  <Input value={shipping.postalCode} readOnly onClick={openPostcode}
-                    className="w-32 cursor-pointer bg-muted/40" />
-                  <Button type="button" variant="outline" onClick={openPostcode}>우편번호 찾기</Button>
+              <div className="grid gap-3 sm:grid-cols-[180px_1fr]">
+                <div>
+                  <Label>우편번호</Label>
+                  <div className="flex gap-2">
+                    <Input value={shipping.postalCode} readOnly onClick={openPostcode}
+                      className="cursor-pointer bg-muted/40" />
+                    <Button type="button" variant="outline" size="icon" onClick={openPostcode}
+                      aria-label="우편번호 찾기">
+                      <Search className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <Label>주소</Label>
+                  <Input value={shipping.address1} readOnly onClick={openPostcode} className="cursor-pointer bg-muted/40" />
                 </div>
               </div>
-              <div>
-                <Label>주소</Label>
-                <Input value={shipping.address1} readOnly onClick={openPostcode} className="cursor-pointer bg-muted/40" />
-              </div>
-              <div>
-                <Label>상세주소</Label>
-                <Input ref={addrDetailRef} value={shipping.address2 ?? ''}
-                  onChange={e => setShipping(p => ({ ...p, address2: e.target.value }))} />
-              </div>
-              <div>
-                <Label>배송 메모 <span className="text-muted-foreground font-normal">(선택)</span></Label>
-                <Input value={shipping.memo ?? ''}
-                  onChange={e => setShipping(p => ({ ...p, memo: e.target.value }))} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <Label>상세주소</Label>
+                  <Input ref={addrDetailRef} value={shipping.address2 ?? ''}
+                    onChange={e => setShipping(p => ({ ...p, address2: e.target.value }))} />
+                </div>
+                <div>
+                  <Label>배송 메모 <span className="text-muted-foreground font-normal">(선택)</span></Label>
+                  <Input value={shipping.memo ?? ''}
+                    onChange={e => setShipping(p => ({ ...p, memo: e.target.value }))} />
+                </div>
               </div>
             </div>
             <Nav onPrev={() => setStep(2)} onNext={handlePrepare}
@@ -611,15 +645,27 @@ function MonthBars({ monthly }: { monthly: { ym: string; count: number }[] }) {
   );
 }
 
-/** 표지와 앞 2페이지만. 나머지는 생략임을 같은 크기 카드로 분명히 알린다. */
+/**
+ * 표지와 앞 2페이지만. 나머지는 생략임을 같은 크기 카드로 분명히 알린다.
+ *
+ * 작은 썸네일만 보여주면 글씨가 안 읽혀 미리보기 구실을 못 한다.
+ * 눌러서 크게 볼 수 있게 한다.
+ */
 function Preview({ preview }: { preview: PreviewResult }) {
+  const [zoom, setZoom] = useState<{ src: string; caption: string } | null>(null);
+  const shots = [
+    ...(preview.cover ? [{ src: preview.cover, caption: '표지' }] : []),
+    ...preview.pages.map((src, i) => ({ src, caption: `본문 ${i + 1}페이지` })),
+  ];
+
   return (
     <div className="mt-3">
       <div className="flex gap-3 overflow-x-auto pb-2">
-        {preview.cover && <PreviewCard src={preview.cover} caption="표지" />}
-        {preview.pages.map((src, i) => <PreviewCard key={i} src={src} caption={`본문 ${i + 1}페이지`} />)}
+        {shots.map(sh => (
+          <PreviewCard key={sh.caption} {...sh} onClick={() => setZoom(sh)} />
+        ))}
         {preview.truncated && (
-          <div className="shrink-0 w-[148px] aspect-[148/210] rounded-lg border-2 border-dashed
+          <div className="shrink-0 w-[180px] aspect-[148/210] rounded-lg border-2 border-dashed
                           grid place-items-center text-center px-3 bg-muted/30">
             <p className="text-[11px] text-muted-foreground leading-relaxed">
               <b className="block text-foreground mb-1">본문 {preview.shownPages + 1}페이지부터는</b>
@@ -630,17 +676,35 @@ function Preview({ preview }: { preview: PreviewResult }) {
         )}
       </div>
       <p className="text-[11px] text-muted-foreground">
-        실제 책은 맨 앞 간지 1장을 포함해 전체 {preview.totalPages}페이지입니다.
-        미리보기는 본문 앞부분만 보여 드립니다.
+        그림을 누르면 크게 볼 수 있습니다. 실제 책은 맨 앞 간지 1장을 포함해
+        전체 {preview.totalPages}페이지입니다.
       </p>
+
+      <Dialog open={!!zoom} onOpenChange={o => !o && setZoom(null)}>
+        <DialogContent className="max-w-3xl p-3">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-medium">{zoom?.caption}</DialogTitle>
+          </DialogHeader>
+          {zoom && (
+            <img src={zoom.src} alt={zoom.caption}
+              className="w-full max-h-[78vh] object-contain rounded-md border" />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function PreviewCard({ src, caption }: { src: string; caption: string }) {
+function PreviewCard({ src, caption, onClick }: {
+  src: string; caption: string; onClick: () => void;
+}) {
   return (
     <figure className="shrink-0">
-      <img src={src} alt={caption} className="w-[148px] aspect-[148/210] object-cover rounded-lg border shadow-sm" />
+      <button type="button" onClick={onClick}
+        className="block rounded-lg border shadow-sm overflow-hidden transition
+                   hover:ring-2 hover:ring-primary/40 focus:outline-none focus:ring-2 focus:ring-primary">
+        <img src={src} alt={caption} className="w-[180px] aspect-[148/210] object-cover" />
+      </button>
       <figcaption className="text-[11px] text-center text-muted-foreground mt-1">{caption}</figcaption>
     </figure>
   );
