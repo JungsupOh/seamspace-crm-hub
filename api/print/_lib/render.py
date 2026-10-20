@@ -399,13 +399,19 @@ FLYLEAF_BOTTOM_MM = 40.0       # 페이지 아래 끝에서 로켓 중심까지
 FLYLEAF_ANGLE = -38            # 음수면 시계방향. 코가 오른쪽 위를 향한다
 
 # 로켓 색 — 본문 종이 위에서 튀지 않게 낮춘 톤
-ROCKET_BODY = (0.945, 0.937, 0.961)
-ROCKET_ACCENT = (0.553, 0.522, 0.694)
-ROCKET_PORT = (0.400, 0.369, 0.549)
-ROCKET_FLAME = (0.969, 0.804, 0.639)
+ROCKET_BODY = (0.957, 0.953, 0.973)
+ROCKET_SHADE = (0.878, 0.867, 0.914)    # 몸통 오른쪽 그늘. 평면이 아니라 원통으로 보이게
+ROCKET_ACCENT = (0.541, 0.506, 0.690)
+ROCKET_DEEP = (0.361, 0.329, 0.514)
+ROCKET_GLASS = (0.714, 0.800, 0.902)
+ROCKET_FLAME = (0.973, 0.788, 0.600)
+ROCKET_FLAME_IN = (0.996, 0.902, 0.761)
 
-_R_BW = 0.165        # 몸통 반폭 (높이 1 기준)
-_R_SHOULDER = 0.68   # 코가 시작되는 높이
+
+def _rocket_right_edge(p):
+    """코끝 → 오른쪽 어깨 → 허리 → 바닥 모서리. 몸통·그늘이 같은 선을 쓰게 모아 둔다."""
+    p.curveTo(0.085, 0.930, 0.150, 0.800, 0.172, 0.640)
+    p.curveTo(0.190, 0.500, 0.188, 0.330, 0.166, 0.185)
 
 
 def draw_rocket(c, cx, cy, h, angle=FLYLEAF_ANGLE):
@@ -413,63 +419,91 @@ def draw_rocket(c, cx, cy, h, angle=FLYLEAF_ANGLE):
     (cx, cy) 를 중심으로 높이 h 의 로켓을 그린다.
 
     좌표는 '높이 1' 단위계로 두고 마지막에 scale 한다 — 크기를 바꿔도 비율이 안 깨진다.
+    몸통은 직선이 아니라 허리가 살짝 부푼 물방울형이다. 곧은 통으로 두면 크레용처럼 보인다.
     """
     c.saveState()
     c.translate(cx, cy)
     c.rotate(angle)
     c.scale(h, h)
-    # 단위계의 세로 범위는 불꽃 -0.13 ~ 코끝 1.0 이다. 그 한가운데를 (cx, cy) 에 둔다 —
+    # 단위계의 세로 범위는 불꽃 -0.185 ~ 코끝 1.0 이다. 그 한가운데를 (cx, cy) 에 둔다 —
     # 호출부가 '중심'으로 위치를 잡을 수 있어야 여백 계산이 단순해진다.
-    c.translate(0, -0.435)
+    c.translate(0, -0.41)
 
-    def nose_edge(p, sx):
-        """어깨에서 코끝까지의 바깥선. 몸통과 코가 같은 곡선을 쓰도록 모아 둔다."""
-        p.curveTo(sx * _R_BW, 0.84, sx * 0.105, 0.95, 0.0, 1.0)
-
-    # 불꽃
+    # ── 불꽃 (맨 뒤) ──
     p = c.beginPath()
-    p.moveTo(-0.085, 0.16)
-    p.curveTo(-0.075, 0.02, -0.04, -0.06, 0.0, -0.13)
-    p.curveTo(0.04, -0.06, 0.075, 0.02, 0.085, 0.16)
+    p.moveTo(-0.098, 0.040)
+    p.curveTo(-0.105, -0.055, -0.060, -0.135, 0.0, -0.185)
+    p.curveTo(0.060, -0.135, 0.105, -0.055, 0.098, 0.040)
     p.close()
     c.setFillColorRGB(*ROCKET_FLAME)
     c.drawPath(p, stroke=0, fill=1)
+    p = c.beginPath()
+    p.moveTo(-0.048, 0.035)
+    p.curveTo(-0.052, -0.030, -0.028, -0.072, 0.0, -0.100)
+    p.curveTo(0.028, -0.072, 0.052, -0.030, 0.048, 0.035)
+    p.close()
+    c.setFillColorRGB(*ROCKET_FLAME_IN)
+    c.drawPath(p, stroke=0, fill=1)
 
-    # 날개
+    # ── 날개 ──
     c.setFillColorRGB(*ROCKET_ACCENT)
     for sx in (-1, 1):
         p = c.beginPath()
-        p.moveTo(sx * _R_BW, 0.33)
-        p.curveTo(sx * 0.26, 0.24, sx * 0.33, 0.15, sx * 0.35, 0.05)
-        p.curveTo(sx * 0.27, 0.07, sx * 0.21, 0.09, sx * _R_BW, 0.12)
+        p.moveTo(sx * 0.158, 0.300)
+        p.curveTo(sx * 0.250, 0.215, sx * 0.350, 0.090, sx * 0.392, -0.040)
+        p.curveTo(sx * 0.300, -0.015, sx * 0.215, 0.030, sx * 0.150, 0.095)
         p.close()
         c.drawPath(p, stroke=0, fill=1)
 
-    # 몸통 (코까지 한 덩어리)
+    # ── 몸통 ──
     p = c.beginPath()
-    p.moveTo(-_R_BW, 0.14)
-    p.lineTo(-_R_BW, _R_SHOULDER)
-    nose_edge(p, -1)
-    p.curveTo(0.105, 0.95, _R_BW, 0.84, _R_BW, _R_SHOULDER)
-    p.lineTo(_R_BW, 0.14)
-    p.curveTo(0.09, 0.10, -0.09, 0.10, -_R_BW, 0.14)
+    p.moveTo(0.0, 1.0)
+    _rocket_right_edge(p)
+    p.curveTo(0.150, 0.130, 0.090, 0.095, 0.0, 0.092)
+    p.curveTo(-0.090, 0.095, -0.150, 0.130, -0.166, 0.185)
+    p.curveTo(-0.188, 0.330, -0.190, 0.500, -0.172, 0.640)
+    p.curveTo(-0.150, 0.800, -0.085, 0.930, 0.0, 1.0)
     p.close()
     c.setFillColorRGB(*ROCKET_BODY)
     c.drawPath(p, stroke=0, fill=1)
 
-    # 코 (몸통 위를 덮는 모자)
     p = c.beginPath()
-    p.moveTo(-_R_BW, _R_SHOULDER)
-    nose_edge(p, -1)
-    p.curveTo(0.105, 0.95, _R_BW, 0.84, _R_BW, _R_SHOULDER)
-    p.curveTo(0.08, 0.645, -0.08, 0.645, -_R_BW, _R_SHOULDER)
+    p.moveTo(0.0, 1.0)
+    _rocket_right_edge(p)
+    p.curveTo(0.150, 0.130, 0.090, 0.095, 0.0, 0.092)
+    p.curveTo(0.055, 0.260, 0.070, 0.600, 0.0, 1.0)
+    p.close()
+    c.setFillColorRGB(*ROCKET_SHADE)
+    c.drawPath(p, stroke=0, fill=1)
+
+    # ── 코 ──
+    p = c.beginPath()
+    p.moveTo(0.0, 1.0)
+    p.curveTo(0.085, 0.930, 0.150, 0.800, 0.172, 0.640)
+    p.curveTo(0.090, 0.690, -0.090, 0.690, -0.172, 0.640)
+    p.curveTo(-0.150, 0.800, -0.085, 0.930, 0.0, 1.0)
     p.close()
     c.setFillColorRGB(*ROCKET_ACCENT)
     c.drawPath(p, stroke=0, fill=1)
 
-    # 창
-    c.setFillColorRGB(*ROCKET_PORT)
-    c.circle(0.0, 0.47, 0.075, stroke=0, fill=1)
+    # ── 노즐 — 몸통 '아래'에 붙는다. 안쪽에 그리면 입처럼 보인다 ──
+    p = c.beginPath()
+    p.moveTo(-0.100, 0.108)
+    p.lineTo(-0.128, 0.030)
+    p.curveTo(-0.065, 0.008, 0.065, 0.008, 0.128, 0.030)
+    p.lineTo(0.100, 0.108)
+    p.curveTo(0.050, 0.092, -0.050, 0.092, -0.100, 0.108)
+    p.close()
+    c.setFillColorRGB(*ROCKET_ACCENT)
+    c.drawPath(p, stroke=0, fill=1)
+
+    # ── 창 ──
+    c.setFillColorRGB(*ROCKET_ACCENT)
+    c.circle(0.0, 0.480, 0.112, stroke=0, fill=1)
+    c.setFillColorRGB(*ROCKET_GLASS)
+    c.circle(0.0, 0.480, 0.078, stroke=0, fill=1)
+    c.setFillColorRGB(*ROCKET_DEEP)
+    c.circle(-0.028, 0.508, 0.022, stroke=0, fill=1)
 
     c.restoreState()
 
@@ -488,7 +522,7 @@ def draw_flyleaf(c, size):
         c,
         size[0] - FLYLEAF_RIGHT_MM * mm,
         FLYLEAF_BOTTOM_MM * mm,
-        FLYLEAF_W_MM * mm * 1.45,
+        FLYLEAF_W_MM * mm * 1.55,
     )
     c.showPage()
     _blank_page(c, size)      # 간지 뒷면
