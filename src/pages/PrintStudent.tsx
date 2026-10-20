@@ -308,6 +308,12 @@ export default function PrintStudent() {
                   <Button onClick={handleLogin} disabled={busy} className="w-full">
                     {busy ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />확인 중…</> : '로그인'}
                   </Button>
+                  {/* 구글로 가입한 사용자는 여기서 쓸 비밀번호가 없다. 앱에서 바로
+                      들어오는 길이 생기기 전까지는 왜 안 되는지라도 알려 줘야 한다. */}
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    구글 계정으로 가입하셨다면 이 화면에서는 로그인할 수 없습니다.
+                    마음일기 앱에서 신청하시거나 고객센터(042-864-5566)로 문의해 주세요.
+                  </p>
                 </div>
               </div>
 
