@@ -394,10 +394,10 @@ def draw_diary_page(c, diary, alt_state):
 # 없었다. 여기서는 몸통·코·날개·창·불꽃 다섯 덩어리면 충분하다.
 FLYLEAF_PAGES = 2              # 종이 1장 = 앞뒤 2면. pricing.front_pages 와 같아야 한다
 # 로켓 크기. 단위계의 '높이 1' 에 해당하는 길이다 — 날개와 기울기가 더해져
-# 실제 그려지는 크기는 이보다 크다(현재 비율에서 약 39×41mm).
-FLYLEAF_SIZE_MM = 40.0
-FLYLEAF_RIGHT_MM = 34.0        # 페이지 오른쪽 끝에서 로켓 중심까지
-FLYLEAF_BOTTOM_MM = 40.0       # 페이지 아래 끝에서 로켓 중심까지
+# 실제 그려지는 크기는 이와 비슷하다(현재 비율에서 약 27×28mm).
+FLYLEAF_SIZE_MM = 28.0
+FLYLEAF_RIGHT_MM = 30.0        # 페이지 오른쪽 끝에서 로켓 중심까지
+FLYLEAF_BOTTOM_MM = 36.0       # 페이지 아래 끝에서 로켓 중심까지
 FLYLEAF_ANGLE = -38            # 음수면 시계방향. 코가 오른쪽 위를 향한다
 
 # 로켓 색 — 본문 종이 위에서 튀지 않게 낮춘 톤
