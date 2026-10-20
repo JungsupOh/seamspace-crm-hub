@@ -88,12 +88,15 @@ class handler(BaseHTTPRequestHandler):
             if not selected:
                 return send_json(self, {"error": "선택한 구간에 인쇄할 일기가 없습니다."}, 400)
 
-            # ── 내지 앞 2페이지 ──
+            # ── 본문 앞 2페이지 ──
+            # 맨 앞 간지는 빼고 그린다(front=False). 거의 비어 있는 장을 '1페이지'로
+            # 보여주면 미리보기 두 장 중 한 장을 버리는 셈이다.
             buf = io.BytesIO()
             render_volume(
                 selected[:DRAW_ENTRIES], buf, include_secret,
                 0,                       # 미리보기는 빈 페이지로 채우지 않는다
                 pricing.page_size(VENDOR),
+                front=False,
             )
             pages = _render_pdf(buf.getvalue(), limit=SHOW_PAGES)
 
@@ -115,6 +118,8 @@ class handler(BaseHTTPRequestHandler):
                 "pages": pages,
                 "shownPages": len(pages),
                 "totalPages": total_pages,
+                # 맨 앞 간지를 뺀 '본문' 페이지 수. 화면의 쪽 번호가 이 기준이다.
+                "bodyPages": max(0, total_pages - pricing.front_pages(VENDOR)),
                 # 화면이 "3페이지부터 생략" 안내를 띄우는 근거
                 "truncated": total_pages > len(pages),
             })

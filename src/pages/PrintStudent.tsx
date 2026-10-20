@@ -63,6 +63,8 @@ export default function PrintStudent() {
   const [quoting, setQuoting] = useState(false);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  // 편수가 최소에 모자랄 때 뒤를 백지로 채울지. 기본 false — 사용자가 켜야 만든다.
+  const [allowPadding, setAllowPadding] = useState(false);
 
   // ④ 배송지
   const [shipping, setShipping] = useState<ShippingInput>({
@@ -127,11 +129,13 @@ export default function PrintStudent() {
     setStep(0);
   }
 
-  async function refreshQuote(next: { from: string; to: string }, nextMode = mode) {
+  async function refreshQuote(
+    next: { from: string; to: string }, nextMode = mode, pad = allowPadding,
+  ) {
     if (!monthly.length) return;
     setQuoting(true);
     try {
-      const q = await requote(monthly, next.from, next.to, undefined, nextMode, 'sweetbook');
+      const q = await requote(monthly, next.from, next.to, undefined, nextMode, 'sweetbook', pad);
       setQuote(q);
       setPrepared(null);        // 구간이 바뀌면 이미 만든 책은 쓸 수 없다
     } catch (e) {
@@ -334,9 +338,9 @@ export default function PrintStudent() {
             <Nav
               onNext={() => { setStep(2); if (range) void refreshQuote(range); }}
               nextLabel="기간 고르기"
-              disabled={stats.renderable < stats.vendor.minDiaries}
-              hint={stats.renderable < stats.vendor.minDiaries
-                ? `책으로 만들려면 글이 ${stats.vendor.minDiaries}편 이상 필요합니다.`
+              hint={stats.renderable < stats.vendor.naturalMin
+                ? `글이 ${stats.vendor.naturalMin}편보다 적으면 책 뒤쪽을 백지로 채워야 합니다. `
+                  + '다음 단계에서 채울지 고르실 수 있습니다.'
                 : undefined}
             />
           </Section>
@@ -359,6 +363,34 @@ export default function PrintStudent() {
                   <p className="text-sm text-amber-800 bg-amber-50 rounded-lg p-3">{quote.reason}</p>
                 )}
 
+                {/* 편수가 모자랄 때 — 채울지 말지는 사용자가 정한다.
+                    말없이 채우면 절반이 백지인 책을 받고도 왜 그런지 모른다. */}
+                {quote.needsPadding && (
+                  <label className="flex items-start gap-2.5 cursor-pointer rounded-lg border-2 border-amber-300 bg-amber-50/60 p-3">
+                    <input type="checkbox" checked={allowPadding} className="mt-0.5 h-4 w-4 accent-primary"
+                      onChange={e => {
+                        setAllowPadding(e.target.checked);
+                        setPreview(null);
+                        if (range) void refreshQuote(range, mode, e.target.checked);
+                      }} />
+                    <span className="text-sm">
+                      <span className="font-medium">
+                        뒤에 백지 {quote.padSheets}장({quote.padPages}페이지)을 넣고 만들기
+                      </span>
+                      <span className="block text-[11px] text-muted-foreground mt-1">
+                        최소 {stats.vendor.pageMin}페이지부터 제작할 수 있어 모자란 만큼을 백지로
+                        채웁니다. 백지도 인쇄 비용에 포함됩니다.
+                      </span>
+                    </span>
+                  </label>
+                )}
+
+                {allowPadding && quote.printable && quote.padPages > 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    책 뒤쪽에 백지 {quote.padSheets}장이 들어갑니다. 글을 더 쓰고 오시면 백지 없이 만들 수 있습니다.
+                  </p>
+                )}
+
                 {quote.volumes.length > 1 && (
                   <div className="rounded-lg border p-3">
                     <p className="text-sm font-medium mb-2">
@@ -377,6 +409,9 @@ export default function PrintStudent() {
 
                 {quote.volumes.length > 0 && (
                   <div className="rounded-lg border divide-y">
+                    <div className="px-3 py-2 text-[11px] text-muted-foreground bg-muted/30">
+                      모든 책의 맨 앞에는 간지 1장이 들어갑니다 (페이지 수에 포함)
+                    </div>
                     {quote.volumes.map(v => (
                       <div key={v.volume} className="flex items-center justify-between px-3 py-2 text-sm">
                         <span>
@@ -582,20 +617,21 @@ function Preview({ preview }: { preview: PreviewResult }) {
     <div className="mt-3">
       <div className="flex gap-3 overflow-x-auto pb-2">
         {preview.cover && <PreviewCard src={preview.cover} caption="표지" />}
-        {preview.pages.map((src, i) => <PreviewCard key={i} src={src} caption={`${i + 1}페이지`} />)}
+        {preview.pages.map((src, i) => <PreviewCard key={i} src={src} caption={`본문 ${i + 1}페이지`} />)}
         {preview.truncated && (
           <div className="shrink-0 w-[148px] aspect-[148/210] rounded-lg border-2 border-dashed
                           grid place-items-center text-center px-3 bg-muted/30">
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              <b className="block text-foreground mb-1">{preview.shownPages + 1}페이지부터는</b>
+              <b className="block text-foreground mb-1">본문 {preview.shownPages + 1}페이지부터는</b>
               미리보기에서 생략됩니다
-              <span className="block mt-1.5">전체 {preview.totalPages}페이지</span>
+              <span className="block mt-1.5">본문 전체 {preview.bodyPages}페이지</span>
             </p>
           </div>
         )}
       </div>
       <p className="text-[11px] text-muted-foreground">
-        실제 책은 전체 {preview.totalPages}페이지입니다. 미리보기는 앞부분만 보여 드립니다.
+        실제 책은 맨 앞 간지 1장을 포함해 전체 {preview.totalPages}페이지입니다.
+        미리보기는 본문 앞부분만 보여 드립니다.
       </p>
     </div>
   );

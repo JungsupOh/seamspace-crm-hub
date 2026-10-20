@@ -197,6 +197,7 @@ export default function ShopProductDetail() {
               <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
                 <li>· 판형 <strong className="text-foreground">A5 (148×210mm)</strong> · 소프트커버 컬러 인쇄</li>
                 <li>· 보통 <strong className="text-foreground">1페이지에 일기 1편</strong>이 들어갑니다 (1,200자 기준)</li>
+                <li>· 맨 앞에는 <strong className="text-foreground">간지 1장</strong>이 들어갑니다</li>
                 <li>· <strong className="text-foreground">비밀글</strong>은 넣을지 뺄지 주문할 때 고를 수 있습니다</li>
                 <li>· 글이 많으면 <strong className="text-foreground">여러 권으로 나눠</strong> 만듭니다</li>
               </ul>
@@ -230,6 +231,8 @@ export default function ShopProductDetail() {
                   <>
                     <li>· <strong className="text-foreground">{diaryVendor.pageMin}p</strong> 부터 제작 가능하며,
                       한 권은 최대 <strong className="text-foreground">{diaryVendor.pageMax}p</strong> 입니다.</li>
+                    <li>· 일기가 <strong className="text-foreground">{diaryVendor.naturalMin}편</strong>보다 적으면
+                      뒤쪽을 백지로 채워야 합니다 — 채울지는 주문할 때 고르실 수 있습니다.</li>
                     <li>· 기본 {diaryVendor.basePrice?.toLocaleString()}원
                       + {diaryVendor.blockPages}페이지마다 {diaryVendor.blockPrice?.toLocaleString()}원 (VAT 포함)</li>
                     <li>· 여러 권으로 나뉘면 2권째부터는 기본료가{' '}

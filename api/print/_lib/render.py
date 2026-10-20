@@ -381,11 +381,49 @@ def draw_diary_page(c, diary, alt_state):
     return True
 
 
-def render_volume(diaries, out, include_secret=True, pad_to=0, page=None):
+# ── 간지 ────────────────────────────────────────────
+# 책 맨 앞에 **한 장** 넣는다. 종이 한 장은 앞뒤 두 면이므로 PDF 로는 2페이지다
+# (FLYLEAF_PAGES). 일기가 바로 시작되면 표지를 넘기자마자 본문이라 책 같지 않고,
+# 제본 특성상 첫 장은 풀칠 쪽이라 글이 안쪽으로 말려 들어간다.
+#
+# 모티프는 앞면에만 넣는다. 뒷면은 비워 둔다 — 넘기면 바로 일기가 시작된다.
+# 모티프는 뒤표지의 행성을 떼어 종이색 쪽으로 연하게 섞은 것이다
+# (assets/bgImage/flyleafPlanet.png). 과하지 않게 — 아주 작게, 연하게.
+FLYLEAF_IMG = "bgImage/flyleafPlanet.png"
+FLYLEAF_PAGES = 2            # 종이 1장 = 앞뒤 2면. pricing.front_pages 와 같아야 한다
+FLYLEAF_W_MM = 18.0          # 모티프 가로. A5 폭(148)의 약 1/8
+FLYLEAF_ASPECT = 45 / 69     # 에셋의 세로/가로
+FLYLEAF_CY = 0.56            # 아래에서부터의 비율. 정중앙보다 살짝 위가 안정적으로 보인다
+
+
+def _blank_page(c, size):
+    """종이색으로만 채운 면. 흰 종이가 아니라 본문과 같은 색이어야 이질감이 없다."""
+    c.setFillColorRGB(*PAGE_FILL)
+    c.rect(0, 0, size[0], size[1], stroke=0, fill=1)
+
+
+def draw_flyleaf(c, size):
+    """맨 앞 간지 한 장(2면). 앞면에만 작은 모티프, 뒷면은 비운다."""
+    _blank_page(c, size)
+    w = FLYLEAF_W_MM * mm
+    h = w * FLYLEAF_ASPECT
+    c.drawImage(
+        asset(FLYLEAF_IMG),
+        (size[0] - w) / 2, size[1] * FLYLEAF_CY - h / 2,
+        width=w, height=h, mask="auto",
+    )
+    c.showPage()
+    _blank_page(c, size)      # 간지 뒷면
+
+
+def render_volume(diaries, out, include_secret=True, pad_to=0, page=None, front=True):
     """
     일기 목록을 PDF 한 권으로 그려 out(파일 경로 또는 file-like)에 쓴다.
 
     diaries 는 날짜 오름차순으로 정렬되어 있어야 한다.
+    **맨 앞에 간지 한 장이 먼저 들어간다**(front=False 로 끌 수 있다).
+    pricing.printed_pages() 도 이 한 장을 세므로 둘이 어긋나면 안 된다.
+
     pad_to 를 주면 그 페이지 수가 될 때까지 뒤에 빈 페이지를 채운다. 업체가 요구하는
     최소 페이지·짝수 규칙을 맞추기 위한 것이고, 견적이 매긴 인쇄 페이지 수와 실제 PDF
     페이지 수가 달라지면 업로드가 거부되거나 견적과 실물이 어긋나므로 반드시 맞춘다.
@@ -424,6 +462,11 @@ def render_volume(diaries, out, include_secret=True, pad_to=0, page=None):
     pages = 0
     skipped = []
 
+    if front:
+        draw_flyleaf(c, size)
+        c.showPage()
+        pages += FLYLEAF_PAGES
+
     for diary in diaries:
         if not is_renderable(diary, include_secret):
             skipped.append(
@@ -451,7 +494,8 @@ def render_volume(diaries, out, include_secret=True, pad_to=0, page=None):
 
     blanks = 0
     while pages < pad_to:
-        c.showPage()      # 아무것도 그리지 않은 페이지 = 백지
+        _blank_page(c, size)   # 본문과 같은 종이색. 비워 두면 흰 면이 되어 튄다
+        c.showPage()
         pages += 1
         blanks += 1
 

@@ -30,6 +30,7 @@ class handler(BaseHTTPRequestHandler):
                 sess["token"], sess["username"],
                 mode=body.get("mode"), vendor=VENDOR,
                 with_diagnostics=False,          # 고객에게 보여줄 내부 진단이 아니다
+                allow_padding=bool(body.get("allowPadding")),
             )
             # 업체 목록 전체는 고객에게 의미가 없다. 쓰는 것 하나만 내려보낸다.
             data.pop("vendors", None)

@@ -39,7 +39,8 @@ export interface PreviewResult {
   cover: string | null;     // data:image/png;base64,...
   pages: string[];
   shownPages: number;
-  totalPages: number;
+  totalPages: number;       // 간지 포함 전체 페이지
+  bodyPages: number;        // 간지를 뺀 본문 페이지 — 화면 쪽 번호의 기준
   truncated: boolean;       // true 면 "3페이지부터 생략" 안내를 띄운다
 }
 

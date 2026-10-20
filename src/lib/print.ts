@@ -46,6 +46,8 @@ export interface VendorInfo {
   pageMax: number;
   pageIncrement: number;    // 1이면 페이지 수 제약 없음
   minDiaries: number;
+  frontPages: number;       // 맨 앞 간지 (1장 = 2면)
+  naturalMin: number;       // 백지를 안 덧대고 찍을 수 있는 최소 편수
   shippingFee: number;
   trimWidthMm: number;    // 재단 크기. 인쇄 캔버스는 여기에 도련 3mm 를 더한다
   trimHeightMm: number;
@@ -88,6 +90,10 @@ export interface SplitOption {
 export interface Quote {
   printable: boolean;
   reason?: string;
+  /** 편수가 최소에 모자라 뒤에 백지를 덧대야 하는 상태. 채울지는 사용자가 고른다. */
+  needsPadding: boolean;
+  padPages: number;         // 덧댈 백지 면 수
+  padSheets: number;        // 그 면 수를 종이 장수로 (2면 = 1장)
   vendor: VendorInfo;
   mode?: SplitMode;
   options?: SplitOption[];
@@ -234,8 +240,9 @@ export function fetchStats(
 export function requote(
   monthly: MonthCount[], from: string, to: string,
   splits?: string[], mode?: SplitMode, vendor?: Vendor,
+  allowPadding?: boolean,
 ) {
-  return post<Quote>('quote', { monthly, from, to, splits, mode, vendor });
+  return post<Quote>('quote', { monthly, from, to, splits, mode, vendor, allowPadding });
 }
 
 export const SPLIT_MODE_LABEL: Record<SplitMode, string> = {

@@ -49,7 +49,10 @@ VENDORS = {
         "page_min": 36,              # 이보다 적으면 제작 불가
         "page_max": 300,             # 초과는 분권 대상
         "page_increment": 1,         # 페이지 수 제약 없음
-        "min_diaries": 36,           # 판매 최소 편수
+        "front_pages": 2,            # 맨 앞 간지 1장 = 앞뒤 2페이지
+        # 패딩 없이 찍을 수 있는 최소 편수 = page_min - 간지. 이보다 적어도
+        # 뒤를 백지로 채우면 찍을 수 있다(사용자가 선택). natural_min() 참고.
+        "min_diaries": 34,
         "pricing": "bands",
         "bands": (
             (36, 100, 26000),
@@ -66,12 +69,13 @@ VENDORS = {
         "spec": "PHOTOBOOK_A5_SC",   # A5 소프트커버
         "trim": (148.0, 210.0),
         "trim_label": "A5 148×210",
-        "page_min": 50,              # 이보다 적으면 빈 페이지로 채워서 제작
+        "page_min": 50,              # 이보다 적으면 간지로 채워서 제작
         "page_max": 200,
         "page_increment": 2,         # 페이지 수는 2의 배수여야 한다
-        # 판형 최소와 같게 둔다. 36편으로 받으면 빈 페이지가 14장이나 들어간 책이
-        # 나오는데, 50p 값을 다 내고 절반 가까이 백지인 책을 받게 된다.
-        "min_diaries": 50,
+        "front_pages": 2,            # 맨 앞 간지 1장 = 앞뒤 2페이지
+        # 패딩 없이 찍을 수 있는 최소 편수 = 50p - 간지 2p = 48편.
+        # 이보다 적으면 뒤를 백지로 채워야 하고, 채울지는 사용자가 정한다.
+        "min_diaries": 48,
         # 원가가 페이지당 100원 선형이라 가격도 선형으로 간다. 구간제는 구간 안에서
         # 마진이 반토막 나고(50p 51% / 200p 20%), 한 장 차이로 5,000원이 뛰는 걸
         # 고객에게 설명할 수 없다.
@@ -121,6 +125,10 @@ def vendor_info(name=None):
         "pageMax": v["page_max"],
         "pageIncrement": v["page_increment"],
         "minDiaries": v["min_diaries"],
+        # 간지(1장=2p)와, 백지를 안 덧대고 찍을 수 있는 최소 편수.
+        # 화면이 "N장을 뒤에 채울까요?" 를 물으려면 이 둘이 필요하다.
+        "frontPages": v.get("front_pages", 0),
+        "naturalMin": max(0, v["page_min"] - v.get("front_pages", 0)),
         "shippingFee": v["shipping_fee"],
         "trimWidthMm": v["trim"][0],
         "trimHeightMm": v["trim"][1],
@@ -155,17 +163,56 @@ def page_size(vendor=DEFAULT_VENDOR):
     return w + BLEED_MM * 2, h + BLEED_MM * 2
 
 
-def printed_pages(diaries, vendor=DEFAULT_VENDOR):
+def front_pages(vendor=DEFAULT_VENDOR):
+    """책 맨 앞에 들어가는 간지 장수. 일기보다 먼저 인쇄된다."""
+    return VENDORS[resolve_vendor(vendor)].get("front_pages", 0)
+
+
+def max_diaries(vendor=DEFAULT_VENDOR):
+    """
+    한 권에 담을 수 있는 **일기 편수** 상한.
+
+    page_max 는 인쇄 페이지 상한이고, 그중 앞 간지가 자리를 먹는다.
+    분권 판단은 편수로 하므로 여기서 한 번 빼 두지 않으면
+    200편(=202p)짜리 권이 만들어져 업로드가 거부된다.
+    """
+    v = VENDORS[resolve_vendor(vendor)]
+    return v["page_max"] - v.get("front_pages", 0)
+
+
+def natural_min(vendor=DEFAULT_VENDOR):
+    """백지를 덧대지 않고 찍을 수 있는 최소 일기 편수."""
+    v = VENDORS[resolve_vendor(vendor)]
+    return max(0, v["page_min"] - v.get("front_pages", 0))
+
+
+def pad_pages(diaries, vendor=DEFAULT_VENDOR):
+    """최소 페이지를 맞추려고 **뒤에** 덧대야 하는 백지 수. 필요 없으면 0."""
+    v = VENDORS[resolve_vendor(vendor)]
+    if diaries <= 0:
+        return 0
+    return max(0, v["page_min"] - (diaries + v.get("front_pages", 0)))
+
+
+def printed_pages(diaries, vendor=DEFAULT_VENDOR, pad=True):
     """
     일기 수 → 실제 인쇄 페이지 수.
 
-    업체의 페이지 규칙(최소 페이지·증가 단위)에 모자라는 만큼 빈 페이지가 들어간다.
+    맨 앞 간지(1장 = 2페이지)가 항상 먼저 들어간다.
+    pad=True 면 업체의 최소 페이지에 모자라는 만큼 **뒤를** 백지로 채운다.
+    pad=False 면 채우지 않는다 — 최소 미만이면 price_for 가 None 을 돌려
+    '제작 불가'로 떨어진다.
+
     가격도 이 값으로 매긴다 — 인쇄소에 내는 돈이 이 값으로 정해지기 때문이다.
+    **render_volume 이 만드는 페이지 수와 반드시 같아야 한다.** 어긋나면
+    업로드가 거부되거나 견적 금액과 실물이 달라진다.
     """
     v = VENDORS[resolve_vendor(vendor)]
     if diaries <= 0:
         return 0
-    pages = max(diaries, v["page_min"])
+    pages = diaries + v.get("front_pages", 0)
+    if pad:
+        pages = max(pages, v["page_min"])
     inc = v["page_increment"]
     if inc > 1 and pages % inc:
         pages += inc - (pages % inc)
@@ -232,7 +279,7 @@ def _balanced_groups(counts, vendor):
     최저가 분할보다 비쌀 수 있다 — 가격이 구간제라서 두께를 맞추려다 구간 경계를
     넘기면 권당 수천 원이 더 든다. 어느 쪽이 얼마인지는 화면에서 같이 보여준다.
     """
-    page_max = VENDORS[resolve_vendor(vendor)]["page_max"]
+    page_max = max_diaries(vendor)      # 인쇄 상한이 아니라 '편수' 상한이다
     if not counts:
         return []
     n = len(counts)
@@ -303,7 +350,7 @@ def _cheapest_groups(counts, vendor):
     같은 차액이 더해지므로 **총액 순위가 바뀌지 않기 때문**이다. 실제 금액은
     _build() 가 첫 권만 first=True 로 다시 매긴다.
     """
-    page_max = VENDORS[resolve_vendor(vendor)]["page_max"]
+    page_max = max_diaries(vendor)      # 인쇄 상한이 아니라 '편수' 상한이다
     n = len(counts)
     dp = [None] * (n + 1)
     dp[0] = (0, 0, 0, None)
@@ -350,7 +397,9 @@ def _build(months, groups, vendor):
         pages = printed_pages(diaries, vendor)
         # 1권째만 기본료를 제값으로 받는다(blocks 모델). bands 모델은 first 를 무시한다.
         price = price_for(pages, vendor, first=(idx == 1))
-        blanks = pages - diaries
+        # 맨 앞 간지는 '빈 페이지'가 아니다. 빼고 세야 render_volume 이 실제로
+        # 채우는 백지 수와 같아지고, 안내 문구도 사실과 맞는다.
+        blanks = max(0, pages - diaries - v.get("front_pages", 0))
 
         if price is None:
             warnings.append(
@@ -360,11 +409,13 @@ def _build(months, groups, vendor):
             # 단권이면 빈 페이지로 채우는 게 정상이지만, 분권해서 얇은 권이 나왔다면
             # 경계를 잘못 잡은 것이다. 빈 페이지 값을 치르게 되므로 알려준다.
             warnings.append(
-                f"{idx}권이 {diaries}편뿐이라 빈 페이지 {blanks}장이 들어갑니다. "
+                f"{idx}권이 {diaries}편뿐이라 백지 {blanks}페이지가 뒤에 들어갑니다. "
                 f"분책 경계를 조정해 보세요."
             )
         elif blanks:
-            warnings.append(f"{idx}권에 빈 페이지 {blanks}장이 들어갑니다 ({diaries}편 → {pages}p).")
+            warnings.append(
+                f"{idx}권 뒤에 백지 {blanks}페이지가 들어갑니다 ({diaries}편 + 간지 → {pages}p)."
+            )
 
         volumes.append(
             {
@@ -383,6 +434,9 @@ def _build(months, groups, vendor):
     printable = bool(volumes) and all(x["price"] is not None for x in volumes)
     ship = v["shipping_fee"]
 
+    # 뒤에 덧댄 백지 — 사용자가 "채워서 만들래요"를 고른 결과다.
+    pad = sum(x["blanks"] for x in volumes)
+
     return {
         "printable": printable,
         "totalDiaries": sum(x["diaries"] for x in volumes),
@@ -392,10 +446,14 @@ def _build(months, groups, vendor):
         "shippingFee": ship,
         "grandTotal": product_total + ship,
         "warnings": warnings,
+        # 응답 모양을 제작 불가일 때와 같게 맞춘다 — 화면이 분기를 놓치지 않게.
+        "needsPadding": False,
+        "padPages": pad,
+        "padSheets": (pad + 1) // 2,
     }
 
 
-def _not_printable(total, reason):
+def _not_printable(total, reason, **extra):
     return {
         "printable": False,
         "reason": reason,
@@ -406,7 +464,32 @@ def _not_printable(total, reason):
         "shippingFee": 0,
         "grandTotal": 0,
         "warnings": [],
+        # 백지를 덧대면 찍을 수 있는 경우 — 화면이 사용자에게 물어볼 수 있게.
+        "needsPadding": False,
+        "padPages": 0,
+        "padSheets": 0,
+        **extra,
     }
+
+
+def _short_of_minimum(total, vendor):
+    """
+    편수가 모자라 백지를 덧대야 하는 상태. 찍을지 말지는 사용자가 정한다.
+
+    자동으로 채워 버리면 절반이 백지인 책을 받고도 왜 그런지 모른다.
+    반대로 그냥 막아 버리면 30편을 쓴 사람이 책을 못 만든다.
+    """
+    pages = pad_pages(total, vendor)
+    sheets = (pages + 1) // 2
+    return _not_printable(
+        total,
+        f"일기가 {total}편이라 {VENDORS[resolve_vendor(vendor)]['page_min']}페이지에 "
+        f"{pages}페이지(종이 {sheets}장)가 모자랍니다. "
+        f"뒤를 백지로 채우면 그대로 만들 수 있습니다.",
+        needsPadding=True,
+        padPages=pages,
+        padSheets=sheets,
+    )
 
 
 def _plan(months, counts, total, mode, vendor):
@@ -447,13 +530,16 @@ def _summary(plan, mode):
     }
 
 
-def plan_volumes(months, mode=DEFAULT_MODE, vendor=DEFAULT_VENDOR):
+def plan_volumes(months, mode=DEFAULT_MODE, vendor=DEFAULT_VENDOR, allow_padding=False):
     """
     월별 집계로 분권 계획과 견적을 만든다.
 
     months: [{'ym': '2026-01', 'count': 28}, ...] — 인쇄할 구간, 날짜 오름차순.
     mode:   'cheapest'(기본) | 'balanced'
     vendor: 'ddukddak'(기본) | 'sweetbook'
+
+    allow_padding: 편수가 최소에 모자랄 때 뒤를 백지로 채워서라도 만들지 여부.
+                   기본 False — 사용자가 "채워서 만들래요"를 고른 뒤에만 True 로 온다.
 
     선택한 방식의 계획을 돌려주되, 두 방식의 요약을 'options' 에 함께 싣는다.
     화면이 "균등으로 하면 +5,000원" 을 한 번의 호출로 보여줄 수 있어야 하기 때문이다.
@@ -467,10 +553,12 @@ def plan_volumes(months, mode=DEFAULT_MODE, vendor=DEFAULT_VENDOR):
     counts = [m["count"] for m in months]
     total = sum(counts)
 
-    if total < v["min_diaries"]:
-        out = _not_printable(
-            total, f"일기가 {total}편뿐입니다. 최소 {v['min_diaries']}편부터 인쇄할 수 있습니다."
-        )
+    if total <= 0:
+        out = _not_printable(0, "인쇄할 일기가 없습니다.")
+        out["mode"] = mode
+        out["options"] = []
+    elif total < natural_min(vendor) and not allow_padding:
+        out = _short_of_minimum(total, vendor)
         out["mode"] = mode
         out["options"] = []
     else:
@@ -483,7 +571,7 @@ def plan_volumes(months, mode=DEFAULT_MODE, vendor=DEFAULT_VENDOR):
     return out
 
 
-def plan_with_splits(months, split_ends, vendor=DEFAULT_VENDOR):
+def plan_with_splits(months, split_ends, vendor=DEFAULT_VENDOR, allow_padding=False):
     """
     사용자가 분책 경계를 직접 정했을 때의 계획.
 
@@ -497,10 +585,8 @@ def plan_with_splits(months, split_ends, vendor=DEFAULT_VENDOR):
 
     if not months:
         out = _not_printable(0, "인쇄할 일기가 없습니다.")
-    elif total < v["min_diaries"]:
-        out = _not_printable(
-            total, f"일기가 {total}편뿐입니다. 최소 {v['min_diaries']}편부터 인쇄할 수 있습니다."
-        )
+    elif total < natural_min(vendor) and not allow_padding:
+        out = _short_of_minimum(total, vendor)
     else:
         ends = set(split_ends or [])
         groups = []

@@ -20,7 +20,8 @@ def monthly_counts(entries):
     return [{"ym": ym, "count": counter[ym]} for ym in sorted(counter)]
 
 
-def build(token, username, mode=None, vendor=None, with_diagnostics=True):
+def build(token, username, mode=None, vendor=None, with_diagnostics=True,
+          allow_padding=False):
     """
     일기를 전부 받아 월별 집계와 견적을 낸다.
 
@@ -65,7 +66,8 @@ def build(token, username, mode=None, vendor=None, with_diagnostics=True):
         },
         "vendors": pricing.vendor_list(),
         "quote": pricing.plan_volumes(
-            monthly, mode or pricing.DEFAULT_MODE, vendor or pricing.DEFAULT_VENDOR
+            monthly, mode or pricing.DEFAULT_MODE, vendor or pricing.DEFAULT_VENDOR,
+            allow_padding,
         ),
     }
     if with_diagnostics:

@@ -37,10 +37,14 @@ class handler(BaseHTTPRequestHandler):
 
             splits = body.get("splits")
             vendor = body.get("vendor") or pricing.DEFAULT_VENDOR
+            # 편수가 최소에 모자랄 때 뒤를 백지로 채울지는 사용자가 고른다.
+            allow_padding = bool(body.get("allowPadding"))
             result = (
-                pricing.plan_with_splits(selected, splits, vendor)
+                pricing.plan_with_splits(selected, splits, vendor, allow_padding)
                 if splits
-                else pricing.plan_volumes(selected, body.get("mode") or pricing.DEFAULT_MODE, vendor)
+                else pricing.plan_volumes(
+                    selected, body.get("mode") or pricing.DEFAULT_MODE, vendor, allow_padding
+                )
             )
             return send_json(self, result)
         except Exception as e:  # noqa: BLE001
