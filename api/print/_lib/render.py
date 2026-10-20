@@ -393,7 +393,9 @@ def draw_diary_page(c, diary, alt_state):
 # 그라데이션과 결이 그대로 따라와 간지에는 과했고, 원본이 벡터라 깔끔히 떼어낼 수도
 # 없었다. 여기서는 몸통·코·날개·창·불꽃 다섯 덩어리면 충분하다.
 FLYLEAF_PAGES = 2              # 종이 1장 = 앞뒤 2면. pricing.front_pages 와 같아야 한다
-FLYLEAF_W_MM = 26.0            # 로켓 가로 폭(기울인 상태 기준)
+# 로켓 크기. 단위계의 '높이 1' 에 해당하는 길이다 — 날개와 기울기가 더해져
+# 실제 그려지는 크기는 이보다 크다(현재 비율에서 약 39×41mm).
+FLYLEAF_SIZE_MM = 40.0
 FLYLEAF_RIGHT_MM = 34.0        # 페이지 오른쪽 끝에서 로켓 중심까지
 FLYLEAF_BOTTOM_MM = 40.0       # 페이지 아래 끝에서 로켓 중심까지
 FLYLEAF_ANGLE = -38            # 음수면 시계방향. 코가 오른쪽 위를 향한다
@@ -406,6 +408,11 @@ ROCKET_DEEP = (0.361, 0.329, 0.514)
 ROCKET_GLASS = (0.714, 0.800, 0.902)
 ROCKET_FLAME = (0.973, 0.788, 0.600)
 ROCKET_FLAME_IN = (0.996, 0.902, 0.761)
+
+# 몸통 비율. WIDE 를 키우거나 TALL 을 줄이면 통통해진다.
+# **도형에만 걸고 창에는 안 건다** — 같이 걸면 창이 타원이 된다.
+ROCKET_WIDE = 1.25
+ROCKET_TALL = 0.88
 
 
 def _rocket_right_edge(p):
@@ -427,7 +434,10 @@ def draw_rocket(c, cx, cy, h, angle=FLYLEAF_ANGLE):
     c.scale(h, h)
     # 단위계의 세로 범위는 불꽃 -0.185 ~ 코끝 1.0 이다. 그 한가운데를 (cx, cy) 에 둔다 —
     # 호출부가 '중심'으로 위치를 잡을 수 있어야 여백 계산이 단순해진다.
-    c.translate(0, -0.41)
+    c.translate(0, -0.41 * ROCKET_TALL)
+
+    c.saveState()
+    c.scale(ROCKET_WIDE, ROCKET_TALL)   # 창은 이 바깥에서 그려 정원을 유지한다
 
     # ── 불꽃 (맨 뒤) ──
     p = c.beginPath()
@@ -497,13 +507,17 @@ def draw_rocket(c, cx, cy, h, angle=FLYLEAF_ANGLE):
     c.setFillColorRGB(*ROCKET_ACCENT)
     c.drawPath(p, stroke=0, fill=1)
 
+    c.restoreState()               # 가로 배율 해제 — 창은 정원이어야 한다
+
     # ── 창 ──
+    r = 0.112 * ROCKET_WIDE        # 넓어진 몸통에 맞춰 창도 같이 키운다
+    cy_w = 0.480 * ROCKET_TALL     # 몸통이 짧아진 만큼 창도 따라 내려온다
     c.setFillColorRGB(*ROCKET_ACCENT)
-    c.circle(0.0, 0.480, 0.112, stroke=0, fill=1)
+    c.circle(0.0, cy_w, r, stroke=0, fill=1)
     c.setFillColorRGB(*ROCKET_GLASS)
-    c.circle(0.0, 0.480, 0.078, stroke=0, fill=1)
+    c.circle(0.0, cy_w, r * 0.70, stroke=0, fill=1)
     c.setFillColorRGB(*ROCKET_DEEP)
-    c.circle(-0.028, 0.508, 0.022, stroke=0, fill=1)
+    c.circle(-r * 0.25, cy_w + 0.028 * ROCKET_TALL, r * 0.20, stroke=0, fill=1)
 
     c.restoreState()
 
@@ -517,12 +531,11 @@ def _blank_page(c, size):
 def draw_flyleaf(c, size):
     """맨 앞 간지 한 장(2면). 앞면 오른쪽 아래에 로켓, 뒷면은 비운다."""
     _blank_page(c, size)
-    # 기울여 놓으면 가로 폭보다 세로가 길다. 가로 기준으로 받아 높이로 환산한다.
     draw_rocket(
         c,
         size[0] - FLYLEAF_RIGHT_MM * mm,
         FLYLEAF_BOTTOM_MM * mm,
-        FLYLEAF_W_MM * mm * 1.55,
+        FLYLEAF_SIZE_MM * mm,
     )
     c.showPage()
     _blank_page(c, size)      # 간지 뒷면
