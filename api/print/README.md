@@ -351,3 +351,49 @@ POST /mDiary_app/{정해주실 경로}/
 - `api/print/customer/exchange.py` — 코드 → `session.make_session()`
 - `PrintStudent.tsx` — `?t=` 가 있으면 로그인 단계를 건너뛴다
 - 교환 실패 시 평소 로그인 화면으로 떨어뜨린다(코드 만료 등)
+
+---
+
+## 구글 계정 로그인
+
+구글로 가입한 사용자는 쓸 비밀번호가 없다. 화면에서 Google Sign-In 으로 받은
+`id_token` 을 mDiary 가 검증하고 일반 로그인과 같은 액세스 토큰을 내준다.
+
+```
+브라우저  google.accounts.id  →  id_token
+   └ POST /api/print/customer/google_login  { idToken }
+       └ POST {MDIARY}/mDiary_app/google_sso_login/   { id_token }
+           헤더 X-Client-Type: mobile        (교사 웹과 같은 모양)
+         → ss_access_token (아이디 로그인과 동일)
+       └ session.make_session() — 이후 흐름은 아이디 로그인과 완전히 같다
+```
+
+**id_token 검증은 우리가 하지 않는다.** mDiary 가 구글에 대조하고 자기 사용자와
+연결까지 한다. 우리가 따로 검증해도 '이 구글 계정이 어느 마음일기 사용자인지'는
+알 수 없다.
+
+가입 안 된 계정은 `needs_register` 로 돌아오고, 여기서 대신 가입시키지 않는다 —
+약관 동의와 그룹 설정이 앱 흐름에 묶여 있다.
+
+### 설정
+
+| 환경변수 | 값 |
+|---|---|
+| `VITE_GOOGLE_CLIENT_ID` | 웹용 구글 클라이언트 ID |
+
+비어 있으면 버튼이 뜨지 않고 아이디 로그인만 쓴다 — 설정 누락으로 화면이
+깨지지는 않는다.
+
+**GCP 에는 '승인된 JavaScript 원본'만 등록하면 된다.** 리디렉션 URI 는 필요 없다 —
+구글이 페이지를 떠났다 돌아오는 방식이 아니라 같은 페이지의 콜백 함수로
+토큰을 건네주기 때문이다.
+
+```
+https://seamspace-crm-hub.vercel.app
+```
+
+끝에 `/` 나 경로를 붙이면 안 된다. 등록 반영에 5분~몇 시간이 걸린다
+(그 사이에는 `Error 400: origin_mismatch`).
+
+클라이언트 ID 를 바꾸면 **반드시 재배포해야 한다** — `VITE_` 변수는 빌드 때
+번들에 박히므로 환경변수만 바꿔서는 바뀌지 않는다.
