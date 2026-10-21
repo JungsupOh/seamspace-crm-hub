@@ -8,12 +8,15 @@ reportsD.py 는 하드코딩된 Bearer 토큰을 썼는데(이미 만료됐다),
 import os
 import re
 import calendar
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import requests
 
 BASE_URL = os.environ.get("MDIARY_BASE_URL", "https://diaryapi.seamspace.me").rstrip("/")
 TIMEOUT = 30
+# 월별 조회를 동시에 던질 개수 (fetch_all 주석 참고)
+MONTH_FETCH_WORKERS = 8
 
 
 class MDiaryError(Exception):
@@ -216,9 +219,12 @@ def fetch_all(token, username, start_year=None, end_year=None):
 
     먼저 from_date/to_date 로 한 번에 받아 보고, 결과가 두 달 이상에 걸쳐 있으면
     그대로 쓴다. 한 달치만 오거나 비어 있으면 서버가 그 필터를 우리 기대와 다르게
-    해석했다고 보고 year+month 월별 루프로 떨어진다 — reportsD.py 가 쓰던 검증된
-    경로다. 한 달만 쓴 사용자는 불필요하게 루프를 한 번 더 도는데, 결과는 같고
-    느려질 뿐이라 안전한 쪽으로 둔다.
+    해석했다고 보고 year+month 월별 조회로 떨어진다 — reportsD.py 가 쓰던 검증된
+    경로다.
+
+    **월별 조회는 동시에 던진다.** 순차로 돌면 2019년부터 94개월치라 한 번에
+    75초가 넘어 Vercel 60초 제한에 걸린다. 일기가 없거나 한 달치뿐인 계정은
+    무조건 이 경로로 오기 때문에, 신규 사용자가 첫 화면에서 바로 타임아웃을 본다.
     """
     today = datetime.now()
     start_year = start_year or 2019  # 서비스 개시 이전. 넉넉히 잡는다.
@@ -235,15 +241,28 @@ def fetch_all(token, username, start_year=None, end_year=None):
     if _spans_multiple_months(entries):
         return _dedupe(entries)
 
+    months = [
+        (year, month)
+        for year in range(start_year, end_year + 1)
+        for month in range(1, 13)
+        if not (year == today.year and month > today.month)
+    ]
+
     collected = list(entries or [])
-    for year in range(start_year, end_year + 1):
-        for month in range(1, 13):
-            if year == today.year and month > today.month:
-                break
-            got = _post_diary(token, {"username": username, "year": year, "month": month})
+    # 동시에 몇 개까지 던질지. 늘리면 빨라지지만 일기 서버에 부담이 간다.
+    # 8 이면 94개월이 12번에 끝난다.
+    with ThreadPoolExecutor(max_workers=MONTH_FETCH_WORKERS) as pool:
+        futures = [
+            pool.submit(_post_diary, token, {"username": username, "year": y, "month": m})
+            for y, m in months
+        ]
+        for f in futures:
+            # 한 달이라도 실패하면 올린다. 조용히 건너뛰면 편수가 모자란 채로
+            # 견적이 나가고, 실제 인쇄물과 페이지 수가 어긋난다.
+            got = f.result()
             if got:
                 collected.extend(got)
-    return _dedupe(collected)
+    return _dedupe(collected)   # 순서가 섞여도 여기서 날짜 오름차순으로 정렬된다
 
 
 def _spans_multiple_months(entries):
