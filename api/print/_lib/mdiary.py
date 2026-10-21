@@ -100,7 +100,7 @@ def _session_from(res, fallback_username=""):
     }
 
 
-def google_login(id_token, origin="group"):
+def google_login(id_token, origin=None):
     """
     구글 계정으로 로그인한다 — /mDiary_app/google_sso_login/.
 
@@ -113,10 +113,16 @@ def google_login(id_token, origin="group"):
     """
     if not id_token:
         raise MDiaryError("구글 로그인 정보가 비어 있습니다.", status=400)
+    body = {"id_token": id_token}
+    if origin:
+        body["origin"] = origin          # 'app' | 'group'. 교사 웹도 있을 때만 보낸다
     try:
         res = requests.post(
             f"{BASE_URL}/mDiary_app/google_sso_login/",
-            json={"id_token": id_token, "origin": origin},
+            json=body,
+            # 교사 웹(group.seamspace.me)이 보내는 헤더와 맞춘다. 서버가 이 값으로
+            # 분기할 수 있어, 동작이 확인된 클라이언트와 같은 모양으로 부른다.
+            headers={"X-Client-Type": "mobile"},
             timeout=TIMEOUT,
         )
     except requests.RequestException as e:
