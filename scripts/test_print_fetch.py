@@ -38,6 +38,20 @@ def entry(i, ym):
             "date": f"{ym}-{(i % 28) + 1:02d}T09:00:00.000Z"}
 
 
+# 편수 조회는 기본적으로 '모름'(None) 으로 둔다. 각 시나리오에서 따로 덮어쓴다.
+mdiary.diary_count = lambda token, username: None
+
+
+# ── 0. 편수가 0이면 조회 자체를 하지 않는다 ──
+# 신규 사용자가 94번 조회를 기다릴 이유가 없다.
+calls = []
+mdiary.diary_count = lambda t, u: 0
+mdiary._post_diary = lambda t, p: calls.append(p) or []
+check("0편이면 일기 조회 안 함", mdiary.fetch_all("t", "u") == [] and not calls,
+      f"{len(calls)}회 호출")
+mdiary.diary_count = lambda t, u: None
+
+
 # ── 1. 범위 조회가 두 달 이상이면 월별 조회를 하지 않는다 ──
 calls = []
 def range_ok(token, payload):
@@ -48,7 +62,20 @@ out = mdiary.fetch_all("t", "u")
 check("범위 조회로 끝난다", len(calls) == 1, f"{len(calls)}회 호출")
 check("결과 그대로", len(out) == 2)
 
-# ── 2. 한 달치/빈 결과면 월별로 훑되, 동시에 던져 제한 안에 끝낸다 ──
+# ── 1-b. 한 달치여도 편수가 맞으면 월별 조회를 건너뛴다 ──
+calls = []
+mdiary.diary_count = lambda t, u: 3
+def one_month(token, payload):
+    calls.append(payload)
+    return [entry(i, "2026-06") for i in range(3)]
+mdiary._post_diary = one_month
+out = mdiary.fetch_all("t", "u")
+check("편수가 맞으면 한 번으로 끝", len(calls) == 1, f"{len(calls)}회 호출")
+check("결과 3편", len(out) == 3)
+mdiary.diary_count = lambda t, u: None
+
+
+# ── 2. 편수를 못 믿으면 월별로 훑되, 동시에 던져 제한 안에 끝낸다 ──
 DELAY = 0.05        # 실제 0.8초를 줄여 흉내 (비율만 보면 된다)
 calls = []
 lock = threading.Lock()

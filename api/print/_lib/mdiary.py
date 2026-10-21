@@ -213,6 +213,39 @@ def _entry_date(entry):
         return None
 
 
+def diary_count(token, username):
+    """
+    사용자가 쓴 일기 수 — /mDiary_app/user_diary_count/. 한 번이면 끝난다.
+
+    fetch_all 이 '다 받았는지' 판단하는 데 쓴다. 이게 없으면 범위 조회 결과가
+    한 달치일 때 다 받은 건지 서버가 필터를 무시한 건지 구분할 수 없어,
+    2019년부터 월별로 94번을 훑는 수밖에 없었다.
+
+    실패하면 None. 이 값이 없다고 조회를 막으면 안 된다 — 보조 수단일 뿐이다.
+    """
+    try:
+        res = requests.post(
+            f"{BASE_URL}/mDiary_app/user_diary_count/",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"username": username},
+            timeout=TIMEOUT,
+        )
+        if res.status_code != 200:
+            return None
+        body = res.json()
+    except (requests.RequestException, ValueError):
+        return None
+
+    # 응답이 {diary_count:..} 로 오기도, {data:{diary_count:..}} 로 오기도 한다
+    for node in (body, body.get("data") if isinstance(body, dict) else None):
+        if isinstance(node, dict) and node.get("diary_count") is not None:
+            try:
+                return int(node["diary_count"])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def fetch_all(token, username, start_year=None, end_year=None):
     """
     사용자의 일기를 전부 가져온다.
@@ -230,6 +263,12 @@ def fetch_all(token, username, start_year=None, end_year=None):
     start_year = start_year or 2019  # 서비스 개시 이전. 넉넉히 잡는다.
     end_year = end_year or today.year
 
+    # 편수를 먼저 물어본다. 0편이면 여기서 끝 — 신규 사용자가 94번 조회를
+    # 기다릴 이유가 없다.
+    total = diary_count(token, username)
+    if total == 0:
+        return []
+
     entries = _post_diary(
         token,
         {
@@ -241,6 +280,11 @@ def fetch_all(token, username, start_year=None, end_year=None):
     if _spans_multiple_months(entries):
         return _dedupe(entries)
 
+    # 한 달치뿐이어도 편수가 맞으면 다 받은 것이다. 월별 조회를 건너뛴다.
+    got = _dedupe(entries)
+    if total is not None and len(got) >= total:
+        return got
+
     months = [
         (year, month)
         for year in range(start_year, end_year + 1)
@@ -249,6 +293,7 @@ def fetch_all(token, username, start_year=None, end_year=None):
     ]
 
     collected = list(entries or [])
+    # 여기까지 왔다는 건 편수를 못 믿는다는 뜻이다. 전 구간을 훑는다.
     # 동시에 몇 개까지 던질지. 늘리면 빨라지지만 일기 서버에 부담이 간다.
     # 8 이면 94개월이 12번에 끝난다.
     with ThreadPoolExecutor(max_workers=MONTH_FETCH_WORKERS) as pool:
