@@ -71,6 +71,9 @@ export default function PrintStudent() {
 
   // ② 통계
   const [stats, setStats] = useState<CustomerStats | null>(null);
+  // 로그인은 됐는데 일기 조회가 막힌 경우. 로그인 폼을 그대로 두면
+  // '위에는 로그인됐다는데 왜 또 로그인하라지?' 가 된다.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [includeSecret, setIncludeSecret] = useState(true);
 
   // ③ 기간·분권
@@ -167,6 +170,7 @@ export default function PrintStudent() {
 
   async function loadStats(s: CustomerSession) {
     setBusy(true);
+    setLoadError(null);
     try {
       const st = await fetchCustomerStats(s.session, mode);
       setStats(st);
@@ -177,8 +181,10 @@ export default function PrintStudent() {
       setStep(1);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '조회에 실패했습니다.';
-      toast.error(msg);
-      if (/로그인/.test(msg)) logout();
+      // 세션이 끊긴 거라면 다시 로그인하는 수밖에 없다. 그 외에는 세션을 살려 두고
+      // 무엇이 막혔는지 보여 준다 — 다시 시도만 하면 되는 경우가 많다.
+      if (/로그인/.test(msg)) { toast.error(msg); logout(); }
+      else setLoadError(msg);
     } finally {
       setBusy(false);
     }
@@ -187,6 +193,7 @@ export default function PrintStudent() {
   function logout() {
     setSession(null); saveCustomerSession(null);
     setStats(null); setQuote(null); setPreview(null); setPrepared(null);
+    setLoadError(null);
     setStep(0);
   }
 
@@ -342,7 +349,25 @@ export default function PrintStudent() {
       <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
         <Stepper step={step} />
 
-        {step === 0 && (
+        {step === 0 && session && loadError && (
+          <Section icon={<BookOpen className="h-4 w-4" />} title="책을 만들 수 없습니다">
+            <p className="text-sm">
+              <b>{session.name || session.username}</b>님으로 로그인했습니다.
+            </p>
+            <p className="text-sm text-amber-800 bg-amber-50 rounded-lg p-3 mt-3">{loadError}</p>
+            <p className="text-[11px] text-muted-foreground mt-2">
+              이 화면은 로그인한 계정 본인이 쓴 일기만 책으로 만듭니다.
+            </p>
+            <div className="flex gap-2 justify-end mt-6 pt-4 border-t">
+              <Button variant="outline" onClick={logout}>다른 계정으로 로그인</Button>
+              <Button onClick={() => void loadStats(session)} disabled={busy}>
+                {busy ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />확인 중…</> : '다시 시도'}
+              </Button>
+            </div>
+          </Section>
+        )}
+
+        {step === 0 && !(session && loadError) && (
           <Section icon={<Lock className="h-4 w-4" />} title="마음일기 계정으로 로그인">
             {/* 로그인 폼이 좁아 오른쪽이 비었다. 받게 될 책을 바로 보여 주는 쪽이
                 "무엇을 만드는 건지" 설명보다 빠르다. 좁은 화면에서는 숨긴다. */}
@@ -417,7 +442,7 @@ export default function PrintStudent() {
               </p>
             )}
 
-            <MonthBars monthly={stats.monthly} />
+            {stats.monthly.length > 0 && <MonthBars monthly={stats.monthly} />}
 
             {stats.secret.detectable && stats.secret.count + stats.secret.unknown > 0 && (
               <label className="flex items-start gap-2.5 cursor-pointer mt-5 rounded-lg border p-3 bg-amber-50/60">
@@ -438,10 +463,13 @@ export default function PrintStudent() {
             <Nav
               onNext={() => { setStep(2); if (range) void refreshQuote(range); }}
               nextLabel="기간 고르기"
-              hint={stats.renderable < stats.vendor.naturalMin
-                ? `글이 ${stats.vendor.naturalMin}편보다 적으면 책 뒤쪽을 백지로 채워야 합니다. `
-                  + '다음 단계에서 채울지 고르실 수 있습니다.'
-                : undefined}
+              disabled={stats.renderable === 0}
+              hint={stats.renderable === 0
+                ? '아직 책으로 만들 글이 없습니다. 마음일기에 글을 쓰고 다시 찾아와 주세요.'
+                : stats.renderable < stats.vendor.naturalMin
+                  ? `글이 ${stats.vendor.naturalMin}편보다 적으면 책 뒤쪽을 백지로 채워야 합니다. `
+                    + '다음 단계에서 채울지 고르실 수 있습니다.'
+                  : undefined}
             />
           </Section>
         )}

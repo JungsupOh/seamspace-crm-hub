@@ -21,15 +21,20 @@ def monthly_counts(entries):
 
 
 def build(token, username, mode=None, vendor=None, with_diagnostics=True,
-          allow_padding=False):
+          allow_padding=False, allow_empty=False, display_name=None):
     """
     일기를 전부 받아 월별 집계와 견적을 낸다.
 
     with_diagnostics=False 면 진단용 필드(skipped 목록, observedFields)를 빼고 준다.
     고객 화면에 보여줄 값이 아니고, 어떤 글이 왜 빠졌는지는 내부 정보다.
+
+    allow_empty=True 면 일기가 0편이어도 0으로 채운 집계를 돌려준다.
+    **본인 계정으로 들어온 고객용이 그렇다** — 0편인 것도 '내 글 확인'에서
+    보여줘야 할 결과지, 로그인 단계에서 막을 일이 아니다.
+    관리자용은 False 로 둔다. 거기서 0편은 보통 아이디를 잘못 친 것이다.
     """
     entries = mdiary.fetch_all(token, username)
-    if not entries:
+    if not entries and not allow_empty:
         raise NotFound(f"'{username}' 사용자의 일기를 찾지 못했습니다. 아이디를 확인해 주세요.")
 
     renderable = [e for e in entries if is_renderable(e)]
@@ -50,7 +55,8 @@ def build(token, username, mode=None, vendor=None, with_diagnostics=True,
     out = {
         "username": username,
         # 표지에 들어갈 실제 이름. diary 응답에 username 과 함께 들어 있다.
-        "name": mdiary.display_name(entries, username),
+        # 일기가 없으면 응답도 없으니 로그인 때 받은 이름으로 메운다.
+        "name": mdiary.display_name(entries, display_name or username),
         "total": len(entries),
         "renderable": len(renderable),
         "skippedCount": len(skipped),

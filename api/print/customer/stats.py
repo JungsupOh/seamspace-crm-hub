@@ -31,6 +31,10 @@ class handler(BaseHTTPRequestHandler):
                 mode=body.get("mode"), vendor=VENDOR,
                 with_diagnostics=False,          # 고객에게 보여줄 내부 진단이 아니다
                 allow_padding=bool(body.get("allowPadding")),
+                # 0편도 '내 글 확인' 단계에서 보여준다. 로그인은 됐는데 화면이
+                # 로그인 폼에 머물면 사용자는 무엇이 잘못됐는지 알 수 없다.
+                allow_empty=True,
+                display_name=sess["name"],
             )
             # 업체 목록 전체는 고객에게 의미가 없다. 쓰는 것 하나만 내려보낸다.
             data.pop("vendors", None)
@@ -38,13 +42,6 @@ class handler(BaseHTTPRequestHandler):
             return send_json(self, data)
         except session.SessionError as e:
             return send_json(self, {"error": str(e)}, e.status)
-        except diarystats.NotFound:
-            # 본인 일기가 없는 경우다. 아이디를 의심하게 만들면 안 된다.
-            return send_json(
-                self,
-                {"error": "아직 작성한 일기가 없어 책을 만들 수 없습니다."},
-                404,
-            )
         except mdiary.MDiaryError as e:
             return send_json(self, {"error": str(e)}, e.status)
         except Exception as e:  # noqa: BLE001
