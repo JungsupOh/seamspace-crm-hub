@@ -54,6 +54,21 @@ def new_order_ref():
     return f"MD{day}-{tail}"
 
 
+def _as_int(value, default=None):
+    """
+    금액을 정수로. **스위트북은 금액을 소수로 준다**(23027.0).
+    print_orders 의 금액 칸은 integer 라 그대로 넣으면 PostgREST 가
+    'invalid input syntax for type integer' (22P02) 로 거부한다 —
+    주문은 들어갔는데 기록만 빠져 알림톡을 못 보내는 상태가 된다.
+    """
+    if value is None or value == "":
+        return default
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 def save_order(order_ref, order, shipping, ctx, live):
     """
     주문 내역을 print_orders 에 남긴다. 실패해도 예외를 올리지 않는다 —
@@ -77,10 +92,10 @@ def save_order(order_ref, order, shipping, ctx, live):
         "volumes": volumes,
         "include_secret": bool(ctx.get("includeSecret", True)),
         "book_uids": ctx.get("bookUids") or [],
-        "product_amount": int(ctx.get("productAmount") or 0),
-        "shipping_fee": int(ctx.get("shippingFee") or 0),
-        "total_amount": int(ctx.get("totalAmount") or 0),
-        "vendor_cost": (order or {}).get("totalAmount"),
+        "product_amount": _as_int(ctx.get("productAmount"), 0),
+        "shipping_fee": _as_int(ctx.get("shippingFee"), 0),
+        "total_amount": _as_int(ctx.get("totalAmount"), 0),
+        "vendor_cost": _as_int((order or {}).get("totalAmount")),
         "status": (order or {}).get("orderStatus") or "ORDERED",
         "ordered_at": datetime.now(timezone.utc).isoformat(),
     }
