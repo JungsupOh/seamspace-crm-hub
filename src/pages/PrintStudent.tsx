@@ -20,7 +20,8 @@ import {
 } from '@/components/ui/dialog';
 import { formatPhone } from '@/lib/utils';
 import {
-  customerLogin, fetchCustomerStats, fetchPreview, prepareBooks, placeCustomerOrder,
+  customerLogin, customerGoogleLogin, fetchCustomerStats, fetchPreview,
+  prepareBooks, placeCustomerOrder,
   loadCustomerSession, saveCustomerSession,
   type CustomerSession, type CustomerStats, type PreviewResult, type PreparedOrder,
 } from '@/lib/print-customer';
@@ -33,6 +34,19 @@ const STEPS = ['로그인', '내 글 확인', '기간·분권', '배송지', '�
 type StepIndex = 0 | 1 | 2 | 3 | 4;
 
 const TOSS_CLIENT_KEY = import.meta.env.VITE_TOSS_CLIENT_KEY ?? '';
+// 구글 로그인 버튼은 이 값이 있을 때만 뜬다. 없으면 아이디 로그인만 쓴다.
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
+
+type GoogleWindow = Window & {
+  google?: {
+    accounts: {
+      id: {
+        initialize: (o: { client_id: string; callback: (r: { credential: string }) => void }) => void;
+        renderButton: (el: HTMLElement, o: Record<string, unknown>) => void;
+      };
+    };
+  };
+};
 /** 결제창을 거치면 페이지가 새로 뜬다. 완료 페이지가 주문을 마저 넣도록 넘겨 둔다. */
 export const PENDING_KEY = 'print_student_pending';
 
@@ -102,6 +116,50 @@ export default function PrintStudent() {
       await loadStats(s);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '로그인에 실패했습니다.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const googleBtnRef = useRef<HTMLDivElement>(null);
+
+  /** 구글 로그인 버튼을 띄운다. 스크립트는 필요할 때만 받아 온다. */
+  useEffect(() => {
+    if (step !== 0 || !GOOGLE_CLIENT_ID || session) return;
+    let cancelled = false;
+
+    const render = () => {
+      const g = (window as GoogleWindow).google;
+      if (cancelled || !g || !googleBtnRef.current) return;
+      g.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: ({ credential }) => void handleGoogle(credential),
+      });
+      g.accounts.id.renderButton(googleBtnRef.current, {
+        theme: 'outline', size: 'large', width: 320, text: 'continue_with', locale: 'ko',
+      });
+    };
+
+    if ((window as GoogleWindow).google) { render(); return; }
+    const sc = document.createElement('script');
+    sc.src = 'https://accounts.google.com/gsi/client';
+    sc.async = true;
+    sc.onload = render;
+    document.head.appendChild(sc);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, session]);
+
+  async function handleGoogle(credential: string) {
+    if (!credential) return;
+    setBusy(true);
+    try {
+      const s = await customerGoogleLogin(credential);
+      setSession(s);
+      saveCustomerSession(s);
+      await loadStats(s);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '구글 로그인에 실패했습니다.');
     } finally {
       setBusy(false);
     }
@@ -308,12 +366,26 @@ export default function PrintStudent() {
                   <Button onClick={handleLogin} disabled={busy} className="w-full">
                     {busy ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />확인 중…</> : '로그인'}
                   </Button>
-                  {/* 구글로 가입한 사용자는 여기서 쓸 비밀번호가 없다. 앱에서 바로
-                      들어오는 길이 생기기 전까지는 왜 안 되는지라도 알려 줘야 한다. */}
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    구글 계정으로 가입하셨다면 이 화면에서는 로그인할 수 없습니다.
-                    마음일기 앱에서 신청하시거나 고객센터(042-864-5566)로 문의해 주세요.
-                  </p>
+                  {/* 구글로 가입한 사용자는 쓸 비밀번호가 없다.
+                      클라이언트 ID 가 없으면 버튼 대신 안내만 보여 준다. */}
+                  {GOOGLE_CLIENT_ID ? (
+                    <>
+                      <div className="flex items-center gap-2 pt-1">
+                        <span className="h-px flex-1 bg-border" />
+                        <span className="text-[11px] text-muted-foreground">또는</span>
+                        <span className="h-px flex-1 bg-border" />
+                      </div>
+                      <div ref={googleBtnRef} className="flex justify-center" />
+                      <p className="text-[11px] text-muted-foreground text-center">
+                        구글로 가입하셨다면 위 버튼을 눌러 주세요.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      구글 계정으로 가입하셨다면 이 화면에서는 로그인할 수 없습니다.
+                      마음일기 앱에서 신청하시거나 고객센터(042-864-5566)로 문의해 주세요.
+                    </p>
+                  )}
                 </div>
               </div>
 

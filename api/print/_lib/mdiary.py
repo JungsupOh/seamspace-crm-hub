@@ -52,28 +52,75 @@ def login(username, password):
             status=401,
         )
 
+    return _session_from(res, fallback_username=username)
+
+
+def _access_token(res):
+    """
+    로그인 응답에서 액세스 토큰을 꺼낸다.
+
+    토큰은 보통 set-cookie 의 ss_access_token 으로 온다. requests 가 쿠키를
+    못 읽는 경우가 있어 헤더 원문도 본다. 예전 형식(본문에 token)도 받아 둔다.
+    아이디 로그인과 구글 로그인이 같은 방식이라 공유한다.
+    """
     token = res.cookies.get("ss_access_token")
     if not token:
         m = re.search(r"ss_access_token=([^;]+)", res.headers.get("set-cookie", ""))
         if m:
             token = m.group(1)
     if not token:
-        # 예전 형식(본문에 token) 서버를 만나면 이쪽으로 떨어진다.
         try:
-            token = (res.json() or {}).get("token")
+            token = (res.json() or {}).get("token") or (res.json() or {}).get("access_token")
         except ValueError:
             token = None
+    return token
+
+
+def _session_from(res, fallback_username=""):
+    token = _access_token(res)
+    data = {}
+    try:
+        data = res.json() or {}
+    except ValueError:
+        pass
+
     if not token:
         cookies = ", ".join(res.cookies.keys()) or "없음"
-        try:
-            keys = ", ".join((res.json() or {}).keys())
-        except ValueError:
-            keys = "(JSON 아님)"
+        keys = ", ".join(data.keys()) if data else "(JSON 아님)"
         raise MDiaryError(
             f"로그인은 됐지만 액세스 토큰을 받지 못했습니다. "
             f"쿠키=[{cookies}] 본문키=[{keys}]",
             status=401,
         )
+
+    return {
+        "token": token,
+        "username": data.get("username") or fallback_username,
+        "name": data.get("name") or "",
+    }
+
+
+def google_login(id_token, origin="group"):
+    """
+    구글 계정으로 로그인한다 — /mDiary_app/google_sso_login/.
+
+    화면에서 Google Sign-In 으로 받은 id_token 을 넘기면 mDiary 가 검증하고
+    일반 로그인과 같은 액세스 토큰을 내준다.
+
+    **가입이 안 된 구글 계정은 needs_register 로 돌아온다.** 여기서 대신
+    가입시키지 않는다 — 약관 동의와 그룹 설정이 앱 쪽 흐름에 묶여 있고,
+    출력 주문 화면이 회원가입을 대신할 자리가 아니다.
+    """
+    if not id_token:
+        raise MDiaryError("구글 로그인 정보가 비어 있습니다.", status=400)
+    try:
+        res = requests.post(
+            f"{BASE_URL}/mDiary_app/google_sso_login/",
+            json={"id_token": id_token, "origin": origin},
+            timeout=TIMEOUT,
+        )
+    except requests.RequestException as e:
+        raise MDiaryError(f"일기 서버에 연결하지 못했습니다: {e}")
 
     data = {}
     try:
@@ -81,11 +128,18 @@ def login(username, password):
     except ValueError:
         pass
 
-    return {
-        "token": token,
-        "username": data.get("username") or username,
-        "name": data.get("name") or "",
-    }
+    if data.get("needs_register"):
+        raise MDiaryError(
+            "마음일기에 가입되지 않은 구글 계정입니다. 앱에서 먼저 가입해 주세요.",
+            status=403,
+        )
+    if res.status_code != 200:
+        detail = (res.text or "").strip().replace("\n", " ")[:120]
+        raise MDiaryError(
+            f"구글 로그인 거부됨 (HTTP {res.status_code}) — {detail or '응답 본문 없음'}",
+            status=401,
+        )
+    return _session_from(res)
 
 
 def is_admin(username):

@@ -95,6 +95,14 @@ export function customerLogin(username: string, password: string) {
   return post<CustomerSession>('login', { username, password });
 }
 
+/**
+ * 구글 계정 로그인. 화면에서 받은 Google id_token 을 그대로 넘긴다 —
+ * 검증과 '어느 마음일기 사용자인가' 연결은 mDiary 가 한다.
+ */
+export function customerGoogleLogin(idToken: string) {
+  return post<CustomerSession>('google_login', { idToken });
+}
+
 export function fetchCustomerStats(session: string, mode?: SplitMode) {
   return post<CustomerStats>('stats', { session, mode });
 }
