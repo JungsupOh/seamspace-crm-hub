@@ -9,6 +9,19 @@ const APP_URL = window.location.origin;
 // 시스템 정책: 모든 이메일 발송에 영업팀 cc (호출자가 명시적으로 null 주면 제외)
 const DEFAULT_CC = 'sales@tebahsoft.com';
 
+/**
+ * 체험권 메일의 참조 목록.
+ *
+ * sendEmail 은 cc 가 undefined 면 기본 참조(sales@)를 붙이고, null 이면 아예 안 붙인다.
+ * 캠페인이 sales@ 참조를 꺼도 캠페인별 추가 CC 는 살아 있어야 해서 둘을 따로 다룬다.
+ */
+function trialCc(ccSales: boolean | undefined, extra: string | undefined): string | string[] | null | undefined {
+  const withSales = ccSales !== false;        // 설정이 없던 캠페인은 기존대로 참조
+  const more = extra?.trim();
+  if (withSales) return more ? [DEFAULT_CC, more] : undefined;
+  return more ? [more] : null;
+}
+
 async function sendEmail(
   to: string,
   subject: string,
@@ -409,16 +422,25 @@ export async function sendTrialLicenseEmailJP(params: {
   userLimit: number;
   serviceExpireAt?: string;  // YYYY-MM-DD
   cc?: string;               // 추가 cc (sales@ 기본 cc에 더해짐)
+  resend?: boolean;          // 재발송 — 인사말만 바뀐다 (sendTrialLicenseEmailEN 주석 참고)
+  ccSales?: boolean;         // false 면 sales@ 기본 참조를 뺀다 (캠페인 옵션)
 }): Promise<void> {
   // 有効期間は発行日ではなく「コード登録（有効化）」時点から N か月 — 固定の満了日表記は避ける
   const months = Math.max(1, Math.round(params.durationDays / 30));
 
   const html = layoutJP(`
-    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">${params.contactName} 様、ありがとうございました</h2>
-    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
-      seamspace にご関心をお寄せいただき、誠にありがとうございます。<br/>
-      ${params.campaignName} のご登録ありがとうございました。下記のトライアルコードを発行いたしました。
-    </p>
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">${
+      params.resend
+        ? `${params.contactName} 様、トライアルコードを再送いたします`
+        : `${params.contactName} 様、ありがとうございました`
+    }</h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">${
+      params.resend
+        ? `すでに発行済みのトライアルコードがございます。<br/>
+      お手元で見つからない場合に備えて、下記に改めてお送りいたします。`
+        : `seamspace にご関心をお寄せいただき、誠にありがとうございます。<br/>
+      ${params.campaignName} のご登録ありがとうございました。下記のトライアルコードを発行いたしました。`
+    }</p>
 
     <p style="margin:0 0 4px;font-size:13px;color:#71717a;">トライアルコード</p>
     ${codeBox(params.couponCode)}
@@ -453,10 +475,15 @@ export async function sendTrialLicenseEmailJP(params: {
 
   // plain text 대체본 — Gmail/Outlook 스팸 점수 크게 감소
   const text = [
-    `${params.contactName} 様、ありがとうございました。`,
+    params.resend
+      ? `${params.contactName} 様、トライアルコードを再送いたします。`
+      : `${params.contactName} 様、ありがとうございました。`,
     ``,
-    `seamspace にご関心をお寄せいただき、誠にありがとうございます。`,
-    `${params.campaignName} のご登録ありがとうございました。`,
+    ...(params.resend
+      ? [`すでに発行済みのトライアルコードがございます。`,
+         `お手元で見つからない場合に備えて、下記に改めてお送りいたします。`]
+      : [`seamspace にご関心をお寄せいただき、誠にありがとうございます。`,
+         `${params.campaignName} のご登録ありがとうございました。`]),
     ``,
     `トライアルコード: ${params.couponCode}`,
     `最大 ${params.userLimit} ユーザーまでご利用可能`,
@@ -498,14 +525,14 @@ export async function sendTrialLicenseEmailJP(params: {
   await sendEmail(
     params.to,
     // 풀폭 괄호/이모지 제거 — Gmail 스팸 필터 회피
-    `Seamspace ${params.campaignName} トライアルコードのご案内${params.orgName ? ` - ${params.orgName}` : ''}`,
+    `Seamspace ${params.campaignName} トライアルコード${params.resend ? '再送' : ''}のご案内${params.orgName ? ` - ${params.orgName}` : ''}`,
     html,
     {
       text,
       reply_to: 'contact@tebahsoft.com',
       attachments,
-      // cc: 기본 sales@ + 캠페인 추가 cc(있을 때). 없으면 default(sales@) 유지
-      cc: params.cc?.trim() ? [DEFAULT_CC, params.cc.trim()] : undefined,
+      // cc: 캠페인 설정에 따라 sales@ 를 붙이거나 뺀다 (trialCc 주석 참고)
+      cc: trialCc(params.ccSales, params.cc),
     },
   );
 }
@@ -563,16 +590,27 @@ export async function sendTrialLicenseEmailEN(params: {
   userLimit: number;
   serviceExpireAt?: string;  // YYYY-MM-DD
   cc?: string;               // 추가 cc (sales@ 기본 cc에 더해짐)
+  // 이미 코드를 받은 분에게 다시 보내는 경우. 인사말만 바뀌고 나머지는 같다.
+  // 새 코드를 또 내줄 수 없다는 '거절'이 아니라 '잊으셨을까 봐 다시 보낸다'는 쪽으로.
+  resend?: boolean;
+  ccSales?: boolean;         // false 면 sales@ 기본 참조를 뺀다 (캠페인 옵션)
 }): Promise<void> {
   // 유효기간은 발급일이 아니라 '코드 등록(활성화)' 시점부터 N개월 — 고정 만료일 표기 금지
   const months = Math.max(1, Math.round(params.durationDays / 30));
 
   const html = layoutEN(`
-    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">Thank you, ${params.contactName}!</h2>
-    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">
-      Thank you for your interest in seamspace.<br/>
-      We appreciate your registration for ${params.campaignName}. Your trial code is ready below.
-    </p>
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">${
+      params.resend
+        ? `Here it is again, ${params.contactName}!`
+        : `Thank you, ${params.contactName}!`
+    }</h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">${
+      params.resend
+        ? `Good news — you already have a trial code.<br/>
+      We've sent it again below, so you can pick up right where you left off.`
+        : `Thank you for your interest in seamspace.<br/>
+      We appreciate your registration for ${params.campaignName}. Your trial code is ready below.`
+    }</p>
 
     <p style="margin:0 0 4px;font-size:13px;color:#71717a;">Trial code</p>
     ${codeBox(params.couponCode)}
@@ -607,10 +645,15 @@ export async function sendTrialLicenseEmailEN(params: {
 
   // plain text 대체본 — Gmail/Outlook 스팸 점수 크게 감소
   const text = [
-    `Thank you, ${params.contactName}!`,
+    params.resend
+      ? `Here it is again, ${params.contactName}!`
+      : `Thank you, ${params.contactName}!`,
     ``,
-    `Thank you for your interest in seamspace.`,
-    `We appreciate your registration for ${params.campaignName}.`,
+    ...(params.resend
+      ? [`Good news — you already have a trial code.`,
+         `We've sent it again below, so you can pick up right where you left off.`]
+      : [`Thank you for your interest in seamspace.`,
+         `We appreciate your registration for ${params.campaignName}.`]),
     ``,
     `Trial code: ${params.couponCode}`,
     `Up to ${params.userLimit} users`,
@@ -651,14 +694,14 @@ export async function sendTrialLicenseEmailEN(params: {
   const brandPrefix = /seamspace/i.test(params.campaignName) ? '' : 'Seamspace ';
   await sendEmail(
     params.to,
-    `${brandPrefix}${params.campaignName} Trial Code${params.orgName ? ` - ${params.orgName}` : ''}`,
+    `${params.resend ? 'Your trial code (again) — ' : ''}${brandPrefix}${params.campaignName} Trial Code${params.orgName ? ` - ${params.orgName}` : ''}`,
     html,
     {
       text,
       reply_to: 'contact@tebahsoft.com',
       attachments,
-      // cc: 기본 sales@ + 캠페인 추가 cc(있을 때). 없으면 default(sales@) 유지
-      cc: params.cc?.trim() ? [DEFAULT_CC, params.cc.trim()] : undefined,
+      // cc: 캠페인 설정에 따라 sales@ 를 붙이거나 뺀다 (trialCc 주석 참고)
+      cc: trialCc(params.ccSales, params.cc),
     },
   );
 }

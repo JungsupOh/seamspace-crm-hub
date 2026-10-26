@@ -543,6 +543,7 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
         duration_months: Number(trial.duration_months) || 1,
         service_expire_at: trial.service_expire_at?.trim() || undefined,
         cc_email: trial.cc_email?.trim() || undefined,
+        cc_sales: trial.cc_sales !== false,
         // ja면 발송 채널은 email 강제
         delivery_channel: formCfg.locale === 'ja' ? 'email' : (trial.delivery_channel ?? 'alimtalk'),
       } : null;
@@ -932,17 +933,37 @@ function CampaignFormDialog({ open, onClose, initial }: CampaignFormDialogProps)
                   {formCfg.locale !== 'ko' && (
                     <p className="text-[10px] text-amber-700">해외({formCfg.locale}) 캠페인은 이메일로 자동 고정됩니다.</p>
                   )}
-                  {/* 추가 CC — 이메일 발송 캠페인 옵션 (기본 sales@에 더해짐) */}
+                  {/* 참조(CC) — 이메일 발송 캠페인 옵션 */}
                   {(formCfg.locale !== 'ko' || trial.delivery_channel === 'email') && (
-                    <div className="space-y-1 pt-1">
-                      <Label className="text-[10px]">추가 CC <span className="text-muted-foreground">— 이메일 발송 시 (기본 sales@에 추가)</span></Label>
-                      <Input
-                        type="email"
-                        value={trial.cc_email ?? ''}
-                        onChange={e => setTrial(t => ({ ...t, cc_email: e.target.value }))}
-                        placeholder="예: partner@example.com (비우면 sales@만)"
-                        className="h-7 text-xs"
-                      />
+                    <div className="space-y-1.5 pt-1">
+                      {/* 값이 없던 기존 캠페인은 '켜짐'으로 본다 — 저장만으로 동작이 바뀌면 안 된다 */}
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={trial.cc_sales !== false}
+                          onChange={e => setTrial(t => ({ ...t, cc_sales: e.target.checked }))}
+                          className="accent-primary"
+                        />
+                        <span className="text-[10px]">
+                          sales@tebahsoft.com 참조
+                          <span className="text-muted-foreground"> — 끄면 영업팀에 사본이 가지 않습니다</span>
+                        </span>
+                      </label>
+                      <div className="space-y-1">
+                        <Label className="text-[10px]">추가 CC <span className="text-muted-foreground">— 이메일 발송 시</span></Label>
+                        <Input
+                          type="email"
+                          value={trial.cc_email ?? ''}
+                          onChange={e => setTrial(t => ({ ...t, cc_email: e.target.value }))}
+                          placeholder={trial.cc_sales === false ? '예: partner@example.com (비우면 참조 없음)' : '예: partner@example.com (비우면 sales@만)'}
+                          className="h-7 text-xs"
+                        />
+                      </div>
+                      {trial.cc_sales === false && !trial.cc_email?.trim() && (
+                        <p className="text-[10px] text-amber-700">
+                          참조가 하나도 없습니다. 발송 사실이 메일로 공유되지 않습니다.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>

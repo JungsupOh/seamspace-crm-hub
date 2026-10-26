@@ -26,6 +26,9 @@ export interface TrialLicenseSettings {
   service_expire_at?: string;    // YYYY-MM-DD, 비우면 발급일+duration로 자동
   delivery_channel?: TrialDeliveryChannel;  // 'alimtalk' (한국, 기본) | 'email' (해외)
   cc_email?: string;             // 이메일 발송 시 추가 cc (sales@ 기본 cc에 더해짐). 캠페인별 옵션
+  // sales@ 기본 참조를 끌지 여부. 없으면 기존처럼 참조한다(기본 true) —
+  // 예전 캠페인 설정에는 이 값이 없으므로 undefined 를 '켜짐'으로 읽어야 동작이 안 바뀐다.
+  cc_sales?: boolean;
 }
 
 export const PLAN_LABEL: Record<TrialPlanId, string> = {
@@ -176,6 +179,9 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
             userLimit:    userCount,
             serviceExpireAt: expireAt,
             cc:           settings.cc_email,
+            ccSales:      settings.cc_sales !== false,
+            // 새 코드를 못 준다는 거절이 아니라, 잊으셨을까 봐 다시 보내는 안내다
+            resend:       true,
           });
           emailSent = true;
         } catch (e) { console.warn('[trial-license] 재발송(이메일) 실패', e); }
@@ -242,6 +248,7 @@ export async function issueTrialLicense(params: IssueParams): Promise<IssueResul
           userLimit:    userCount,
           serviceExpireAt: expireAt,
           cc:           settings.cc_email,
+          ccSales:      settings.cc_sales !== false,
         });
         emailSent = true;
         console.log(`[trial-license] ${params.locale === 'en' ? '영어' : '일본어'} 이메일 발송 성공 → ${params.lead.email}`);

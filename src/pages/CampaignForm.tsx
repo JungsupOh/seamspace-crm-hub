@@ -34,7 +34,16 @@ interface Campaign {
   trial_license_settings?: TrialLicenseSettings | null;
 }
 
+// 저장되는 값은 **한국어 그대로** 둔다. 화면에 보이는 말만 언어별로 바꾼다 —
+// 리포트·필터가 이 문자열로 집계하고 있어, 언어마다 다른 값이 들어가면 통계가 쪼개진다.
 const SOURCE_OPTIONS = ['대면연수', '온라인연수', '전시회(행사)참가', '지인추천', '기타'];
+const SOURCE_LABELS: Record<string, { ja: string; en: string }> = {
+  '대면연수':        { ja: '対面研修',        en: 'In-person training' },
+  '온라인연수':      { ja: 'オンライン研修',   en: 'Online training' },
+  '전시회(행사)참가': { ja: '展示会・イベント', en: 'Exhibition / Event' },
+  '지인추천':        { ja: '知人の紹介',      en: 'Referral' },
+  '기타':            { ja: 'その他',          en: 'Other' },
+};
 
 export default function CampaignForm() {
   const { slug } = useParams<{ slug: string }>();
@@ -81,7 +90,7 @@ export default function CampaignForm() {
   const lang = formCfg.locale ?? 'ko';
   const isJP = lang === 'ja';
   const isEN = lang === 'en';
-  const isIntl = isJP || isEN;  // 해외 캠페인 공통 동작 (이메일·자유입력·NEIS 미사용·출처 숨김·contact@)
+  const isIntl = isJP || isEN;  // 해외 캠페인 공통 동작 (이메일·자유입력·NEIS 미사용·contact@)
   // 다국어 문자열 헬퍼 (i18n 라이브러리 도입 없이 인라인). en 미지정 시 ko로 폴백.
   const t = (ko: string, ja: string, en?: string) => (isEN ? (en ?? ko) : isJP ? ja : ko);
   // 저장된 라벨이 캠페인 언어와 다른 스크립트면 해당 언어 default로 폴백 (legacy 데이터 방어)
@@ -205,9 +214,17 @@ export default function CampaignForm() {
         `Please enter your ${roleLabel}.`,
       )); return;
     }
-    if (formCfg.source.enabled && !isIntl) {
-      if (!source) { alert('소개받으신 경로를 선택해주세요.'); return; }
-      if (source === '기타' && !sourceEtc.trim()) { alert('기타 경로를 직접 입력해주세요.'); return; }
+    if (formCfg.source.enabled) {
+      if (!source) {
+        alert(t('소개받으신 경로를 선택해주세요.', 'きっかけをお選びください。',
+                'Please tell us how you heard about us.'));
+        return;
+      }
+      if (source === '기타' && !sourceEtc.trim()) {
+        alert(t('기타 경로를 직접 입력해주세요.', 'その他の内容をご記入ください。',
+                'Please tell us how you heard about us.'));
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -411,7 +428,7 @@ export default function CampaignForm() {
           {issuedTrialCode && trialOutcome === 'resent' && (
             <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 rounded-lg px-4 py-3 mb-3 text-left">
               <p className="text-xs text-amber-700 dark:text-amber-300 font-medium mb-1">
-                🔁 {t('이전에 발급된 체험권을 재발송했습니다', '以前発行されたトライアルコードを再送いたしました', 'We have re-sent your previously issued trial code')}
+                🔁 {t('이미 받으신 체험권을 다시 보내 드렸어요', 'トライアルコードを改めてお送りしました', 'Good news — you already have a trial code!')}
               </p>
               <p className="font-mono font-bold text-base text-amber-900 dark:text-amber-100">{issuedTrialCode}</p>
               <p className="text-[11px] text-amber-700 mt-1">
@@ -421,10 +438,12 @@ export default function CampaignForm() {
                 {priorIssuedAt && <> · {priorIssuedAt.slice(0, 10)}</>}
               </p>
               <p className="text-[10px] text-muted-foreground mt-1">
+                {/* 거절이 아니라 리마인드다. 같은 연락처에 코드가 하나만 붙는다는
+                    사실은 그대로지만, 그걸 '불가능합니다'로 알릴 이유는 없다. */}
                 {t(
-                  '이미 발급받으신 체험권이 있어 재발송됩니다. 동일 번호로 추가 체험권 발급은 불가능합니다.',
-                  '既に発行済みのトライアルコードを再送いたします。同一番号で追加発行はできません。',
-                  'You already have a trial code, so it has been re-sent. Additional trial codes cannot be issued for the same contact.',
+                  '혹시 잊으셨을까 봐 아래 코드를 메일로 한 번 더 보내 드렸어요. 이 코드로 이어서 이용하시면 됩니다.',
+                  '見つからない場合に備えて、下記のコードをメールでもう一度お送りしました。そのままご利用いただけます。',
+                  "We've sent it to you again, so you can pick up right where you left off.",
                 )}
               </p>
             </div>
@@ -618,22 +637,30 @@ export default function CampaignForm() {
             </div>
           ))}
 
-          {/* 소개받으신 경로 (옵션) — 해외 캠페인은 비활성 (form_settings.source.enabled=false) */}
-          {formCfg.source.enabled && !isIntl && (
+          {/* 소개받으신 경로 (옵션). 해외 캠페인에서도 보여준다 —
+              저장값은 한국어 그대로고 라벨만 번역된다(SOURCE_LABELS). */}
+          {formCfg.source.enabled && (
             <div className="space-y-1.5">
-              <Label className="text-xs">소개받으신 경로 <span className="text-destructive">*</span></Label>
+              <Label className="text-xs">
+                {t('소개받으신 경로', 'seamspace を知ったきっかけ', 'How did you hear about us?')}
+                <span className="text-destructive"> *</span>
+              </Label>
               <div className="space-y-2">
                 {SOURCE_OPTIONS.map(opt => (
                   <label key={opt} className="flex items-center gap-2 cursor-pointer">
                     <input type="radio" name="source" value={opt} checked={source === opt}
                       onChange={() => setSource(opt)} className="accent-primary" />
-                    <span className="text-sm">{opt}</span>
+                    <span className="text-sm">
+                      {t(opt, SOURCE_LABELS[opt]?.ja ?? opt, SOURCE_LABELS[opt]?.en ?? opt)}
+                    </span>
                   </label>
                 ))}
               </div>
               {source === '기타' && (
                 <Input value={sourceEtc} onChange={e => setSourceEtc(e.target.value)}
-                  placeholder="경로를 직접 입력해주세요" className="h-9 text-sm mt-2" />
+                  placeholder={t('경로를 직접 입력해주세요', 'その他の内容をご記入ください',
+                                 'Please tell us how')}
+                  className="h-9 text-sm mt-2" />
               )}
             </div>
           )}
