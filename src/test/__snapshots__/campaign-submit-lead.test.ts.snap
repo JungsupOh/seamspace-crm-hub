@@ -1,0 +1,534 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`① 스냅샷 — 전환 전 기준값 > 같은 연락처 재신청 (resend) — 인사말만 바뀌고 코드는 기존 것 > resend-en-html 1`] = `
+"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seamspace</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+        <tr>
+          <td style="background:#0f172a;padding:24px 40px;text-align:center;">
+            <img
+              src="https://awosikecivzhwisqzlds.supabase.co/storage/v1/object/public/assets/logo.png"
+              alt="Seamspace"
+              width="200"
+              style="display:inline-block;height:auto;max-width:200px;"
+            />
+          </td>
+        </tr>
+        <tr><td style="background:#6366f1;height:4px;font-size:0;line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:36px 40px 32px;">
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">Here it is again, 김선생!</h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">Good news — you already have a trial code.<br/>
+           We've sent it again below, so you can pick up right where you left off.</p>
+
+    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">Trial code</p>
+    <div style="background:#f4f4f5;border:1px solid #e4e4e7;border-radius:8px;padding:14px 20px;margin:16px 0;text-align:center;">
+    <span style="font-family:'Courier New',Courier,monospace;font-size:22px;font-weight:700;letter-spacing:3px;color:#18181b;">TRIAL-ABCD-1234</span>
+  </div>
+    <p style="margin:0 0 8px;font-size:12px;color:#a1a1aa;text-align:center;">
+      Up to 40 users
+    </p>
+    <p style="margin:0 0 20px;font-size:12px;color:#0f172a;text-align:center;background:#eef2ff;border-radius:6px;padding:8px 12px;">
+      ⏱ Your <strong>3-month</strong> free trial starts <strong>when you register the code</strong> — not from the day you receive this email.
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">How to get started</p>
+    <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
+      Please refer to the attached <strong>Quick Guide (PDF)</strong> to get started.<br/>
+      It walks you through account sign-up and entering your trial code, step by step with screenshots.
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">Would you like a demo meeting?</p>
+    <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
+      We'd be happy to walk you through seamspace online. <strong>Simply reply to this email</strong> and our team will get in touch.
+    </p>
+
+    <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">If you have any questions, please don't hesitate to reach out.</p>
+    <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
+      Contact: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+    </p>
+
+    <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
+      Best regards,<br/>
+      Tebahsoft Inc.
+    </p>
+  </td></tr>
+        <tr>
+          <td style="padding:20px 40px;border-top:1px solid #e4e4e7;background:#fafafa;">
+            <p style="margin:0;font-size:11px;color:#a1a1aa;line-height:1.6;">
+              This email was sent automatically by the Seamspace CRM system.<br/>
+              Contact: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"
+`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 같은 연락처 재신청 (resend) — 인사말만 바뀌고 코드는 기존 것 > resend-en-subject 1`] = `"Your trial code (again) — Seamspace 2026 봄 캠페인 Trial Code - 한빛초등학교"`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 같은 연락처 재신청 (resend) — 인사말만 바뀌고 코드는 기존 것 > resend-jp-html 1`] = `
+"<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seamspace</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN','Segoe UI',sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+        <tr>
+          <td style="background:#0f172a;padding:24px 40px;text-align:center;">
+            <img
+              src="https://awosikecivzhwisqzlds.supabase.co/storage/v1/object/public/assets/logo.png"
+              alt="Seamspace"
+              width="200"
+              style="display:inline-block;height:auto;max-width:200px;"
+            />
+          </td>
+        </tr>
+        <tr><td style="background:#6366f1;height:4px;font-size:0;line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:36px 40px 32px;">
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">김선생 様、トライアルコードを再送いたします</h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">すでに発行済みのトライアルコードがございます。<br/>
+           お手元で見つからない場合に備えて、下記に改めてお送りいたします。</p>
+
+    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">トライアルコード</p>
+    <div style="background:#f4f4f5;border:1px solid #e4e4e7;border-radius:8px;padding:14px 20px;margin:16px 0;text-align:center;">
+    <span style="font-family:'Courier New',Courier,monospace;font-size:22px;font-weight:700;letter-spacing:3px;color:#18181b;">TRIAL-ABCD-1234</span>
+  </div>
+    <p style="margin:0 0 8px;font-size:12px;color:#a1a1aa;text-align:center;">
+      最大 40 ユーザーまでご利用可能
+    </p>
+    <p style="margin:0 0 20px;font-size:12px;color:#0f172a;text-align:center;background:#eef2ff;border-radius:6px;padding:8px 12px;">
+      ⏱ <strong>3か月</strong>の無料トライアルは<strong>コードを登録した時点</strong>から開始します（本メール受信日からではありません）。
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">ご利用方法</p>
+    <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
+      ご利用開始の手順は、添付の <strong>Quick Guide (PDF)</strong> をご参照ください。<br/>
+      アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">デモミーティングをご希望の場合</p>
+    <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
+      オンラインで seamspace の活用方法をご案内いたします。<strong>このメールにそのままご返信ください</strong> — 担当者よりご連絡差し上げます。
+    </p>
+
+    <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">ご不明な点がございましたら、お気軽にお問い合わせください。</p>
+    <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
+      お問い合わせ先: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+    </p>
+
+    <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
+      何卒よろしくお願い申し上げます。<br/>
+      テバソフト株式会社
+    </p>
+  </td></tr>
+        <tr>
+          <td style="padding:20px 40px;border-top:1px solid #e4e4e7;background:#fafafa;">
+            <p style="margin:0;font-size:11px;color:#a1a1aa;line-height:1.6;">
+              このメールは Seamspace CRM システムから自動送信されています。<br/>
+              お問い合わせ: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"
+`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 같은 연락처 재신청 (resend) — 인사말만 바뀌고 코드는 기존 것 > resend-jp-subject 1`] = `"Seamspace 2026 봄 캠페인 トライアルコード再送のご案内 - 한빛초등학교"`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 국내 KO (알림톡 채널이라 메일 템플릿은 JP 경로를 타지 않는다) > ko-cc 1`] = `undefined`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 국내 KO (알림톡 채널이라 메일 템플릿은 JP 경로를 타지 않는다) > ko-html 1`] = `
+"<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seamspace</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN','Segoe UI',sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+        <tr>
+          <td style="background:#0f172a;padding:24px 40px;text-align:center;">
+            <img
+              src="https://awosikecivzhwisqzlds.supabase.co/storage/v1/object/public/assets/logo.png"
+              alt="Seamspace"
+              width="200"
+              style="display:inline-block;height:auto;max-width:200px;"
+            />
+          </td>
+        </tr>
+        <tr><td style="background:#6366f1;height:4px;font-size:0;line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:36px 40px 32px;">
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">김선생 様、ありがとうございました</h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">seamspace にご関心をお寄せいただき、誠にありがとうございます。<br/>
+           2026 봄 캠페인 のご登録ありがとうございました。下記のトライアルコードを発行いたしました。</p>
+
+    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">トライアルコード</p>
+    <div style="background:#f4f4f5;border:1px solid #e4e4e7;border-radius:8px;padding:14px 20px;margin:16px 0;text-align:center;">
+    <span style="font-family:'Courier New',Courier,monospace;font-size:22px;font-weight:700;letter-spacing:3px;color:#18181b;">TRIAL-ABCD-1234</span>
+  </div>
+    <p style="margin:0 0 8px;font-size:12px;color:#a1a1aa;text-align:center;">
+      最大 40 ユーザーまでご利用可能
+    </p>
+    <p style="margin:0 0 20px;font-size:12px;color:#0f172a;text-align:center;background:#eef2ff;border-radius:6px;padding:8px 12px;">
+      ⏱ <strong>3か月</strong>の無料トライアルは<strong>コードを登録した時点</strong>から開始します（本メール受信日からではありません）。
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">ご利用方法</p>
+    <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
+      ご利用開始の手順は、添付の <strong>Quick Guide (PDF)</strong> をご参照ください。<br/>
+      アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">デモミーティングをご希望の場合</p>
+    <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
+      オンラインで seamspace の活用方法をご案内いたします。<strong>このメールにそのままご返信ください</strong> — 担当者よりご連絡差し上げます。
+    </p>
+
+    <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">ご不明な点がございましたら、お気軽にお問い合わせください。</p>
+    <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
+      お問い合わせ先: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+    </p>
+
+    <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
+      何卒よろしくお願い申し上げます。<br/>
+      テバソフト株式会社
+    </p>
+  </td></tr>
+        <tr>
+          <td style="padding:20px 40px;border-top:1px solid #e4e4e7;background:#fafafa;">
+            <p style="margin:0;font-size:11px;color:#a1a1aa;line-height:1.6;">
+              このメールは Seamspace CRM システムから自動送信されています。<br/>
+              お問い合わせ: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"
+`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 국내 KO (알림톡 채널이라 메일 템플릿은 JP 경로를 타지 않는다) > ko-subject 1`] = `"Seamspace 2026 봄 캠페인 トライアルコードのご案内 - 한빛초등학교"`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 국내 KO (알림톡 채널이라 메일 템플릿은 JP 경로를 타지 않는다) > ko-text 1`] = `
+"김선생 様、ありがとうございました。
+
+seamspace にご関心をお寄せいただき、誠にありがとうございます。
+2026 봄 캠페인 のご登録ありがとうございました。
+
+トライアルコード: TRIAL-ABCD-1234
+最大 40 ユーザーまでご利用可能
+3か月の無料トライアルはコードを登録した時点から開始します（本メール受信日からではありません）。
+
+ご利用開始の手順は、添付の Quick Guide (PDF) をご参照ください。
+アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
+
+デモミーティングをご希望の場合は、このメールにそのままご返信ください。
+
+お問い合わせ: contact@tebahsoft.com
+テバソフト株式会社"
+`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 이메일만 있는 해외 신청 (orgName 없음, 캠페인 참조 끔) > email-only-cc 1`] = `
+[
+  "intl-partner@example.com",
+]
+`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 이메일만 있는 해외 신청 (orgName 없음, 캠페인 참조 끔) > email-only-html 1`] = `
+"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seamspace</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+        <tr>
+          <td style="background:#0f172a;padding:24px 40px;text-align:center;">
+            <img
+              src="https://awosikecivzhwisqzlds.supabase.co/storage/v1/object/public/assets/logo.png"
+              alt="Seamspace"
+              width="200"
+              style="display:inline-block;height:auto;max-width:200px;"
+            />
+          </td>
+        </tr>
+        <tr><td style="background:#6366f1;height:4px;font-size:0;line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:36px 40px 32px;">
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">Thank you, 김선생!</h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">Thank you for your interest in seamspace.<br/>
+           We appreciate your registration for 2026 봄 캠페인. Your trial code is ready below.</p>
+
+    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">Trial code</p>
+    <div style="background:#f4f4f5;border:1px solid #e4e4e7;border-radius:8px;padding:14px 20px;margin:16px 0;text-align:center;">
+    <span style="font-family:'Courier New',Courier,monospace;font-size:22px;font-weight:700;letter-spacing:3px;color:#18181b;">TRIAL-ABCD-1234</span>
+  </div>
+    <p style="margin:0 0 8px;font-size:12px;color:#a1a1aa;text-align:center;">
+      Up to 40 users
+    </p>
+    <p style="margin:0 0 20px;font-size:12px;color:#0f172a;text-align:center;background:#eef2ff;border-radius:6px;padding:8px 12px;">
+      ⏱ Your <strong>3-month</strong> free trial starts <strong>when you register the code</strong> — not from the day you receive this email.
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">How to get started</p>
+    <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
+      Please refer to the attached <strong>Quick Guide (PDF)</strong> to get started.<br/>
+      It walks you through account sign-up and entering your trial code, step by step with screenshots.
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">Would you like a demo meeting?</p>
+    <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
+      We'd be happy to walk you through seamspace online. <strong>Simply reply to this email</strong> and our team will get in touch.
+    </p>
+
+    <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">If you have any questions, please don't hesitate to reach out.</p>
+    <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
+      Contact: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+    </p>
+
+    <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
+      Best regards,<br/>
+      Tebahsoft Inc.
+    </p>
+  </td></tr>
+        <tr>
+          <td style="padding:20px 40px;border-top:1px solid #e4e4e7;background:#fafafa;">
+            <p style="margin:0;font-size:11px;color:#a1a1aa;line-height:1.6;">
+              This email was sent automatically by the Seamspace CRM system.<br/>
+              Contact: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"
+`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 이메일만 있는 해외 신청 (orgName 없음, 캠페인 참조 끔) > email-only-subject 1`] = `"Seamspace 2026 봄 캠페인 Trial Code"`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 쿠폰 설명 문자열 > desc-full 1`] = `"2026 봄 캠페인 한빛초등학교 김선생 체험이용권"`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 쿠폰 설명 문자열 > desc-no-org 1`] = `"EDIX Tokyo  Taro 체험이용권"`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 해외 EN > en-cc 1`] = `undefined`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 해외 EN > en-html 1`] = `
+"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seamspace</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+        <tr>
+          <td style="background:#0f172a;padding:24px 40px;text-align:center;">
+            <img
+              src="https://awosikecivzhwisqzlds.supabase.co/storage/v1/object/public/assets/logo.png"
+              alt="Seamspace"
+              width="200"
+              style="display:inline-block;height:auto;max-width:200px;"
+            />
+          </td>
+        </tr>
+        <tr><td style="background:#6366f1;height:4px;font-size:0;line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:36px 40px 32px;">
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">Thank you, 김선생!</h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">Thank you for your interest in seamspace.<br/>
+           We appreciate your registration for EDIX Tokyo 2026. Your trial code is ready below.</p>
+
+    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">Trial code</p>
+    <div style="background:#f4f4f5;border:1px solid #e4e4e7;border-radius:8px;padding:14px 20px;margin:16px 0;text-align:center;">
+    <span style="font-family:'Courier New',Courier,monospace;font-size:22px;font-weight:700;letter-spacing:3px;color:#18181b;">TRIAL-ABCD-1234</span>
+  </div>
+    <p style="margin:0 0 8px;font-size:12px;color:#a1a1aa;text-align:center;">
+      Up to 40 users
+    </p>
+    <p style="margin:0 0 20px;font-size:12px;color:#0f172a;text-align:center;background:#eef2ff;border-radius:6px;padding:8px 12px;">
+      ⏱ Your <strong>3-month</strong> free trial starts <strong>when you register the code</strong> — not from the day you receive this email.
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">How to get started</p>
+    <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
+      Please refer to the attached <strong>Quick Guide (PDF)</strong> to get started.<br/>
+      It walks you through account sign-up and entering your trial code, step by step with screenshots.
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">Would you like a demo meeting?</p>
+    <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
+      We'd be happy to walk you through seamspace online. <strong>Simply reply to this email</strong> and our team will get in touch.
+    </p>
+
+    <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">If you have any questions, please don't hesitate to reach out.</p>
+    <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
+      Contact: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+    </p>
+
+    <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
+      Best regards,<br/>
+      Tebahsoft Inc.
+    </p>
+  </td></tr>
+        <tr>
+          <td style="padding:20px 40px;border-top:1px solid #e4e4e7;background:#fafafa;">
+            <p style="margin:0;font-size:11px;color:#a1a1aa;line-height:1.6;">
+              This email was sent automatically by the Seamspace CRM system.<br/>
+              Contact: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"
+`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 해외 EN > en-subject 1`] = `"Seamspace EDIX Tokyo 2026 Trial Code - 한빛초등학교"`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 해외 EN > en-text 1`] = `
+"Thank you, 김선생!
+
+Thank you for your interest in seamspace.
+We appreciate your registration for EDIX Tokyo 2026.
+
+Trial code: TRIAL-ABCD-1234
+Up to 40 users
+Your 3-month free trial starts when you register the code (not from the day you receive this email).
+
+Please refer to the attached Quick Guide (PDF) to get started.
+It walks you through account sign-up and entering your trial code, step by step with screenshots.
+
+Would you like a demo meeting? Simply reply to this email and our team will get in touch.
+
+Contact: contact@tebahsoft.com
+Tebahsoft Inc."
+`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 해외 JP > jp-html 1`] = `
+"<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seamspace</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN','Segoe UI',sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+        <tr>
+          <td style="background:#0f172a;padding:24px 40px;text-align:center;">
+            <img
+              src="https://awosikecivzhwisqzlds.supabase.co/storage/v1/object/public/assets/logo.png"
+              alt="Seamspace"
+              width="200"
+              style="display:inline-block;height:auto;max-width:200px;"
+            />
+          </td>
+        </tr>
+        <tr><td style="background:#6366f1;height:4px;font-size:0;line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:36px 40px 32px;">
+    <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#18181b;">김선생 様、ありがとうございました</h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#18181b;line-height:1.8;">seamspace にご関心をお寄せいただき、誠にありがとうございます。<br/>
+           EDIX 東京 2026 のご登録ありがとうございました。下記のトライアルコードを発行いたしました。</p>
+
+    <p style="margin:0 0 4px;font-size:13px;color:#71717a;">トライアルコード</p>
+    <div style="background:#f4f4f5;border:1px solid #e4e4e7;border-radius:8px;padding:14px 20px;margin:16px 0;text-align:center;">
+    <span style="font-family:'Courier New',Courier,monospace;font-size:22px;font-weight:700;letter-spacing:3px;color:#18181b;">TRIAL-ABCD-1234</span>
+  </div>
+    <p style="margin:0 0 8px;font-size:12px;color:#a1a1aa;text-align:center;">
+      最大 40 ユーザーまでご利用可能
+    </p>
+    <p style="margin:0 0 20px;font-size:12px;color:#0f172a;text-align:center;background:#eef2ff;border-radius:6px;padding:8px 12px;">
+      ⏱ <strong>3か月</strong>の無料トライアルは<strong>コードを登録した時点</strong>から開始します（本メール受信日からではありません）。
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">ご利用方法</p>
+    <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
+      ご利用開始の手順は、添付の <strong>Quick Guide (PDF)</strong> をご参照ください。<br/>
+      アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
+    </p>
+
+    <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">デモミーティングをご希望の場合</p>
+    <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
+      オンラインで seamspace の活用方法をご案内いたします。<strong>このメールにそのままご返信ください</strong> — 担当者よりご連絡差し上げます。
+    </p>
+
+    <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">ご不明な点がございましたら、お気軽にお問い合わせください。</p>
+    <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
+      お問い合わせ先: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+    </p>
+
+    <p style="margin:0;font-size:14px;color:#18181b;line-height:1.8;">
+      何卒よろしくお願い申し上げます。<br/>
+      テバソフト株式会社
+    </p>
+  </td></tr>
+        <tr>
+          <td style="padding:20px 40px;border-top:1px solid #e4e4e7;background:#fafafa;">
+            <p style="margin:0;font-size:11px;color:#a1a1aa;line-height:1.6;">
+              このメールは Seamspace CRM システムから自動送信されています。<br/>
+              お問い合わせ: <a href="mailto:contact@tebahsoft.com" style="color:#6366f1;text-decoration:none;">contact@tebahsoft.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"
+`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 해외 JP > jp-subject 1`] = `"Seamspace EDIX 東京 2026 トライアルコードのご案内 - 한빛초등학교"`;
+
+exports[`① 스냅샷 — 전환 전 기준값 > 해외 JP > jp-text 1`] = `
+"김선생 様、ありがとうございました。
+
+seamspace にご関心をお寄せいただき、誠にありがとうございます。
+EDIX 東京 2026 のご登録ありがとうございました。
+
+トライアルコード: TRIAL-ABCD-1234
+最大 40 ユーザーまでご利用可能
+3か月の無料トライアルはコードを登録した時点から開始します（本メール受信日からではありません）。
+
+ご利用開始の手順は、添付の Quick Guide (PDF) をご参照ください。
+アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
+
+デモミーティングをご希望の場合は、このメールにそのままご返信ください。
+
+お問い合わせ: contact@tebahsoft.com
+テバソフト株式会社"
+`;
