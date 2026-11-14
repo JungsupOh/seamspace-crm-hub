@@ -11,6 +11,7 @@
 
 import { CORS, confirmTossPayment, buildReceiptFields, jsonResponse } from "../_shared/toss.ts";
 import { notifyShopOrderTG } from "../_shared/telegram.ts";
+import { internalHeaders } from "../_shared/internal.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -171,7 +172,7 @@ Deno.serve(async (req: Request) => {
         try {
           const couponRes = await fetch(`${SUPABASE_URL}/functions/v1/create-coupon`, {
             method: "POST",
-            headers: { Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+            headers: { Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", ...internalHeaders() },
             body: JSON.stringify({
               description,
               duration:   String(meta.duration),

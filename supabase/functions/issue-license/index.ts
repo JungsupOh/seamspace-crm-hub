@@ -23,6 +23,7 @@
 // qty(총인원)로 장수를 세면 160명 1장짜리가 160장이 된다.
 
 import { notifyWebLicenseTG } from "../_shared/telegram.ts";
+import { internalHeaders } from "../_shared/internal.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin":  "https://seamspace-crm-hub.vercel.app",
@@ -282,6 +283,7 @@ Deno.serve(async (req: Request) => {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${SUPABASE_KEY}`,
+          ...internalHeaders(),
         },
         body: JSON.stringify({ description, duration: String(duration), user_limit: userLimit }),
       });

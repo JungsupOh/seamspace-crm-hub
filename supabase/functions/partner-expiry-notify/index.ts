@@ -6,6 +6,8 @@
 //   { threshold?: number=7, dry_run?: boolean, test_email?: string, only_org?: string, force?: boolean }
 // 사용자 노출 텍스트는 '심스페이스', 문의 sales@tebahsoft.com.
 
+import { internalHeaders } from "../_shared/internal.ts";
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY     = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -124,7 +126,7 @@ Deno.serve(async (req: Request) => {
       try {
         const sr = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
           method: "POST",
-          headers: { Authorization: `Bearer ${ANON_KEY}`, apikey: ANON_KEY, "Content-Type": "application/json" },
+          headers: { Authorization: `Bearer ${ANON_KEY}`, apikey: ANON_KEY, "Content-Type": "application/json", ...internalHeaders() },
           body: JSON.stringify({ to, subject, html, cc: SALES_CC, reply_to: SALES_CC }),
         });
         const sd = await sr.json().catch(() => ({}));

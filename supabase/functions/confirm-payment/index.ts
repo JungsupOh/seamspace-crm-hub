@@ -17,6 +17,7 @@
 
 import { CORS, confirmTossPayment, buildReceiptFields, jsonResponse } from "../_shared/toss.ts";
 import { notifyWebPaymentTG } from "../_shared/telegram.ts";
+import { internalHeaders } from "../_shared/internal.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -112,6 +113,7 @@ Deno.serve(async (req: Request) => {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${SUPABASE_KEY}`,
+          ...internalHeaders(),
         },
         body: JSON.stringify({
           description,

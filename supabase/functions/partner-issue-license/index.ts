@@ -7,6 +7,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { sendTelegram } from '../_shared/telegram.ts';
+import { internalHeaders } from '../_shared/internal.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin':  'https://seamspace-crm-hub.vercel.app',
@@ -120,6 +121,7 @@ Deno.serve(async (req: Request) => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
         apikey: SERVICE_ROLE_KEY,
+        ...internalHeaders(),
       },
       body: JSON.stringify({ description, duration: String(duration), user_limit: String(userCount) }),
     });

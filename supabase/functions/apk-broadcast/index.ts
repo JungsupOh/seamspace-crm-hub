@@ -2,6 +2,8 @@
 // 어드민 호출 → 특정 버전을 모든 active 구독자에게 일괄 발송
 // apk_send_history UNIQUE 제약으로 한 버전당 1회만 발송됨 (재시도 멱등성)
 
+import { internalHeaders } from "../_shared/internal.ts";
+
 const CORS = {
   "Access-Control-Allow-Origin":  "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -270,6 +272,7 @@ ${changelogHtml ? `<p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-we
       "Content-Type": "application/json",
       Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
       apikey: SUPABASE_ANON_KEY,
+      ...internalHeaders(),
     },
     body: JSON.stringify({
       to: p.to,

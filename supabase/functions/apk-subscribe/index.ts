@@ -3,6 +3,8 @@
 // 사용자 노출 텍스트는 '심스페이스'만 사용 (mDiary 표기 금지)
 // 문의처: info@tebahsoft.com (APK 배포 전용 채널)
 
+import { internalHeaders } from "../_shared/internal.ts";
+
 const CORS = {
   "Access-Control-Allow-Origin":  "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -254,6 +256,7 @@ ${changelogHtml ? `<p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-we
       "Content-Type": "application/json",
       Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
       apikey: SUPABASE_ANON_KEY,
+      ...internalHeaders(),
     },
     body: JSON.stringify({
       to: p.to,
