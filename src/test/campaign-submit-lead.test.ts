@@ -37,7 +37,16 @@ import {
   buildContactInsert,
   buildCampaignLeadTelegram,
   telegramSourceLabel,
+  randomCode,
+  couponExpiresAt,
+  discountLabel,
+  buildCouponAlimtokBody,
+  buildCouponInsert,
+  precheckCoupon,
+  couponInsertVerdict,
+  COUPON_MAX_ATTEMPTS,
   MAX_SUBMISSIONS_PER_DAY,
+  type CouponSettings,
 } from '../../supabase/functions/campaign-submit-lead/logic';
 import { normalizePhone as browserNormalizePhone } from '@/lib/phone';
 
@@ -53,6 +62,10 @@ const LOGIC_TS = readFileSync(
 );
 const TELEGRAM_TS = readFileSync(resolve(ROOT, 'src/lib/telegram.ts'), 'utf8');
 const LUCKYSEVEN_TS = readFileSync(resolve(ROOT, 'src/lib/luckySeven.ts'), 'utf8');
+const COUPONS_TS = readFileSync(resolve(ROOT, 'src/lib/campaign-coupons.ts'), 'utf8');
+const INDEX_TS = readFileSync(
+  resolve(ROOT, 'supabase/functions/campaign-submit-lead/index.ts'), 'utf8',
+);
 
 // ── 대표 입력 5가지 ──────────────────────────────────
 const CAMPAIGN_ID = '11111111-2222-4333-8444-555555555555';
@@ -540,5 +553,219 @@ describe('⑩ contacts 로직 원문이 luckySeven.ts 와 같다 (드리프트 �
     expect(LUCKYSEVEN_TS).toContain("lead_source: options.leadSource ?? '럭키세븐 5월',");
     expect(LOGIC_TS).toContain("contact_type: options.contactType ?? '리드',");
     expect(LOGIC_TS).toContain("lead_source: options.leadSource ?? '럭키세븐 5월',");
+  });
+});
+
+// ════════════════════════════════════════════════════
+// 021-5c — 캠페인 쿠폰 (체험 이용권과 별개 기능)
+// ════════════════════════════════════════════════════
+
+const COUPON: CouponSettings = {
+  enabled: true,
+  code_prefix: 'SPRING',
+  discount_type: 'amount',
+  discount_value: 5000,
+  applicable_products: ['boardgame', 'keyring'],
+  expires_in_days: 30,
+  max_count: 100,
+  alimtok_tpl_code: 'UM_1234',
+  min_order: 10000,
+};
+
+describe('⑪ 캠페인 쿠폰 — campaign-coupons.ts 와 같은 값', () => {
+  it('할인 라벨 — percent / amount', () => {
+    expect(discountLabel({ ...COUPON, discount_type: 'percent', discount_value: 30 })).toBe('30%');
+    expect(discountLabel({ ...COUPON, discount_type: 'amount', discount_value: 5000 })).toBe('5,000원');
+    expect(discountLabel({ ...COUPON, discount_type: 'amount', discount_value: 500 })).toBe('500원');
+  });
+
+  it('알림톡 요청 본문이 원본과 같다', () => {
+    expect(buildCouponAlimtokBody(
+      COUPON, { name: '김선생', phone: '010-5157-8698' },
+      'SPRING-AB23CD', '2026-12-15T09:00:00.000Z',
+    )).toEqual({
+      tpl_code: 'UM_1234',
+      name: '김선생',
+      phone: '010-5157-8698',
+      coupon_code: 'SPRING-AB23CD',
+      expiry_date: '2026-12-15',   // ISO 앞 10자
+      duration: '5,000원',
+    });
+  });
+
+  it('shop_coupons INSERT 본문이 원본과 같다', () => {
+    expect(buildCouponInsert(
+      COUPON, { id: 'camp-1', name: '2026 봄 캠페인' }, 'lead-1',
+      'SPRING-AB23CD', '2026-12-15T09:00:00.000Z',
+    )).toEqual({
+      code: 'SPRING-AB23CD',
+      batch_name: '2026 봄 캠페인',
+      campaign_id: 'camp-1',
+      lead_id: 'lead-1',
+      discount_type: 'amount',
+      discount_value: 5000,
+      min_order: 10000,
+      expires_at: '2026-12-15T09:00:00.000Z',
+      applicable_products: ['boardgame', 'keyring'],
+      active: true,
+    });
+  });
+
+  it('applicable_products 가 비면 null, min_order 가 없으면 0', () => {
+    const body = buildCouponInsert(
+      { ...COUPON, applicable_products: [], min_order: undefined },
+      { id: 'c', name: 'n' }, 'l', 'CODE', 'ISO',
+    );
+    expect(body.applicable_products).toBeNull();
+    expect(body.min_order).toBe(0);
+  });
+
+  it('만료일은 발급일 + N일 (UTC ISO)', () => {
+    expect(couponExpiresAt(30, new Date('2026-11-15T09:00:00.000Z')))
+      .toBe('2026-12-15T09:00:00.000Z');
+  });
+
+  it('코드 알파벳에 헷갈리는 글자(I,O,0,1)가 없다', () => {
+    const code = randomCode(64, buf => { for (let i = 0; i < buf.length; i++) buf[i] = i; });
+    expect(code).not.toMatch(/[IO01]/);
+    expect(code).toHaveLength(64);
+  });
+
+  it('난수를 고정하면 코드가 재현된다', () => {
+    const fixed = (buf: Uint8Array) => { for (let i = 0; i < buf.length; i++) buf[i] = 0; };
+    expect(randomCode(6, fixed)).toBe('AAAAAA');
+  });
+
+  describe('사전 판정', () => {
+    it('비활성이면 skip', () => {
+      expect(precheckCoupon({ ...COUPON, enabled: false }, 0)).toEqual({ action: 'skip', reason: 'disabled' });
+      expect(precheckCoupon(null, 0)).toEqual({ action: 'skip', reason: 'disabled' });
+    });
+    it('code_prefix 가 없으면 skip', () => {
+      expect(precheckCoupon({ ...COUPON, code_prefix: '' }, 0)).toEqual({ action: 'skip', reason: 'no_prefix' });
+    });
+    it('max_count 에 도달하면 skip', () => {
+      expect(precheckCoupon(COUPON, 100)).toEqual({ action: 'skip', reason: 'max_count' });
+      expect(precheckCoupon(COUPON, 101)).toEqual({ action: 'skip', reason: 'max_count' });
+      expect(precheckCoupon(COUPON, 99)).toEqual({ action: 'issue' });
+    });
+    it('max_count 가 null/0 이면 무제한', () => {
+      expect(precheckCoupon({ ...COUPON, max_count: null }, null)).toEqual({ action: 'issue' });
+      expect(precheckCoupon({ ...COUPON, max_count: 0 }, null)).toEqual({ action: 'issue' });
+    });
+  });
+
+  describe('INSERT 재시도 판정 (UNIQUE 충돌)', () => {
+    it('성공이면 inserted', () => {
+      expect(couponInsertVerdict(true, 201)).toBe('inserted');
+    });
+    it('409/400 이면 재시도 — UNIQUE 충돌 가능', () => {
+      expect(couponInsertVerdict(false, 409)).toBe('retry');
+      expect(couponInsertVerdict(false, 400)).toBe('retry');
+    });
+    it('그 외 오류는 중단', () => {
+      expect(couponInsertVerdict(false, 500)).toBe('abort');
+      expect(couponInsertVerdict(false, 403)).toBe('abort');
+    });
+    it('재시도 횟수가 원본과 같다 (5회)', () => {
+      expect(COUPON_MAX_ATTEMPTS).toBe(5);
+      expect(COUPONS_TS).toContain('attempt < 5');
+    });
+  });
+});
+
+describe('⑫ 쿠폰 로직 원문이 campaign-coupons.ts 와 같다 (드리프트 가드)', () => {
+  it('코드 알파벳·라벨·만료 계산이 같다', () => {
+    for (const line of [
+      "const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';",
+      "if (s.discount_type === 'percent') return `${s.discount_value}%`;",
+      'return `${s.discount_value.toLocaleString()}원`;',
+      'd.setDate(d.getDate() + days);',
+    ]) {
+      expect(COUPONS_TS).toContain(line);
+      expect(LOGIC_TS).toContain(line);
+    }
+  });
+
+  it('알림톡 본문 필드가 같다', () => {
+    for (const line of [
+      'tpl_code:    settings.alimtok_tpl_code,',
+      'coupon_code: code,',
+      'duration:    discountLabel(settings),',
+    ]) {
+      expect(COUPONS_TS).toContain(line);
+      expect(LOGIC_TS).toContain(line);
+    }
+  });
+
+  it('INSERT 본문 필드가 같다', () => {
+    for (const line of [
+      'batch_name: params.campaign.name,',
+      'min_order: settings.min_order ?? 0,',
+    ].map(l => l.replace('params.campaign.name', 'campaign.name'))) {
+      expect(LOGIC_TS).toContain(line);
+    }
+    expect(COUPONS_TS).toContain('batch_name: params.campaign.name,');
+    expect(COUPONS_TS).toContain('min_order: settings.min_order ?? 0,');
+    expect(COUPONS_TS).toContain(
+      "applicable_products: (settings.applicable_products && settings.applicable_products.length > 0)");
+    expect(LOGIC_TS).toContain(
+      "applicable_products: (settings.applicable_products && settings.applicable_products.length > 0)");
+  });
+});
+
+describe('⑬ 쿠폰과 체험권이 서로를 막지 않는다 (index.ts 구조 검증)', () => {
+  const at = (needle: string) => {
+    const i = INDEX_TS.indexOf(needle);
+    if (i < 0) throw new Error(`없음: ${needle}`);
+    return i;
+  };
+
+  it('브라우저와 같은 순서 — contacts → 텔레그램 → 쿠폰 → 체험권', () => {
+    const contacts = at('6-a) contacts upsert');
+    const telegram = at('6-b) 텔레그램 알림');
+    const coupon = at('6-c) 캠페인 쿠폰');
+    const trial = at("여기까지가 '신청 접수'");
+    expect(contacts).toBeLessThan(telegram);
+    expect(telegram).toBeLessThan(coupon);
+    expect(coupon).toBeLessThan(trial);
+  });
+
+  it('원본 CampaignForm 도 쿠폰이 체험권보다 앞이다', () => {
+    const form = readFileSync(resolve(ROOT, 'src/pages/CampaignForm.tsx'), 'utf8');
+    expect(form.indexOf('issueCampaignCoupon')).toBeLessThan(form.indexOf('issueTrialLicense({'));
+  });
+
+  it('쿠폰 발급이 try/catch 로 감싸져 체험권을 막지 않는다', () => {
+    const block = INDEX_TS.slice(at('6-c) 캠페인 쿠폰'), at("여기까지가 '신청 접수'"));
+    expect(block).toContain('try {');
+    expect(block).toContain('} catch (e) {');
+    expect(block).toContain('쿠폰 발급 실패');
+    // catch 안에서 return 하지 않는다 = 뒤의 체험권 흐름이 계속된다
+    expect(block.slice(block.indexOf('} catch (e) {'))).not.toContain('return');
+  });
+
+  it('쿠폰 결과가 모든 응답 경로에 실린다 (체험권 유무와 무관)', () => {
+    const returns = [...INDEX_TS.matchAll(/ok: true, leadId, isExistingCustomer: existing,/g)];
+    expect(returns.length).toBeGreaterThanOrEqual(5);
+    for (const m of returns) {
+      expect(INDEX_TS.slice(m.index!, m.index! + 90)).toContain('coupon');
+    }
+  });
+
+  it('쿠폰 설정을 요청 본문이 아니라 DB 캠페인에서 읽는다', () => {
+    expect(INDEX_TS).toContain('campaign.coupon_settings');
+    expect(INDEX_TS).toContain('trial_license_settings,coupon_settings&limit=1');
+    // raw(요청 본문)에서 쿠폰 설정을 꺼내지 않는다
+    expect(INDEX_TS).not.toContain('raw.coupon_settings');
+    expect(INDEX_TS).not.toContain('lead.couponSettings');
+  });
+
+  it('서버끼리 호출에 internalHeaders 를 쓴다 (send-shop-alimtok 포함)', () => {
+    for (const fn of ['create-coupon', 'send-email', 'notify-telegram', 'send-shop-alimtok']) {
+      const i = INDEX_TS.indexOf(`functions/v1/${fn}`);
+      expect(i, fn).toBeGreaterThan(-1);
+      expect(INDEX_TS.slice(i, i + 400), fn).toContain('internalHeaders()');
+    }
   });
 });

@@ -333,3 +333,111 @@ export function buildCampaignLeadTelegram(params: {
     `👤 ${name} / ${phone}${positionStr}${sourceStr}${existingTag}`
   );
 }
+
+// ── 캠페인 쿠폰 (021-5c) ─────────────────────────────
+// src/lib/campaign-coupons.ts 의 순수 부분 복사.
+// 체험 이용권(mDiary 쿠폰)과 **별개 기능**이고, 한 신청에서 둘 다 발급될 수 있다.
+
+export interface CouponSettings {
+  enabled: boolean;
+  code_prefix: string;
+  discount_type: 'amount' | 'percent';
+  discount_value: number;
+  applicable_products?: string[];
+  expires_in_days: number;
+  max_count?: number | null;
+  alimtok_tpl_code?: string;
+  min_order?: number;
+}
+
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/** campaign-coupons.ts:37-41 복사. 테스트에서 난수를 고정할 수 있게 주입 가능. */
+export function randomCode(len = 6, fill?: (buf: Uint8Array) => void): string {
+  const buf = new Uint8Array(len);
+  (fill ?? ((b: Uint8Array) => crypto.getRandomValues(b)))(buf);
+  return Array.from(buf, b => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
+}
+
+/** campaign-coupons.ts:44-48 복사. 기준 시각을 인자로 받아 테스트 가능하게. */
+export function couponExpiresAt(days: number, now: Date = new Date()): string {
+  const d = new Date(now.getTime());
+  d.setDate(d.getDate() + days);
+  return d.toISOString();
+}
+
+/** 발송 라벨 — '30%' 또는 '5,000원'. campaign-coupons.ts:87-90 복사. */
+export function discountLabel(s: CouponSettings): string {
+  if (s.discount_type === 'percent') return `${s.discount_value}%`;
+  return `${s.discount_value.toLocaleString()}원`;
+}
+
+/** send-shop-alimtok 요청 본문. campaign-coupons.ts:104-112 복사. */
+export function buildCouponAlimtokBody(
+  settings: CouponSettings,
+  lead: { name: string; phone: string },
+  code: string,
+  expiresIso: string,
+): Record<string, unknown> {
+  return {
+    tpl_code:    settings.alimtok_tpl_code,
+    name:        lead.name,
+    phone:       lead.phone,
+    coupon_code: code,
+    expiry_date: expiresIso.slice(0, 10),
+    // 일부 템플릿은 duration/user_limit 슬롯을 활용할 수 있어 함께 채움
+    duration:    discountLabel(settings),
+  };
+}
+
+/** shop_coupons INSERT 본문. campaign-coupons.ts:155-167 복사. */
+export function buildCouponInsert(
+  settings: CouponSettings,
+  campaign: { id: string; name: string },
+  leadId: string,
+  code: string,
+  expIso: string,
+): Record<string, unknown> {
+  return {
+    code,
+    batch_name: campaign.name,
+    campaign_id: campaign.id,
+    lead_id: leadId,
+    discount_type: settings.discount_type,
+    discount_value: settings.discount_value,
+    min_order: settings.min_order ?? 0,
+    expires_at: expIso,
+    applicable_products: (settings.applicable_products && settings.applicable_products.length > 0)
+      ? settings.applicable_products : null,
+    active: true,
+  };
+}
+
+/** 발급 전 사전 판정 — campaign-coupons.ts:122-127, 141-147 의 분기. */
+export type CouponPrecheck =
+  | { action: 'skip'; reason: 'disabled' | 'no_prefix' | 'max_count' }
+  | { action: 'issue' };
+
+export function precheckCoupon(
+  settings: CouponSettings | null | undefined,
+  issuedCount: number | null,
+): CouponPrecheck {
+  if (!settings?.enabled) return { action: 'skip', reason: 'disabled' };
+  if (!settings.code_prefix) return { action: 'skip', reason: 'no_prefix' };
+  if (settings.max_count && settings.max_count > 0 && issuedCount !== null) {
+    if (issuedCount >= settings.max_count) return { action: 'skip', reason: 'max_count' };
+  }
+  return { action: 'issue' };
+}
+
+/** INSERT 응답 상태 → 재시도 여부. campaign-coupons.ts:173-181 의 분기. */
+export type InsertVerdict = 'inserted' | 'retry' | 'abort';
+
+export function couponInsertVerdict(ok: boolean, status: number): InsertVerdict {
+  if (ok) return 'inserted';
+  // UNIQUE 충돌 가능 — 재시도
+  if (status === 409 || status === 400) return 'retry';
+  return 'abort';
+}
+
+export const COUPON_MAX_ATTEMPTS = 5;

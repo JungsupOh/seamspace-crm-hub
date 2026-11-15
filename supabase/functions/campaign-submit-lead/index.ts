@@ -30,10 +30,18 @@ import {
   buildCampaignLeadTelegram,
   telegramSourceLabel,
   normalizePhone,
+  randomCode,
+  couponExpiresAt,
+  buildCouponAlimtokBody,
+  buildCouponInsert,
+  precheckCoupon,
+  couponInsertVerdict,
+  COUPON_MAX_ATTEMPTS,
   MAX_SUBMISSIONS_PER_DAY,
   type CleanLead,
   type PriorTrial,
   type ExistingContact,
+  type CouponSettings,
 } from "./logic.ts";
 import { buildTrialEmail } from "./templates.ts";
 import { internalHeaders } from "../_shared/internal.ts";
@@ -216,6 +224,127 @@ async function notifyTelegram(text: string): Promise<void> {
   }
 }
 
+// ── 캠페인 쿠폰 (021-5c) — campaign-coupons.ts 와 같은 동작 ──
+// 체험 이용권과 **별개**다. 둘 다 켜진 캠페인에서는 둘 다 발급된다.
+
+/** 같은 캠페인의 다른 리드(같은 phone)가 이미 받은 쿠폰 — 재발송용. (campaign-coupons.ts:51-72) */
+async function findExistingCoupon(
+  campaignId: string,
+  phoneNormalized: string,
+  excludeLeadId: string,
+): Promise<{ code: string; expires_at: string } | null> {
+  const r1 = await fetch(
+    `${SUPABASE_URL}/rest/v1/campaign_leads?campaign_id=eq.${q(campaignId)}` +
+      `&phone_normalized=eq.${q(phoneNormalized)}&id=not.eq.${q(excludeLeadId)}&select=id`,
+    { headers: DB },
+  );
+  if (!r1.ok) return null;
+  const otherLeads = await r1.json() as Array<{ id: string }>;
+  if (otherLeads.length === 0) return null;
+
+  const leadIds = otherLeads.map((l) => `"${l.id}"`).join(",");
+  const r2 = await fetch(
+    `${SUPABASE_URL}/rest/v1/shop_coupons?lead_id=in.(${leadIds})&campaign_id=eq.${q(campaignId)}` +
+      `&active=eq.true&order=created_at.desc&select=code,expires_at&limit=1`,
+    { headers: DB },
+  );
+  if (!r2.ok) return null;
+  const rows = await r2.json() as Array<{ code: string; expires_at: string }>;
+  return rows[0] ?? null;
+}
+
+/** campaign-coupons.ts:74-84 */
+async function countCampaignCoupons(campaignId: string): Promise<number> {
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/shop_coupons?campaign_id=eq.${q(campaignId)}&select=id`,
+    { headers: { ...DB, Prefer: "count=exact" } },
+  );
+  if (!r.ok) return 0;
+  const range = r.headers.get("content-range") ?? "";
+  const total = Number(range.split("/")[1] ?? "0");
+  return Number.isFinite(total) ? total : 0;
+}
+
+/** campaign-coupons.ts:92-119 — 템플릿 코드가 없으면 보내지 않는다. */
+async function sendCouponAlimtok(
+  settings: CouponSettings,
+  lead: { name: string; phone: string },
+  code: string,
+  expiresIso: string,
+): Promise<boolean> {
+  if (!settings.alimtok_tpl_code) return false;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/send-shop-alimtok`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${ANON_KEY}`,
+        apikey: ANON_KEY,
+        ...internalHeaders(),
+      },
+      body: JSON.stringify(buildCouponAlimtokBody(settings, lead, code, expiresIso)),
+    });
+    return r.ok;
+  } catch (e) {
+    console.warn("[campaign-submit-lead] 쿠폰 alimtok 실패", e);
+    return false;
+  }
+}
+
+/** campaign-coupons.ts:121-191 issueCampaignCoupon 과 같은 순서. */
+async function issueCampaignCoupon(
+  settings: CouponSettings,
+  campaign: { id: string; name: string },
+  lead: { id: string; phone_normalized: string; name: string; phone: string },
+): Promise<{ code: string; isNew: boolean; alimtokSent: boolean } | null> {
+  // 1) 동일 phone 중복 — 기존 코드 재발송
+  const existing = await findExistingCoupon(campaign.id, lead.phone_normalized, lead.id);
+  if (existing) {
+    const sent = await sendCouponAlimtok(settings, lead, existing.code, existing.expires_at);
+    return { code: existing.code, isNew: false, alimtokSent: sent };
+  }
+
+  // 2) max_count
+  const pre = precheckCoupon(
+    settings,
+    settings.max_count && settings.max_count > 0 ? await countCampaignCoupons(campaign.id) : null,
+  );
+  if (pre.action === "skip") {
+    if (pre.reason === "max_count") {
+      console.warn(`[campaign-submit-lead] 쿠폰 max_count(${settings.max_count}) 초과 — skip`);
+    }
+    return null;
+  }
+
+  // 3) 코드 생성 + INSERT (UNIQUE 충돌 시 재시도)
+  const expIso = couponExpiresAt(settings.expires_in_days || 30);
+  let code = "";
+  let inserted = false;
+  for (let attempt = 0; attempt < COUPON_MAX_ATTEMPTS && !inserted; attempt++) {
+    code = `${settings.code_prefix}-${randomCode()}`;
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/shop_coupons`, {
+      method: "POST",
+      headers: { ...DB, Prefer: "return=minimal" },
+      body: JSON.stringify(buildCouponInsert(settings, campaign, lead.id, code, expIso)),
+    });
+    const verdict = couponInsertVerdict(r.ok, r.status);
+    if (verdict === "inserted") inserted = true;
+    else if (verdict === "retry") continue;
+    else {
+      console.warn("[campaign-submit-lead] 쿠폰 INSERT 실패", r.status);
+      return null;
+    }
+  }
+  if (!inserted) {
+    console.warn("[campaign-submit-lead] 쿠폰 코드 생성 5회 재시도 모두 실패");
+    return null;
+  }
+
+  // 4) 알림톡
+  const sent = await sendCouponAlimtok(settings, lead, code, expIso);
+  return { code, isNew: true, alimtokSent: sent };
+}
+
 async function patchLeadStatus(leadId: string, status: string) {
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${q(leadId)}`, {
@@ -311,13 +440,14 @@ Deno.serve(async (req: Request) => {
     // 3) 캠페인 조회 — 설정은 **서버가 DB 에서 읽는다**(요청 본문을 믿지 않는다)
     const cRes = await fetch(
       `${SUPABASE_URL}/rest/v1/campaigns?id=eq.${q(lead.campaignId)}` +
-        `&select=id,name,title,status,trial_license_settings&limit=1`,
+        `&select=id,name,title,status,trial_license_settings,coupon_settings&limit=1`,
       { headers: DB },
     );
     if (!cRes.ok) return json({ error: "캠페인을 불러오지 못했습니다." }, 502);
     const campaigns = await cRes.json() as Array<{
       id: string; name: string; title?: string | null; status?: string;
       trial_license_settings?: Record<string, unknown> | null;
+      coupon_settings?: Record<string, unknown> | null;
     }>;
     const campaign = campaigns[0];
     if (!campaign) return json({ error: "캠페인을 찾을 수 없습니다." }, 404);
@@ -419,6 +549,24 @@ Deno.serve(async (req: Request) => {
       isExistingCustomer: existing,
     }));
 
+    // 6-c) 캠페인 쿠폰 — CampaignForm.tsx:304-323 과 같은 위치(체험권보다 **앞**)
+    //      체험 이용권과 별개 기능이다. 둘 다 켜져 있으면 둘 다 발급된다.
+    //      쿠폰 설정은 요청 본문이 아니라 **DB 의 캠페인 설정**에서 읽는다.
+    let coupon: { code: string; isNew: boolean; alimtokSent: boolean } | null = null;
+    const couponSettings = (campaign.coupon_settings ?? null) as CouponSettings | null;
+    if (couponSettings?.enabled) {
+      try {
+        coupon = await issueCampaignCoupon(
+          couponSettings,
+          { id: campaign.id, name: campaign.name },
+          { id: leadId, phone_normalized: lead.phoneNormalized, name: lead.name, phone: lead.phone },
+        );
+      } catch (e) {
+        // 쿠폰 실패가 접수나 체험권을 막지 않는다 (CampaignForm.tsx:319-322 과 같은 원칙)
+        console.warn("[campaign-submit-lead] 쿠폰 발급 실패", e);
+      }
+    }
+
     // ── 여기까지가 '신청 접수'. 아래 체험권 발급은 실패해도 접수는 성공이다
     //    (campaign-trial-license.ts:8 과 같은 원칙)
 
@@ -429,7 +577,7 @@ Deno.serve(async (req: Request) => {
     } | null;
 
     if (!settings?.enabled || !settings?.auto_issue) {
-      return json({ ok: true, leadId, isExistingCustomer: existing, trial: null });
+      return json({ ok: true, leadId, isExistingCustomer: existing, coupon, trial: null });
     }
 
     const PLAN_USER_COUNT: Record<string, number> = { classroom: 40, grade: 200 };
@@ -469,7 +617,7 @@ Deno.serve(async (req: Request) => {
     if (decision.action === "block") {
       await patchLeadStatus(leadId, decision.leadStatus);
       return json({
-        ok: true, leadId, isExistingCustomer: existing,
+        ok: true, leadId, isExistingCustomer: existing, coupon,
         trial: {
           code: decision.code, outcome: decision.outcome,
           alimtokSent: false, emailSent: false, licenseSaved: false, channel,
@@ -495,7 +643,7 @@ Deno.serve(async (req: Request) => {
       }
       await patchLeadStatus(leadId, decision.leadStatus);
       return json({
-        ok: true, leadId, isExistingCustomer: existing,
+        ok: true, leadId, isExistingCustomer: existing, coupon,
         trial: {
           code: decision.code, outcome: decision.outcome,
           alimtokSent, emailSent, licenseSaved: false, channel,
@@ -511,7 +659,7 @@ Deno.serve(async (req: Request) => {
     } catch (e) {
       console.error("[campaign-submit-lead] 쿠폰 생성 실패", e);
       // 원본과 같이 리드 등록은 성공으로 둔다
-      return json({ ok: true, leadId, isExistingCustomer: existing, trial: null });
+      return json({ ok: true, leadId, isExistingCustomer: existing, coupon, trial: null });
     }
 
     let alimtokSent = false, emailSent = false;
@@ -555,7 +703,7 @@ Deno.serve(async (req: Request) => {
     await patchLeadStatus(leadId, "체험발송");
 
     return json({
-      ok: true, leadId, isExistingCustomer: existing,
+      ok: true, leadId, isExistingCustomer: existing, coupon,
       trial: { code, outcome: "new", alimtokSent, emailSent, licenseSaved, channel },
     });
   } catch (e) {
