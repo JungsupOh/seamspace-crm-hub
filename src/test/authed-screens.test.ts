@@ -87,6 +87,13 @@ const SCREENS: ScreenCase[] = [
     // :425 admin-auth 는 이미 session.access_token 을 쓴다(021-8b-1).
     allowedPlainRest: [],
   },
+  {
+    file: 'pages/Deals.tsx',
+    allowedAnonAuth: [],
+    // :1432, :1530, :2641 은 Storage 공개 URL 을 그냥 내려받는 fetch 로
+    // rest/v1 호출이 아니고 Authorization 도 없다 → 전환 대상이 아니다.
+    allowedPlainRest: [],
+  },
 ];
 
 describe('021-8b-4 — 관리자 화면 rest/v1 호출은 로그인 토큰으로 나간다', () => {

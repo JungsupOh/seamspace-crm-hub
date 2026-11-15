@@ -23,6 +23,7 @@ import {
   FileText, Receipt, Package, Pencil, Trash2, UserCheck, UserPlus, X, Users,
   FileSpreadsheet, CheckCircle2, AlertCircle, FileDown, Globe,
 } from 'lucide-react';
+import { authedFetch } from '@/lib/authedFetch';
 import { airtable, AirtableRecord } from '@/lib/airtable';
 import { DealFields, ContactFields } from '@/types/airtable';
 import { DEAL_STAGES, ALL_DEAL_STAGES } from '@/lib/grades';
@@ -878,9 +879,9 @@ function DealForm({
     queryFn: async () => {
       const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
       const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-      const res = await fetch(
+      const res = await authedFetch(
         `${SUPABASE_URL}/rest/v1/partners?select=id,name&status=eq.active&order=name.asc`,
-        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+        { headers: { apikey: SUPABASE_KEY } }
       );
       return res.ok ? res.json() : [];
     },
@@ -1469,9 +1470,9 @@ function DealForm({
       notes: tab?.notes,
     };
     try {
-      const found = await fetch(
+      const found = await authedFetch(
         `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=eq.${encodeURIComponent(quoteNumber)}&select=id`,
-        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+        { headers: { apikey: SUPABASE_KEY } },
       ).then((r) => (r.ok ? r.json() : []));
       if (Array.isArray(found) && found.length > 0) {
         await updateDealQuote(found[0].id, fields);
@@ -3212,7 +3213,7 @@ export default function Deals() {
   const handleAutoDealLink = async () => {
     setAutoDealLinking(true);
     setAutoDealLinkResult(null);
-    const headers = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY };
+    const headers = { apikey: SUPABASE_KEY };
     try {
       setAutoDealLinkProgress('딜 목록 불러오는 중...');
       const allDeals = await airtable.fetchAll<DealFields>('03_Deals');
@@ -3227,8 +3228,8 @@ export default function Deals() {
 
       setAutoDealLinkProgress('미연결 이용권 불러오는 중...');
       const [cRes, dlRes] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/mdiary_coupons?group_name=not.is.null&select=id,coupon_code,group_name,extracted_name,is_used,duration,user_limit,service_expire_at&limit=5000`, { headers }),
-        fetch(`${SUPABASE_URL}/rest/v1/deal_licenses?select=coupon_code&limit=5000`, { headers }),
+        authedFetch(`${SUPABASE_URL}/rest/v1/mdiary_coupons?group_name=not.is.null&select=id,coupon_code,group_name,extracted_name,is_used,duration,user_limit,service_expire_at&limit=5000`, { headers }),
+        authedFetch(`${SUPABASE_URL}/rest/v1/deal_licenses?select=coupon_code&limit=5000`, { headers }),
       ]);
       const rawCoupons: Array<{
         id: number; coupon_code: string; group_name: string; extracted_name: string | null;
