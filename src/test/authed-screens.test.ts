@@ -73,6 +73,11 @@ const SCREENS: ScreenCase[] = [
     ],
     allowedPlainRest: [],
   },
+  {
+    file: 'pages/Contacts.tsx',
+    allowedAnonAuth: [],
+    allowedPlainRest: [],
+  },
 ];
 
 describe('021-8b-4 — 관리자 화면 rest/v1 호출은 로그인 토큰으로 나간다', () => {

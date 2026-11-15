@@ -16,6 +16,7 @@ import { AirtableRecord } from '@/lib/airtable';
 import { ContactFields } from '@/types/airtable';
 import { FUNNEL_STAGES, ALL_STAGES, STAGE_COLOR, CONTACT_TYPES, CONTACT_TYPE_COLOR, normalizeStage, normalizeContactType, resolveContactTypeKey } from '@/lib/grades';
 import { useResizableColumns } from '@/hooks/useResizableColumns';
+import { authedFetch } from '@/lib/authedFetch';
 import { airtable } from '@/lib/airtable';
 import { searchSchools, SchoolInfo } from '@/lib/neis';
 
@@ -52,9 +53,9 @@ interface MDiaryCoupon {
 async function getMDiaryCouponsByName(name: string): Promise<MDiaryCoupon[]> {
   if (!name || name.length < 2) return [];
   // 거부된 것(false)은 제외, 미확인(null)과 확인됨(true)만 표시
-  const res = await fetch(
+  const res = await authedFetch(
     `${SUPABASE_URL}/rest/v1/mdiary_coupons?extracted_name=eq.${encodeURIComponent(name)}&order=created_at.desc`,
-    { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+    { headers: { apikey: SUPABASE_KEY } }
   );
   if (!res.ok) return [];
   const data: MDiaryCoupon[] = await res.json();
@@ -79,17 +80,17 @@ async function rejectCouponLink(id: number): Promise<void> {
 
 async function getLicensesByPhone(phone: string): Promise<LicenseRecord[]> {
   const normalized = phone.replace(/\D/g, '');
-  const res = await fetch(
+  const res = await authedFetch(
     `${SUPABASE_URL}/rest/v1/deal_licenses?contact_phone=eq.${encodeURIComponent(phone)}&order=created_at.desc`,
-    { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+    { headers: { apikey: SUPABASE_KEY } }
   );
   if (!res.ok) return [];
   const data: LicenseRecord[] = await res.json();
   if (data.length > 0) return data;
   // 전화번호 포맷이 다를 수 있으므로 숫자만으로 like 검색
-  const res2 = await fetch(
+  const res2 = await authedFetch(
     `${SUPABASE_URL}/rest/v1/deal_licenses?contact_phone=like.*${encodeURIComponent(normalized)}*&order=created_at.desc`,
-    { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+    { headers: { apikey: SUPABASE_KEY } }
   );
   if (!res2.ok) return [];
   const candidates: LicenseRecord[] = await res2.json();
@@ -97,9 +98,9 @@ async function getLicensesByPhone(phone: string): Promise<LicenseRecord[]> {
 }
 
 async function getLicensesByName(name: string): Promise<LicenseRecord[]> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${SUPABASE_URL}/rest/v1/deal_licenses?contact_name=eq.${encodeURIComponent(name)}&order=created_at.desc`,
-    { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+    { headers: { apikey: SUPABASE_KEY } }
   );
   if (!res.ok) return [];
   return res.json();
@@ -539,8 +540,8 @@ export default function Contacts() {
     if (myPhoneNorm.length >= 9) {
       (async () => {
         try {
-          const headers = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY };
-          const leadsRes = await fetch(
+          const headers = { apikey: SUPABASE_KEY };
+          const leadsRes = await authedFetch(
             `${SUPABASE_URL}/rest/v1/campaign_leads?phone_normalized=eq.${encodeURIComponent(myPhoneNorm)}&select=id,campaign_id,name,school_name,position,email,source,source_etc,custom_fields,created_at,status&order=created_at.desc`,
             { headers },
           );
@@ -550,7 +551,7 @@ export default function Contacts() {
 
           // 캠페인 이름 + form_settings 조회
           const campaignIds = Array.from(new Set(leads.map(l => l.campaign_id)));
-          const cRes = await fetch(
+          const cRes = await authedFetch(
             `${SUPABASE_URL}/rest/v1/campaigns?id=in.(${campaignIds.join(',')})&select=id,name,form_settings`,
             { headers },
           );
@@ -559,7 +560,7 @@ export default function Contacts() {
 
           // 각 lead의 체험권 코드 (campaign_licenses)
           const leadIds = leads.map(l => l.id);
-          const licRes = await fetch(
+          const licRes = await authedFetch(
             `${SUPABASE_URL}/rest/v1/campaign_licenses?lead_id=in.(${leadIds.join(',')})&select=lead_id,coupon_code`,
             { headers },
           );
@@ -611,9 +612,9 @@ export default function Contacts() {
         const codeList = codes.map(c => `"${c.replace(/"/g, '\\"')}"`).join(',');
 
         const phoneMap = new Map<string, string>(); // coupon_code → contact_phone(normalized)
-        const fetchOpts = { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } };
+        const fetchOpts = { headers: { apikey: SUPABASE_KEY } };
         const tryFetch = async (url: string) => {
-          const r = await fetch(url, fetchOpts).catch(() => null);
+          const r = await authedFetch(url, fetchOpts).catch(() => null);
           if (!r?.ok) return [] as { coupon_code: string; contact_phone: string | null }[];
           return r.json();
         };
