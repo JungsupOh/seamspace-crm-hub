@@ -17,10 +17,12 @@ import { Button } from '@/components/ui/button';
 import { AlimtalkSendDialog } from '@/components/AlimtalkSendDialog';
 import { getRecentSendLogs, buildSentMap, isAlreadySent, canSendUH2821, lastUH2821SentAt, nextUH2821ResendAt, todayUHStage, type AlimtalkRecipient } from '@/lib/alimtalk';
 import { RevenueTrendChart } from '@/components/dashboard/RevenueTrendChart';
+import { authedFetch } from '@/lib/authedFetch';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-const REST_HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY };
+// Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (021-8b-4).
+const REST_HEADERS = { apikey: SUPABASE_KEY };
 
 const fmt = (n: number) =>
   n >= 100_000_000 ? `${(n / 100_000_000).toFixed(1)}억`
@@ -112,8 +114,8 @@ export default function Dashboard() {
     queryKey: ['deal_partner_map'],
     queryFn: async (): Promise<Record<string, string>> => {
       const [pdRes, pRes] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/partner_deals?linked_deal_id=not.is.null&select=linked_deal_id,partner_id`, { headers: REST_HEADERS }),
-        fetch(`${SUPABASE_URL}/rest/v1/partners?select=id,name`, { headers: REST_HEADERS }),
+        authedFetch(`${SUPABASE_URL}/rest/v1/partner_deals?linked_deal_id=not.is.null&select=linked_deal_id,partner_id`, { headers: REST_HEADERS }),
+        authedFetch(`${SUPABASE_URL}/rest/v1/partners?select=id,name`, { headers: REST_HEADERS }),
       ]);
       const pds = pdRes.ok ? (await pdRes.json() as { linked_deal_id: string; partner_id: string }[]) : [];
       const partners = pRes.ok ? (await pRes.json() as { id: string; name: string }[]) : [];
@@ -130,7 +132,7 @@ export default function Dashboard() {
   const { data: priorYearRows } = useQuery({
     queryKey: ['prior_year_revenue', currentYear - 1],
     queryFn: async () => {
-      const r = await fetch(
+      const r = await authedFetch(
         `${SUPABASE_URL}/rest/v1/prior_year_revenue?year=eq.${currentYear - 1}&select=month,amount`,
         { headers: REST_HEADERS },
       );
