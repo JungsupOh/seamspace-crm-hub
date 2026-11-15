@@ -1,5 +1,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import {
+  resolveCallerRole, callerVerdict, validateAssignRole, buildProfileUpdate,
+} from './logic.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://seamspace-crm-hub.vercel.app',
@@ -43,16 +46,22 @@ serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const { data: profile } = await adminClient
+    const { data: profile, error: profileErr } = await adminClient
       .from('user_profiles')
       .select('role')
       .eq('id', caller.id)
       .single();
 
-    const callerRole = profile?.role ?? caller.user_metadata?.role;
-    if (callerRole !== 'admin' && callerRole !== 'sub_admin') {
-      return jsonResponse({ error: 'Admin access required' }, 403);
+    if (profileErr) {
+      // 조회 실패·행 없음 — fail-closed. 틈을 만들지 않는다.
+      console.warn(`[admin-auth] user_profiles 조회 실패 user=${caller.id}`);
     }
+
+    // ⚠️ user_metadata 로 폴백하지 않는다 — 사용자가 스스로 고칠 수 있는 값이라
+    //    프로필 없는 계정이 role=admin 을 적어 넣고 통과할 수 있다 (021-6d C-2).
+    const callerRole = resolveCallerRole(profile, caller.user_metadata);
+    const cv = callerVerdict(callerRole);
+    if (!cv.ok) return jsonResponse({ error: cv.error }, cv.status);
 
     // --- Parse action ---
     const body = await req.json();
@@ -70,14 +79,50 @@ serve(async (req) => {
         if (!email || !password) {
           return jsonResponse({ error: 'email and password are required' }, 400);
         }
+
+        // 부여할 역할을 **먼저** 검증한다 — 계정을 만든 뒤에 거절하면 찌꺼기가 남는다.
+        const meta = (user_metadata ?? {}) as Record<string, unknown>;
+        const rv = validateAssignRole(meta.role);
+        if (!rv.ok) return jsonResponse({ error: rv.error }, rv.status);
+
         const { data, error } = await adminClient.auth.admin.createUser({
           email,
           password,
           email_confirm: true,
-          user_metadata: user_metadata ?? {},
+          user_metadata: meta,
         });
         if (error) return jsonResponse({ error: error.message }, 400);
-        return jsonResponse({ user: data.user });
+
+        // ── 역할 부여 ──
+        // 트리거(마이그레이션 20261115000000)는 이제 role='guest' 로만 행을 만든다.
+        // 실제 권한은 여기서 준다 — 호출자가 admin·sub_admin 임을 이미 확인한 뒤다.
+        const newUserId = data.user?.id;
+        if (newUserId) {
+          const { error: profErr } = await adminClient
+            .from('user_profiles')
+            .update(buildProfileUpdate({
+              role: rv.role,
+              partnerId: meta.partner_id,
+              name: meta.name,
+            }))
+            .eq('id', newUserId);
+
+          if (profErr) {
+            // 계정은 만들어졌지만 역할이 들어가지 않았다 = 'guest' 로 남아 있다.
+            // guest 는 아무 권한이 없으므로 **위험하지는 않다**(fail-closed).
+            // 계정을 지우지 않는 이유는 021-6d C-4 참고 — 호출부가 재시도로
+            // 수습할 수 있고, 삭제는 그 자체로 실패할 수 있는 파괴적 동작이다.
+            console.error(`[admin-auth] 프로필 역할 부여 실패 user=${newUserId}`, profErr);
+            return jsonResponse({
+              error: '계정은 생성됐지만 역할 부여에 실패했습니다. ' +
+                     '해당 계정은 권한 없음(guest) 상태입니다. 사용자 화면에서 역할을 지정하거나 삭제해 주세요.',
+              user: data.user,
+              roleAssigned: false,
+            }, 500);
+          }
+        }
+
+        return jsonResponse({ user: data.user, roleAssigned: true });
       }
 
       case 'deleteUser': {
