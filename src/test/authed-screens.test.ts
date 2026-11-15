@@ -94,6 +94,13 @@ const SCREENS: ScreenCase[] = [
     // rest/v1 호출이 아니고 Authorization 도 없다 → 전환 대상이 아니다.
     allowedPlainRest: [],
   },
+  {
+    file: 'pages/ShopOrders.tsx',
+    allowedAnonAuth: [
+      { why: ':318 functions/v1/send-shop-alimtok — 021-8a 담당' },
+    ],
+    allowedPlainRest: [],
+  },
 ];
 
 describe('021-8b-4 — 관리자 화면 rest/v1 호출은 로그인 토큰으로 나간다', () => {

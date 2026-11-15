@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
+import { authedFetch } from '@/lib/authedFetch';
 import { toast } from 'sonner';
 import { formatPhone } from '@/lib/utils';
 import { apiSendCoupon } from '@/lib/coupons';
@@ -18,7 +19,8 @@ import { matchesPeriod, type PeriodValue } from '@/lib/period';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
+// Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (021-8b-4).
+const HEADERS = { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
 
 // 디지털 전용 상품 ID (배송 불필요)
 const DIGITAL_PRODUCTS = new Set(['minddiary']);
@@ -61,7 +63,7 @@ const NEXT_STATUS: Record<typeof STATUS_LIST[number], typeof STATUS_LIST[number]
 const CARRIERS = ['CJ대한통운', '롯데택배', '한진택배', '우체국', '로젠택배', '직접배송'];
 
 async function fetchOrders(): Promise<ShopOrder[]> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/shop_orders?order=created_at.desc&limit=500`, { headers: HEADERS });
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/shop_orders?order=created_at.desc&limit=500`, { headers: HEADERS });
   if (!r.ok) throw new Error('주문 목록 조회 실패');
   return r.json();
 }
@@ -71,7 +73,7 @@ async function deleteShopOrder(orderId: string): Promise<{ items: number; licens
   const counts = { items: 0, licenses: 0, deals: 0 };
 
   // 1) 디지털 발급분: deals (quote_number 패턴 = orderId 또는 orderId-N)
-  const dealsRes = await fetch(
+  const dealsRes = await authedFetch(
     `${SUPABASE_URL}/rest/v1/deals?quote_number=like.${encodeURIComponent(orderId)}*&select=id`,
     { headers: HEADERS },
   );
@@ -80,23 +82,23 @@ async function deleteShopOrder(orderId: string): Promise<{ items: number; licens
   if (dealIds.length > 0) {
     const inFilter = `(${dealIds.map(id => `"${id}"`).join(',')})`;
     // 1-1) deal_licenses
-    const licDel = await fetch(
+    const licDel = await authedFetch(
       `${SUPABASE_URL}/rest/v1/deal_licenses?deal_id=in.${inFilter}`,
       { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
     );
     if (licDel.ok) counts.licenses = ((await licDel.json()) as unknown[]).length;
     // 1-2) deal_quotes
-    await fetch(
+    await authedFetch(
       `${SUPABASE_URL}/rest/v1/deal_quotes?deal_id=in.${inFilter}`,
       { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=minimal' } },
     );
     // 1-3) deal_users
-    await fetch(
+    await authedFetch(
       `${SUPABASE_URL}/rest/v1/deal_users?deal_id=in.${inFilter}`,
       { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=minimal' } },
     );
     // 1-4) deals
-    const dDel = await fetch(
+    const dDel = await authedFetch(
       `${SUPABASE_URL}/rest/v1/deals?id=in.${inFilter}`,
       { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
     );
@@ -104,14 +106,14 @@ async function deleteShopOrder(orderId: string): Promise<{ items: number; licens
   }
 
   // 2) shop_order_items
-  const itemsDel = await fetch(
+  const itemsDel = await authedFetch(
     `${SUPABASE_URL}/rest/v1/shop_order_items?order_id=eq.${encodeURIComponent(orderId)}`,
     { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
   );
   if (itemsDel.ok) counts.items = ((await itemsDel.json()) as unknown[]).length;
 
   // 3) shop_orders
-  const oDel = await fetch(
+  const oDel = await authedFetch(
     `${SUPABASE_URL}/rest/v1/shop_orders?order_id=eq.${encodeURIComponent(orderId)}`,
     { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=minimal' } },
   );
@@ -124,7 +126,7 @@ async function deleteShopOrder(orderId: string): Promise<{ items: number; licens
 }
 
 async function fetchOrderItems(orderId: string): Promise<ShopOrderItem[]> {
-  const r = await fetch(
+  const r = await authedFetch(
     `${SUPABASE_URL}/rest/v1/shop_order_items?order_id=eq.${encodeURIComponent(orderId)}`,
     { headers: HEADERS },
   );
@@ -137,7 +139,7 @@ async function fetchIssuedLicensesByOrderId(orderId: string): Promise<Array<{
   coupon_code: string; duration: string; user_count: string; contact_name: string; contact_phone: string;
 }>> {
   // 1) quote_number 패턴 매칭으로 deal id 조회 (orderId, orderId-1, orderId-2, ...)
-  const dealsRes = await fetch(
+  const dealsRes = await authedFetch(
     `${SUPABASE_URL}/rest/v1/deals?quote_number=like.${encodeURIComponent(orderId)}*&select=id`,
     { headers: HEADERS },
   );
@@ -147,7 +149,7 @@ async function fetchIssuedLicensesByOrderId(orderId: string): Promise<Array<{
 
   // 2) 각 deal에 묶인 deal_licenses 조회
   const dealIds = deals.map((d) => d.id).join(',');
-  const licRes = await fetch(
+  const licRes = await authedFetch(
     `${SUPABASE_URL}/rest/v1/deal_licenses?deal_id=in.(${dealIds})&select=coupon_code,duration,user_count,contact_name,contact_phone`,
     { headers: HEADERS },
   );
@@ -178,7 +180,7 @@ export default function ShopOrders() {
   const itemsByOrder = useQuery({
     queryKey: ['shop-orders-items-bulk'],
     queryFn: async () => {
-      const r = await fetch(
+      const r = await authedFetch(
         `${SUPABASE_URL}/rest/v1/shop_order_items?select=order_id,product_id,subtotal,qty&limit=2000`,
         { headers: HEADERS },
       );
@@ -281,7 +283,7 @@ export default function ShopOrders() {
       }
       if (params.carrier !== undefined) body.carrier = params.carrier || null;
       if (params.trackingNumber !== undefined) body.tracking_number = params.trackingNumber || null;
-      const r = await fetch(`${SUPABASE_URL}/rest/v1/shop_orders?id=eq.${params.id}`, {
+      const r = await authedFetch(`${SUPABASE_URL}/rest/v1/shop_orders?id=eq.${params.id}`, {
         method: 'PATCH',
         headers: { ...HEADERS, Prefer: 'return=minimal' },
         body: JSON.stringify(body),
@@ -311,7 +313,9 @@ export default function ShopOrders() {
           };
           fetch(`${SUPABASE_URL}/functions/v1/send-shop-alimtok`, {
             method: 'POST',
-            headers: { ...HEADERS },
+            // 엣지 함수 호출은 이 단위 범위가 아니다(021-8a). HEADERS 에서 Authorization 을
+            // 빼면서 여기만 기존 동작 그대로 공개 키를 명시해 둔다.
+            headers: { ...HEADERS, Authorization: `Bearer ${SUPABASE_KEY}` },
             body: JSON.stringify(sendBody),
           }).then(res => {
             if (!res.ok) console.warn('[ShopOrders] UH_5417 응답', res.status);
