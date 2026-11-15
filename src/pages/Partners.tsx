@@ -15,6 +15,7 @@ import { Plus, Upload, Scan, FileText, Trash2, ExternalLink, Building2, Search, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDeals, useCreateDeal, useContacts } from '@/hooks/use-airtable';
 import type { DealFields, ContactFields } from '@/types/airtable';
+import { authedFetch } from '@/lib/authedFetch';
 import { airtable, type AirtableRecord } from '@/lib/airtable';
 import { getPartnerDeals, getAllPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals, createDealBuyers, getDealBuyers, deleteDealBuyers } from '@/lib/partner-deals';
 import { getPartnerLicenses, type PartnerLicense } from '@/lib/partner-licenses';
@@ -40,8 +41,8 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const BUCKET = 'partner-files';
 
+// Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (021-8b-4).
 const DB_HEADERS = {
-  Authorization: `Bearer ${SUPABASE_KEY}`,
   apikey: SUPABASE_KEY,
   'Content-Type': 'application/json',
 };
@@ -94,13 +95,13 @@ const PARTNER_URL      = `${SUPABASE_URL}/rest/v1/partners`;
 const PARTNER_FILE_URL = `${SUPABASE_URL}/rest/v1/partner_files`;
 
 async function getPartners(): Promise<Partner[]> {
-  const res = await fetch(`${PARTNER_URL}?order=created_at.asc`, { headers: DB_HEADERS });
+  const res = await authedFetch(`${PARTNER_URL}?order=created_at.asc`, { headers: DB_HEADERS });
   if (!res.ok) throw new Error(`파트너 조회 실패: ${res.status}`);
   return res.json();
 }
 
 async function createPartner(fields: Partial<PartnerFields>): Promise<Partner> {
-  const res = await fetch(PARTNER_URL, {
+  const res = await authedFetch(PARTNER_URL, {
     method: 'POST',
     headers: { ...DB_HEADERS, Prefer: 'return=representation' },
     body: JSON.stringify({ ...fields, status: fields.status ?? 'active' }),
@@ -114,7 +115,7 @@ async function createPartner(fields: Partial<PartnerFields>): Promise<Partner> {
 }
 
 async function updatePartner(id: string, fields: Partial<PartnerFields>): Promise<void> {
-  const res = await fetch(`${PARTNER_URL}?id=eq.${id}`, {
+  const res = await authedFetch(`${PARTNER_URL}?id=eq.${id}`, {
     method: 'PATCH',
     headers: DB_HEADERS,
     body: JSON.stringify(fields),
@@ -123,12 +124,12 @@ async function updatePartner(id: string, fields: Partial<PartnerFields>): Promis
 }
 
 async function deletePartner(id: string): Promise<void> {
-  const res = await fetch(`${PARTNER_URL}?id=eq.${id}`, { method: 'DELETE', headers: DB_HEADERS });
+  const res = await authedFetch(`${PARTNER_URL}?id=eq.${id}`, { method: 'DELETE', headers: DB_HEADERS });
   if (!res.ok) throw new Error(`파트너 삭제 실패: ${res.status}`);
 }
 
 async function getPartnerFiles(partnerId: string): Promise<PartnerFile[]> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${PARTNER_FILE_URL}?partner_id=eq.${encodeURIComponent(partnerId)}&order=uploaded_at.asc`,
     { headers: DB_HEADERS },
   );
@@ -137,7 +138,7 @@ async function getPartnerFiles(partnerId: string): Promise<PartnerFile[]> {
 }
 
 async function deletePartnerFile(id: string): Promise<void> {
-  const res = await fetch(`${PARTNER_FILE_URL}?id=eq.${id}`, { method: 'DELETE', headers: DB_HEADERS });
+  const res = await authedFetch(`${PARTNER_FILE_URL}?id=eq.${id}`, { method: 'DELETE', headers: DB_HEADERS });
   if (!res.ok) throw new Error(`파일 삭제 실패: ${res.status}`);
 }
 
@@ -165,7 +166,7 @@ async function uploadPartnerFile(partnerId: string, fileType: FileType, file: Fi
   }
 
   const fileUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${path}`;
-  const dbRes = await fetch(PARTNER_FILE_URL, {
+  const dbRes = await authedFetch(PARTNER_FILE_URL, {
     method: 'POST',
     headers: { ...DB_HEADERS, Prefer: 'return=representation' },
     body: JSON.stringify({ partner_id: partnerId, file_type: fileType, file_name: file.name, file_url: fileUrl }),

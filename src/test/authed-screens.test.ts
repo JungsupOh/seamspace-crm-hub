@@ -78,6 +78,15 @@ const SCREENS: ScreenCase[] = [
     allowedAnonAuth: [],
     allowedPlainRest: [],
   },
+  {
+    file: 'pages/Partners.tsx',
+    allowedAnonAuth: [
+      { why: ':157 Storage 업로드(partner-files 버킷) — 021-8e 담당' },
+      { why: ':227 functions/v1/ocr-partner-doc — 021-8a 담당' },
+    ],
+    // :425 admin-auth 는 이미 session.access_token 을 쓴다(021-8b-1).
+    allowedPlainRest: [],
+  },
 ];
 
 describe('021-8b-4 — 관리자 화면 rest/v1 호출은 로그인 토큰으로 나간다', () => {
