@@ -44,6 +44,7 @@ import {
   type CouponSettings,
 } from "./logic.ts";
 import { buildTrialEmail } from "./templates.ts";
+import { fetchGuideAttachments } from "./quick-guide.ts";
 import { internalHeaders } from "../_shared/internal.ts";
 
 const CORS = {
@@ -57,6 +58,10 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // Edge→Edge 호출은 SERVICE_ROLE_KEY 를 Bearer 로 쓰면 401 이 난다(apk-subscribe:14).
 // 그래서 내부 호출의 Authorization 은 anon 키로 두고, 인증은 internalHeaders 가 맡는다.
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+// 퀵가이드 PDF 를 받아 올 운영 사이트 주소 (public/docs/quick-guide/ 가 서빙되는 곳).
+// 기본값은 apk-subscribe 등 다른 함수의 APP_URL 기본값과 같다. 전용 환경변수(QUICK_GUIDE_BASE_URL)로만 바꾼다
+// (APP_URL 은 다른 용도로 쓰이는 이름이라 일부러 재사용하지 않는다).
+const QUICK_GUIDE_BASE_URL = Deno.env.get("QUICK_GUIDE_BASE_URL") ?? "https://seamspace-crm-hub.vercel.app";
 
 const DB: Record<string, string> = {
   Authorization: `Bearer ${SERVICE_KEY}`,
@@ -385,6 +390,11 @@ async function sendMail(built: ReturnType<typeof buildTrialEmail>): Promise<void
   // cc 가 undefined 면 키를 넣지 않는다 — send-email 이 기본 참조(sales@)를 붙인다.
   // null 이면 참조를 끄겠다는 뜻이라 그대로 실어 보낸다. (email.ts:36,41 과 같은 규칙)
   if (built.cc !== undefined) body.cc = built.cc;
+
+  // 퀵가이드 PDF 첨부 (CRM-022). 브라우저 email.ts 와 같은 목록·같은 파일명.
+  // 파일은 운영 사이트의 public 정적 경로에서 받는다. 실패하면 첨부 없이 보낸다(브라우저와 같은 정책).
+  const attachments = await fetchGuideAttachments(built.guideLang, QUICK_GUIDE_BASE_URL, "campaign-submit-lead");
+  if (attachments) body.attachments = attachments;
 
   const r = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
     method: "POST",

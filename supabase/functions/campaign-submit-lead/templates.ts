@@ -11,6 +11,8 @@
 // 이 파일은 순수 문자열 조립만 한다 — Deno API 도 네트워크도 쓰지 않는다.
 // 덕분에 vitest(Node)에서도 그대로 import 해서 검증할 수 있다.
 
+import { guideBlockHtml, guideBlockText, type GuideLang } from './quick-guide.ts';
+
 export const DEFAULT_CC = 'sales@tebahsoft.com';
 
 export interface TrialEmailParams {
@@ -34,6 +36,8 @@ export interface BuiltEmail {
   text: string;
   reply_to: string;
   cc: string | string[] | null | undefined;
+  /** 첨부할 퀵가이드 언어 — 템플릿 언어와 같다 (ko 로케일은 JP 템플릿이므로 ja). */
+  guideLang: GuideLang;
 }
 
 // ── src/lib/email.ts:18-23 복사 ──
@@ -165,6 +169,7 @@ export function buildTrialEmailJP(params: TrialEmailParams): BuiltEmail {
       ご利用開始の手順は、添付の <strong>Quick Guide (PDF)</strong> をご参照ください。<br/>
       アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
     </p>
+    ${guideBlockHtml('ja')}
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">デモミーティングをご希望の場合</p>
     <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
@@ -201,6 +206,8 @@ export function buildTrialEmailJP(params: TrialEmailParams): BuiltEmail {
     `ご利用開始の手順は、添付の Quick Guide (PDF) をご参照ください。`,
     `アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。`,
     ``,
+    ...guideBlockText('ja'),
+    ``,
     `デモミーティングをご希望の場合は、このメールにそのままご返信ください。`,
     ``,
     `お問い合わせ: contact@tebahsoft.com`,
@@ -216,6 +223,7 @@ export function buildTrialEmailJP(params: TrialEmailParams): BuiltEmail {
     reply_to: 'contact@tebahsoft.com',
     // cc: 캠페인 설정에 따라 sales@ 를 붙이거나 뺀다 (trialCc 주석 참고)
     cc: trialCc(params.ccSales, params.cc),
+    guideLang: 'ja',
   };
 }
 
@@ -252,6 +260,7 @@ export function buildTrialEmailEN(params: TrialEmailParams): BuiltEmail {
       Please refer to the attached <strong>Quick Guide (PDF)</strong> to get started.<br/>
       It walks you through account sign-up and entering your trial code, step by step with screenshots.
     </p>
+    ${guideBlockHtml('en')}
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">Would you like a demo meeting?</p>
     <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
@@ -288,6 +297,8 @@ export function buildTrialEmailEN(params: TrialEmailParams): BuiltEmail {
     `Please refer to the attached Quick Guide (PDF) to get started.`,
     `It walks you through account sign-up and entering your trial code, step by step with screenshots.`,
     ``,
+    ...guideBlockText('en'),
+    ``,
     `Would you like a demo meeting? Simply reply to this email and our team will get in touch.`,
     ``,
     `Contact: contact@tebahsoft.com`,
@@ -305,6 +316,7 @@ export function buildTrialEmailEN(params: TrialEmailParams): BuiltEmail {
     reply_to: 'contact@tebahsoft.com',
     // cc: 캠페인 설정에 따라 sales@ 를 붙이거나 뺀다 (trialCc 주석 참고)
     cc: trialCc(params.ccSales, params.cc),
+    guideLang: 'en',
   };
 }
 

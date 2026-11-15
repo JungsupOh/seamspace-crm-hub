@@ -44,6 +44,19 @@ exports[`① 스냅샷 — 전환 전 기준값 > 같은 연락처 재신청 (re
       Please refer to the attached <strong>Quick Guide (PDF)</strong> to get started.<br/>
       It walks you through account sign-up and entering your trial code, step by step with screenshots.
     </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;line-height:1.7;">
+      Attached files (Quick Guide, 7 PDFs)<br/>
+      01 How To Start<br/>
+      02 Sign Up and Login<br/>
+      03 Admin Page<br/>
+      04 Group Journal<br/>
+      05 Wall<br/>
+      06 Worksheet<br/>
+      07 Newsletter
+    </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;line-height:1.7;">
+      Online tutorial: <a href="https://www.seamspace.site/resource/tutorial" style="color:#6366f1;text-decoration:none;">https://www.seamspace.site/resource/tutorial</a>
+    </p>
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">Would you like a demo meeting?</p>
     <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
@@ -120,6 +133,19 @@ exports[`① 스냅샷 — 전환 전 기준값 > 같은 연락처 재신청 (re
     <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
       ご利用開始の手順は、添付の <strong>Quick Guide (PDF)</strong> をご参照ください。<br/>
       アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
+    </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;line-height:1.7;">
+      添付ファイル（Quick Guide PDF 7点）<br/>
+      01 How To Start<br/>
+      02 Sign Up and Login<br/>
+      03 Admin Page<br/>
+      04 Shared Story<br/>
+      05 Wall<br/>
+      06 Worksheet<br/>
+      07 Newsletter
+    </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;line-height:1.7;">
+      オンラインチュートリアル: <a href="https://www.seamspace.site/ja/resource/tutorial" style="color:#6366f1;text-decoration:none;">https://www.seamspace.site/ja/resource/tutorial</a>
     </p>
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">デモミーティングをご希望の場合</p>
@@ -200,6 +226,19 @@ exports[`① 스냅샷 — 전환 전 기준값 > 국내 KO (알림톡 채널이
       ご利用開始の手順は、添付の <strong>Quick Guide (PDF)</strong> をご参照ください。<br/>
       アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
     </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;line-height:1.7;">
+      添付ファイル（Quick Guide PDF 7点）<br/>
+      01 How To Start<br/>
+      02 Sign Up and Login<br/>
+      03 Admin Page<br/>
+      04 Shared Story<br/>
+      05 Wall<br/>
+      06 Worksheet<br/>
+      07 Newsletter
+    </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;line-height:1.7;">
+      オンラインチュートリアル: <a href="https://www.seamspace.site/ja/resource/tutorial" style="color:#6366f1;text-decoration:none;">https://www.seamspace.site/ja/resource/tutorial</a>
+    </p>
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">デモミーティングをご希望の場合</p>
     <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
@@ -245,6 +284,16 @@ seamspace にご関心をお寄せいただき、誠にありがとうござい�
 
 ご利用開始の手順は、添付の Quick Guide (PDF) をご参照ください。
 アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
+
+添付ファイル（Quick Guide PDF 7点）:
+- 01 How To Start
+- 02 Sign Up and Login
+- 03 Admin Page
+- 04 Shared Story
+- 05 Wall
+- 06 Worksheet
+- 07 Newsletter
+オンラインチュートリアル: https://www.seamspace.site/ja/resource/tutorial
 
 デモミーティングをご希望の場合は、このメールにそのままご返信ください。
 
@@ -301,6 +350,19 @@ exports[`① 스냅샷 — 전환 전 기준값 > 이메일만 있는 해외 신
     <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
       Please refer to the attached <strong>Quick Guide (PDF)</strong> to get started.<br/>
       It walks you through account sign-up and entering your trial code, step by step with screenshots.
+    </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;line-height:1.7;">
+      Attached files (Quick Guide, 7 PDFs)<br/>
+      01 How To Start<br/>
+      02 Sign Up and Login<br/>
+      03 Admin Page<br/>
+      04 Group Journal<br/>
+      05 Wall<br/>
+      06 Worksheet<br/>
+      07 Newsletter
+    </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;line-height:1.7;">
+      Online tutorial: <a href="https://www.seamspace.site/resource/tutorial" style="color:#6366f1;text-decoration:none;">https://www.seamspace.site/resource/tutorial</a>
     </p>
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">Would you like a demo meeting?</p>
@@ -385,6 +447,19 @@ exports[`① 스냅샷 — 전환 전 기준값 > 해외 EN > en-html 1`] = `
       Please refer to the attached <strong>Quick Guide (PDF)</strong> to get started.<br/>
       It walks you through account sign-up and entering your trial code, step by step with screenshots.
     </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;line-height:1.7;">
+      Attached files (Quick Guide, 7 PDFs)<br/>
+      01 How To Start<br/>
+      02 Sign Up and Login<br/>
+      03 Admin Page<br/>
+      04 Group Journal<br/>
+      05 Wall<br/>
+      06 Worksheet<br/>
+      07 Newsletter
+    </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;line-height:1.7;">
+      Online tutorial: <a href="https://www.seamspace.site/resource/tutorial" style="color:#6366f1;text-decoration:none;">https://www.seamspace.site/resource/tutorial</a>
+    </p>
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">Would you like a demo meeting?</p>
     <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
@@ -430,6 +505,16 @@ Your 3-month free trial starts when you register the code (not from the day you 
 
 Please refer to the attached Quick Guide (PDF) to get started.
 It walks you through account sign-up and entering your trial code, step by step with screenshots.
+
+Attached files (Quick Guide, 7 PDFs):
+- 01 How To Start
+- 02 Sign Up and Login
+- 03 Admin Page
+- 04 Group Journal
+- 05 Wall
+- 06 Worksheet
+- 07 Newsletter
+Online tutorial: https://www.seamspace.site/resource/tutorial
 
 Would you like a demo meeting? Simply reply to this email and our team will get in touch.
 
@@ -481,6 +566,19 @@ exports[`① 스냅샷 — 전환 전 기준값 > 해외 JP > jp-html 1`] = `
       ご利用開始の手順は、添付の <strong>Quick Guide (PDF)</strong> をご参照ください。<br/>
       アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
     </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;line-height:1.7;">
+      添付ファイル（Quick Guide PDF 7点）<br/>
+      01 How To Start<br/>
+      02 Sign Up and Login<br/>
+      03 Admin Page<br/>
+      04 Shared Story<br/>
+      05 Wall<br/>
+      06 Worksheet<br/>
+      07 Newsletter
+    </p>
+    <p style="margin:0 0 16px;font-size:12px;color:#64748b;line-height:1.7;">
+      オンラインチュートリアル: <a href="https://www.seamspace.site/ja/resource/tutorial" style="color:#6366f1;text-decoration:none;">https://www.seamspace.site/ja/resource/tutorial</a>
+    </p>
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">デモミーティングをご希望の場合</p>
     <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
@@ -526,6 +624,16 @@ EDIX 東京 2026 のご登録ありがとうございました。
 
 ご利用開始の手順は、添付の Quick Guide (PDF) をご参照ください。
 アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
+
+添付ファイル（Quick Guide PDF 7点）:
+- 01 How To Start
+- 02 Sign Up and Login
+- 03 Admin Page
+- 04 Shared Story
+- 05 Wall
+- 06 Worksheet
+- 07 Newsletter
+オンラインチュートリアル: https://www.seamspace.site/ja/resource/tutorial
 
 デモミーティングをご希望の場合は、このメールにそのままご返信ください。
 

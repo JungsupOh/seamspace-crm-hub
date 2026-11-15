@@ -2,6 +2,8 @@
 // Resend API는 브라우저에서 직접 호출 불가 (CORS 제한)
 // supabase/functions/send-email/index.ts 를 배포해야 함
 
+import { guideBlockHtml, guideBlockText, guideLang, fetchGuideAttachments } from '@/lib/quickGuide';
+
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const APP_URL = window.location.origin;
@@ -456,6 +458,7 @@ export async function sendTrialLicenseEmailJP(params: {
       ご利用開始の手順は、添付の <strong>Quick Guide (PDF)</strong> をご参照ください。<br/>
       アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。
     </p>
+    ${guideBlockHtml('ja')}
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">デモミーティングをご希望の場合</p>
     <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
@@ -492,35 +495,16 @@ export async function sendTrialLicenseEmailJP(params: {
     `ご利用開始の手順は、添付の Quick Guide (PDF) をご参照ください。`,
     `アカウント登録 → トライアルコード入力までの流れを画面付きでご案内しております。`,
     ``,
+    ...guideBlockText('ja'),
+    ``,
     `デモミーティングをご希望の場合は、このメールにそのままご返信ください。`,
     ``,
     `お問い合わせ: contact@tebahsoft.com`,
     `テバソフト株式会社`,
   ].join('\n');
 
-  // Quick Guide PDF 첨부 (public/docs/Quick Guide_HowToStart(JP).pdf)
-  // public 자산은 fetch로 base64로 읽어서 첨부.
-  let attachments: Array<{ filename: string; content: string }> | undefined;
-  try {
-    const r = await fetch('/docs/Quick%20Guide_HowToStart(JP).pdf');
-    if (r.ok) {
-      const blob = await r.blob();
-      const buf = await blob.arrayBuffer();
-      // base64 인코딩
-      const bytes = new Uint8Array(buf);
-      let binary = '';
-      const chunkSize = 0x8000;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
-      }
-      const base64 = btoa(binary);
-      attachments = [{ filename: 'seamspace_QuickGuide_JP.pdf', content: base64 }];
-    } else {
-      console.warn('[sendTrialLicenseEmailJP] Quick Guide PDF 로드 실패', r.status);
-    }
-  } catch (e) {
-    console.warn('[sendTrialLicenseEmailJP] Quick Guide PDF 첨부 실패 (메일은 진행)', e);
-  }
+  // Quick Guide PDF 첨부 — 쪽별 PDF (public/docs/quick-guide/ja/, 목록은 quickGuide.ts)
+  const attachments = await fetchGuideAttachments('ja', '', 'sendTrialLicenseEmailJP');
 
   await sendEmail(
     params.to,
@@ -626,6 +610,7 @@ export async function sendTrialLicenseEmailEN(params: {
       Please refer to the attached <strong>Quick Guide (PDF)</strong> to get started.<br/>
       It walks you through account sign-up and entering your trial code, step by step with screenshots.
     </p>
+    ${guideBlockHtml('en')}
 
     <p style="margin:0 0 6px;font-size:13px;color:#0f172a;font-weight:600;">Would you like a demo meeting?</p>
     <p style="margin:0 0 24px;font-size:13px;color:#334155;line-height:1.7;">
@@ -662,33 +647,16 @@ export async function sendTrialLicenseEmailEN(params: {
     `Please refer to the attached Quick Guide (PDF) to get started.`,
     `It walks you through account sign-up and entering your trial code, step by step with screenshots.`,
     ``,
+    ...guideBlockText('en'),
+    ``,
     `Would you like a demo meeting? Simply reply to this email and our team will get in touch.`,
     ``,
     `Contact: contact@tebahsoft.com`,
     `Tebahsoft Inc.`,
   ].join('\n');
 
-  // Quick Guide PDF 첨부 (public/docs/Quick Guide_How To Start (En).pdf)
-  let attachments: Array<{ filename: string; content: string }> | undefined;
-  try {
-    const r = await fetch('/docs/Quick%20Guide_How%20To%20Start%20(En).pdf');
-    if (r.ok) {
-      const blob = await r.blob();
-      const buf = await blob.arrayBuffer();
-      const bytes = new Uint8Array(buf);
-      let binary = '';
-      const chunkSize = 0x8000;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
-      }
-      const base64 = btoa(binary);
-      attachments = [{ filename: 'seamspace_QuickGuide_EN.pdf', content: base64 }];
-    } else {
-      console.warn('[sendTrialLicenseEmailEN] Quick Guide PDF 로드 실패', r.status);
-    }
-  } catch (e) {
-    console.warn('[sendTrialLicenseEmailEN] Quick Guide PDF 첨부 실패 (메일은 진행)', e);
-  }
+  // Quick Guide PDF 첨부 — 쪽별 PDF 7개 (public/docs/quick-guide/en/, 목록은 quickGuide.ts)
+  const attachments = await fetchGuideAttachments('en', '', 'sendTrialLicenseEmailEN');
 
   // 제목: 폼 제목에 이미 'Seamspace'가 있으면 접두어 생략 (중복 'Seamspace Seamspace' 방지)
   const brandPrefix = /seamspace/i.test(params.campaignName) ? '' : 'Seamspace ';
@@ -734,11 +702,8 @@ export async function sendPurchaseLicenseEmail(params: {
     ? (params.partnerName || 'Seamspace Partner')
     : `${params.partnerName ? `${params.partnerName} · ` : ''}Tebahsoft Inc.`;
 
-  const guide = {
-    ko: { path: '/docs/Quick%20Guide_How%20To%20Start%20(KR).pdf', filename: 'seamspace_QuickGuide_KR.pdf' },
-    ja: { path: '/docs/Quick%20Guide_HowToStart(JP).pdf',          filename: 'seamspace_QuickGuide_JP.pdf' },
-    en: { path: '/docs/Quick%20Guide_How%20To%20Start%20(En).pdf', filename: 'seamspace_QuickGuide_EN.pdf' },
-  };
+  // 첨부·본문 목록 언어: ko / ja 는 해당 언어, 그 밖은 영어 (quickGuide.ts guideLang)
+  const gl = guideLang(locale);
 
   const copy = {
     ko: {
@@ -783,7 +748,6 @@ export async function sendPurchaseLicenseEmail(params: {
   };
 
   const t = copy[locale as keyof typeof copy] ?? copy.en;
-  const g = guide[locale as keyof typeof guide] ?? guide.en;
   const wrap = locale === 'ko' ? layout : layoutEN;
 
   const html = wrap(`
@@ -805,6 +769,7 @@ export async function sendPurchaseLicenseEmail(params: {
     <p style="margin:0 0 16px;font-size:13px;color:#334155;line-height:1.7;">
       ${t.howBody}
     </p>
+    ${guideBlockHtml(gl)}
 
     <p style="margin:0 0 4px;font-size:14px;color:#18181b;line-height:1.8;">${t.askLine}</p>
     <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.8;">
@@ -829,28 +794,14 @@ export async function sendPurchaseLicenseEmail(params: {
     ``,
     stripTags(t.howBody),
     ``,
+    ...guideBlockText(gl),
+    ``,
     `${t.contactLabel}: ${contactEmail}`,
     signature,
   ].join('\n');
 
-  // Quick Guide PDF 첨부 (언어별)
-  let attachments: Array<{ filename: string; content: string }> | undefined;
-  try {
-    const r = await fetch(g.path);
-    if (r.ok) {
-      const blob = await r.blob();
-      const buf = await blob.arrayBuffer();
-      const bytes = new Uint8Array(buf);
-      let binary = '';
-      const chunkSize = 0x8000;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
-      }
-      attachments = [{ filename: g.filename, content: btoa(binary) }];
-    }
-  } catch (e) {
-    console.warn('[sendPurchaseLicenseEmail] Quick Guide PDF 첨부 실패 (메일은 진행)', e);
-  }
+  // Quick Guide PDF 첨부 — 언어별 쪽별 PDF (ko 6개 / ja 7개 / 그 밖은 en 7개)
+  const attachments = await fetchGuideAttachments(gl, '', 'sendPurchaseLicenseEmail');
 
   await sendEmail(
     params.to,

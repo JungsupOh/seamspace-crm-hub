@@ -17,6 +17,7 @@ const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY,
 import { issueCampaignCoupon, type CouponSettings } from '@/lib/campaign-coupons';
 import { issueTrialLicense, type TrialLicenseSettings, type IssueOutcome } from '@/lib/campaign-trial-license';
 import { upsertLeadContact } from '@/lib/luckySeven';
+import { QUICK_GUIDE_FILES, TUTORIAL_URL, guideFileUrl } from '@/lib/quickGuide';
 import { DEFAULT_FORM_SETTINGS, type FormSettings } from './Campaigns';
 
 interface Campaign {
@@ -401,10 +402,10 @@ export default function CampaignForm() {
   if (submitted) {
     const contactEmail = isIntl ? 'contact@tebahsoft.com' : 'sales@tebahsoft.com';
     const sameCodeNote = t('알림톡으로 동일한 코드가 발송됩니다.', '同じコードがメールでも送信されます。', 'The same code has also been sent to your email.');
-    // 빠른 시작용 Quick Guide PDF (언어별 — 한/영/일 모두 제공)
-    const guideUrl = isEN ? '/docs/Quick%20Guide_How%20To%20Start%20(En).pdf'
-      : isJP ? '/docs/Quick%20Guide_HowToStart(JP).pdf'
-      : '/docs/Quick%20Guide_How%20To%20Start%20(KR).pdf';
+    // 빠른 시작용 Quick Guide PDF (언어별 쪽별 PDF — 메일 첨부와 같은 목록, quickGuide.ts)
+    const guideLangKey = isEN ? 'en' : isJP ? 'ja' : 'ko';
+    const guideFiles = QUICK_GUIDE_FILES[guideLangKey];
+    const tutorialUrl = TUTORIAL_URL[guideLangKey];
     return (
       <div className="min-h-screen flex items-center justify-center bg-muted/20 p-4">
         <div className="max-w-md w-full bg-card rounded-xl p-8 text-center shadow-lg ring-1 ring-border">
@@ -477,16 +478,33 @@ export default function CampaignForm() {
               <p className="text-[10px] text-muted-foreground mt-1">{sameCodeNote}</p>
             </div>
           )}
-          {guideUrl && (
+          <div className="mb-3 rounded-lg border border-primary/30 px-4 py-3 text-left">
+            <p className="text-sm font-semibold mb-2">
+              📘 {t('퀵 가이드 다운로드 — 바로 시작하기', 'クイックガイドをダウンロード — 今すぐ始める', 'Download the Quick Guide — get started now')}
+            </p>
+            <ul className="text-xs space-y-1">
+              {guideFiles.map(f => (
+                <li key={f.file}>
+                  <a
+                    href={guideFileUrl(guideLangKey, f.file)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary underline underline-offset-2 hover:opacity-80"
+                  >
+                    {f.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
             <a
-              href={guideUrl}
+              href={tutorialUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 w-full mb-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold px-4 py-2.5 hover:opacity-90 transition-opacity"
+              className="inline-block mt-2 text-xs font-medium text-primary underline underline-offset-2 hover:opacity-80"
             >
-              📘 {t('퀵 가이드 다운로드 — 바로 시작하기', 'クイックガイドをダウンロード — 今すぐ始める', 'Download the Quick Guide — get started now')}
+              🎓 {t('온라인 튜토리얼 보기', 'オンラインチュートリアルを見る', 'View the online tutorial')}
             </a>
-          )}
+          </div>
           <p className="text-xs text-muted-foreground">
             {t('문의', 'お問い合わせ', 'Contact')}: {contactEmail}
           </p>
