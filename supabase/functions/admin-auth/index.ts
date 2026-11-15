@@ -2,6 +2,8 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import {
   resolveCallerRole, callerVerdict, validateAssignRole, buildProfileUpdate,
+  canAssignRole, canActOnTarget, validateProfileUpdates, profileUpdateVerdict,
+  type TargetLookup,
 } from './logic.ts';
 
 const corsHeaders = {
@@ -57,6 +59,22 @@ serve(async (req) => {
       console.warn(`[admin-auth] user_profiles 조회 실패 user=${caller.id}`);
     }
 
+    /**
+     * 대상 계정의 **현재** 역할을 서버가 직접 읽는다 (021-6e A-4).
+     * 요청 본문이 알려 주는 역할은 믿지 않는다.
+     * adminClient 가 이미 타입을 갖고 있으므로 클로저로 둔다.
+     */
+    const lookupTargetRole = async (userId: string): Promise<TargetLookup> => {
+      const { data, error } = await adminClient
+        .from('user_profiles')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle();
+      if (error) return { error: true };
+      if (!data) return { found: false };
+      return { found: true, role: (data as { role?: string }).role ?? '' };
+    };
+
     // ⚠️ user_metadata 로 폴백하지 않는다 — 사용자가 스스로 고칠 수 있는 값이라
     //    프로필 없는 계정이 role=admin 을 적어 넣고 통과할 수 있다 (021-6d C-2).
     const callerRole = resolveCallerRole(profile, caller.user_metadata);
@@ -84,6 +102,11 @@ serve(async (req) => {
         const meta = (user_metadata ?? {}) as Record<string, unknown>;
         const rv = validateAssignRole(meta.role);
         if (!rv.ok) return jsonResponse({ error: rv.error }, rv.status);
+
+        // 021-6e A-1: admin·sub_admin 역할 부여는 admin 만.
+        // partner_* · guest 는 sub_admin 도 그대로 줄 수 있다.
+        const assign = canAssignRole(cv.role, rv.role);
+        if (!assign.ok) return jsonResponse({ error: assign.error }, assign.status);
 
         const { data, error } = await adminClient.auth.admin.createUser({
           email,
@@ -128,6 +151,11 @@ serve(async (req) => {
       case 'deleteUser': {
         const { userId } = body;
         if (!userId) return jsonResponse({ error: 'userId is required' }, 400);
+
+        // 021-6e A-3: 관리자급 계정 삭제는 admin 만 (계정 탈취·서비스 거부 방지)
+        const del = canActOnTarget(cv.role, await lookupTargetRole(userId));
+        if (!del.ok) return jsonResponse({ error: del.error }, del.status);
+
         const { error } = await adminClient.auth.admin.deleteUser(userId);
         if (error) return jsonResponse({ error: error.message }, 400);
         return jsonResponse({ success: true });
@@ -136,6 +164,12 @@ serve(async (req) => {
       case 'updateUser': {
         const { userId, password } = body;
         if (!userId) return jsonResponse({ error: 'userId is required' }, 400);
+
+        // 021-6e A-3: 관리자급 계정의 비밀번호 변경은 admin 만.
+        // 그대로 두면 sub_admin 이 admin 비밀번호를 바꿔 계정을 가져갈 수 있다.
+        const upd = canActOnTarget(cv.role, await lookupTargetRole(userId));
+        if (!upd.ok) return jsonResponse({ error: upd.error }, upd.status);
+
         const updates: Record<string, unknown> = {};
         if (password) updates.password = password;
         const { data, error } = await adminClient.auth.admin.updateUserById(userId, updates);
@@ -148,9 +182,25 @@ serve(async (req) => {
         if (!userId || !updates) {
           return jsonResponse({ error: 'userId and updates are required' }, 400);
         }
+
+        // 021-6e A-2: 지금까지는 updates 를 검증 없이 그대로 적용했다.
+        // 허용 필드·허용 값으로 제한한다.
+        const uv = validateProfileUpdates(updates);
+        if (!uv.ok) return jsonResponse({ error: uv.error }, uv.status);
+
+        // 대상의 현재 역할은 서버가 읽는다 (A-4)
+        const pv = profileUpdateVerdict({
+          callerRole: cv.role,
+          callerId: caller.id,
+          targetId: String(userId),
+          target: await lookupTargetRole(String(userId)),
+          updates: uv.value,
+        });
+        if (!pv.ok) return jsonResponse({ error: pv.error }, pv.status);
+
         const { error } = await adminClient
           .from('user_profiles')
-          .update(updates)
+          .update(uv.value)
           .eq('id', userId);
         if (error) return jsonResponse({ error: error.message }, 400);
         return jsonResponse({ success: true });

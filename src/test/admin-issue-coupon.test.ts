@@ -200,8 +200,9 @@ describe('⑤ 구조 — partner-issue-license 복제 + 응답 호환', () => {
   it('user_metadata 폴백이 핸들러에 없다 (021-6b)', () => {
     expect(INDEX_TS).not.toContain("profile?.role ?? caller.user_metadata?.role");
     expect(INDEX_TS).toContain('resolveRole(profile, caller.user_metadata)');
-    // 원본에는 아직 폴백이 남아 있다 — 이번 단위에서 고치지 않았음을 고정
-    expect(PARTNER_TS).toContain("profile?.role ?? caller.user_metadata?.role");
+    // 021-6e 에서 partner-issue-license 의 같은 폴백도 제거됐다.
+    // (021-6b 시점에는 남아 있었고, 그때 이 줄이 그 사실을 고정하고 있었다)
+    expect(PARTNER_TS).not.toContain("profile?.role ?? caller.user_metadata?.role");
   });
 
   it('파트너 관련 조회가 없다 — 이 함수는 파트너를 다루지 않는다', () => {

@@ -46,13 +46,21 @@ Deno.serve(async (req: Request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const { data: profile } = await admin
+    const { data: profile, error: profileErr } = await admin
       .from('user_profiles')
       .select('role, partner_id')
       .eq('id', caller.id)
       .single();
 
-    const role: string = profile?.role ?? caller.user_metadata?.role ?? '';
+    if (profileErr) {
+      // 조회 실패·행 없음 — fail-closed. 아래 role='' 이 403 으로 이어진다.
+      console.warn(`[partner-issue-license] user_profiles 조회 실패 user=${caller.id}`);
+    }
+
+    // ⚠️ user_metadata 로 폴백하지 않는다 (021-6e B).
+    //    user_metadata 는 사용자가 스스로 고칠 수 있는 값이라, 프로필 행이 없는
+    //    계정이 role=admin 을 적어 넣으면 아무 파트너나 지정해 발급할 수 있었다.
+    const role: string = profile?.role ?? '';
     const isPartner = role.startsWith('partner_');
     if (!isPartner && role !== 'admin' && role !== 'sub_admin') {
       return json({ error: 'Not allowed' }, 403);
