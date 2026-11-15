@@ -32,6 +32,11 @@ import {
   expiresAtFromDuration,
   normalizePhone,
   phoneCountryFor,
+  activityNoteFor,
+  buildContactPatch,
+  buildContactInsert,
+  buildCampaignLeadTelegram,
+  telegramSourceLabel,
   MAX_SUBMISSIONS_PER_DAY,
 } from '../../supabase/functions/campaign-submit-lead/logic';
 import { normalizePhone as browserNormalizePhone } from '@/lib/phone';
@@ -42,6 +47,12 @@ const TEMPLATES_TS = readFileSync(
   resolve(ROOT, 'supabase/functions/campaign-submit-lead/templates.ts'),
   'utf8',
 );
+const LOGIC_TS = readFileSync(
+  resolve(ROOT, 'supabase/functions/campaign-submit-lead/logic.ts'),
+  'utf8',
+);
+const TELEGRAM_TS = readFileSync(resolve(ROOT, 'src/lib/telegram.ts'), 'utf8');
+const LUCKYSEVEN_TS = readFileSync(resolve(ROOT, 'src/lib/luckySeven.ts'), 'utf8');
 
 // ── 대표 입력 5가지 ──────────────────────────────────
 const CAMPAIGN_ID = '11111111-2222-4333-8444-555555555555';
@@ -331,5 +342,203 @@ describe('⑦ JP/EN 선택 규칙', () => {
   it("제목에 'Seamspace' 가 이미 있으면 영어 접두어를 생략한다", () => {
     expect(buildTrialEmailEN({ ...BASE, campaignName: 'Seamspace Expo' }).subject)
       .not.toContain('Seamspace Seamspace');
+  });
+});
+
+// ════════════════════════════════════════════════════
+// 021-5b — contacts 등록(A) · 텔레그램 알림(B)
+// ════════════════════════════════════════════════════
+
+describe('⑧ contacts 등록 — luckySeven.ts upsertLeadContact 와 같은 동작', () => {
+  const member = {
+    name: '김선생', phone: '010-5157-8698',
+    email: 'teacher@example.com', orgName: '한빛초등학교',
+  };
+
+  it('활동이력 문자열이 CampaignForm.tsx:274-275 와 같다', () => {
+    expect(activityNoteFor('2026-11-15', '2026 봄 캠페인'))
+      .toBe('[2026-11-15] 캠페인 신청 — 2026 봄 캠페인');
+  });
+
+  describe('기존 contact 매칭 시 (PATCH)', () => {
+    it('빈 칸만 채운다 — 이미 있는 값은 덮지 않는다', () => {
+      const { patch } = buildContactPatch(
+        { id: 'c1', name: '기존이름', email: 'old@example.com', org_name: '기존학교', notes: '' },
+        member,
+      );
+      expect(patch.name).toBeUndefined();
+      expect(patch.email).toBeUndefined();
+      expect(patch.org_name).toBeUndefined();
+    });
+
+    it('비어 있던 칸은 채운다', () => {
+      const { patch } = buildContactPatch(
+        { id: 'c1', name: '', email: null, org_name: undefined, notes: '' },
+        member,
+      );
+      expect(patch).toMatchObject({
+        name: '김선생', email: 'teacher@example.com', org_name: '한빛초등학교',
+      });
+    });
+
+    it('활동이력을 맨 앞에 붙인다 (prepend)', () => {
+      const note = activityNoteFor('2026-11-15', '2026 봄 캠페인');
+      const { patch, activityAppended } = buildContactPatch(
+        { id: 'c1', name: 'n', email: 'e', org_name: 'o', notes: '이전 메모' },
+        member, note,
+      );
+      expect(activityAppended).toBe(true);
+      expect(patch.notes).toBe(`${note}\n이전 메모`);
+    });
+
+    it('기존 메모가 비어 있으면 활동이력만 남는다', () => {
+      const note = activityNoteFor('2026-11-15', 'X');
+      const { patch } = buildContactPatch(
+        { id: 'c1', name: 'n', email: 'e', org_name: 'o', notes: null }, member, note,
+      );
+      expect(patch.notes).toBe(note);
+    });
+
+    it('같은 줄이 이미 있으면 중복으로 붙이지 않는다 (오늘 재신청)', () => {
+      const note = activityNoteFor('2026-11-15', '2026 봄 캠페인');
+      const { patch, activityAppended } = buildContactPatch(
+        { id: 'c1', name: 'n', email: 'e', org_name: 'o', notes: `${note}\n이전 메모` },
+        member, note,
+      );
+      expect(activityAppended).toBe(false);
+      expect(patch.notes).toBeUndefined();
+    });
+
+    it('활동이력이 없으면 notes 를 건드리지 않는다', () => {
+      const { patch, activityAppended } = buildContactPatch(
+        { id: 'c1', name: 'n', email: 'e', org_name: 'o', notes: '이전' }, member,
+      );
+      expect(activityAppended).toBe(false);
+      expect(patch.notes).toBeUndefined();
+    });
+  });
+
+  describe('신규 contact (INSERT)', () => {
+    it('기본값이 원본과 같다 — contact_type 리드, lead_stage 미설정', () => {
+      const body = buildContactInsert(member, '01051578698', {
+        leadSource: '2026 봄 캠페인',
+        activityNote: activityNoteFor('2026-11-15', '2026 봄 캠페인'),
+      });
+      expect(body).toEqual({
+        name: '김선생',
+        phone: '010-5157-8698',
+        phone_normalized: '01051578698',
+        email: 'teacher@example.com',
+        org_name: '한빛초등학교',
+        contact_type: '리드',
+        lead_source: '2026 봄 캠페인',
+        notes: '[2026-11-15] 캠페인 신청 — 2026 봄 캠페인',
+      });
+      expect('lead_stage' in body).toBe(false);
+    });
+
+    it('활동이력이 없으면 notes 키 자체가 없다', () => {
+      const body = buildContactInsert(member, '01051578698', { leadSource: 'X' });
+      expect('notes' in body).toBe(false);
+    });
+
+    it('leadSource 미지정 시 원본과 같은 기본값', () => {
+      const body = buildContactInsert(member, '01051578698');
+      expect(body.lead_source).toBe('럭키세븐 5월');
+    });
+  });
+
+  it('언어별 전화 정규화 국가가 CampaignForm 과 같다 (EN→intl, JP→jp, 그 외 kr)', () => {
+    expect(phoneCountryFor('en')).toBe('intl');
+    expect(phoneCountryFor('ja')).toBe('jp');
+    expect(phoneCountryFor('ko')).toBe('kr');
+    expect(phoneCountryFor(undefined)).toBe('kr');
+  });
+});
+
+describe('⑨ 텔레그램 알림 — telegram.ts:101-120 과 글자 단위로 같다', () => {
+  it('전체 항목이 있을 때', () => {
+    expect(buildCampaignLeadTelegram({
+      campaignName: '2026 봄 캠페인',
+      schoolName: '한빛초등학교',
+      name: '김선생',
+      phone: '010-5157-8698',
+      position: '교사',
+      source: '검색',
+      isExistingCustomer: true,
+    })).toMatchSnapshot('tg-full');
+  });
+
+  it('선택 항목이 없을 때 — 학교는 (미입력), 나머지 줄은 아예 빠진다', () => {
+    expect(buildCampaignLeadTelegram({
+      campaignName: 'EDIX Tokyo 2026',
+      name: 'Taro',
+      phone: '09012345678',
+    })).toMatchSnapshot('tg-minimal');
+  });
+
+  it('기존 고객 태그는 isExistingCustomer 일 때만 붙는다', () => {
+    const base = { campaignName: 'C', name: 'N', phone: 'P' };
+    expect(buildCampaignLeadTelegram({ ...base, isExistingCustomer: true })).toContain('⚠️ 기존 고객');
+    expect(buildCampaignLeadTelegram({ ...base, isExistingCustomer: false })).not.toContain('기존 고객');
+    expect(buildCampaignLeadTelegram(base)).not.toContain('기존 고객');
+  });
+
+  it("경로가 '기타'면 sourceEtc 를 붙인다 (CampaignForm.tsx:300)", () => {
+    expect(telegramSourceLabel('기타', '지인 소개')).toBe('기타 — 지인 소개');
+    expect(telegramSourceLabel('기타', null)).toBe('기타 — ');
+    expect(telegramSourceLabel('검색', '무시됨')).toBe('검색');
+    expect(telegramSourceLabel(null, null)).toBeUndefined();
+  });
+
+  it('메시지 조립 원문이 telegram.ts 와 같다 (드리프트 가드)', () => {
+    const norm = (s: string) => s.split('\n').map(l => l.trim()).filter(Boolean).join('\n');
+    // 원본은 sendTelegramNotification( 으로 감싸고, 사본은 return ( 으로 감싼다.
+    // 감싸는 부분만 걷어내고 메시지 리터럴 네 줄을 대조한다.
+    const grab = (src: string, open: string) => {
+      const i = src.indexOf(open);
+      if (i < 0) throw new Error(`마커 없음: ${open}`);
+      const s = src.indexOf('`🎯', i);
+      const e = src.indexOf('`\n', src.indexOf('${existingTag}', s));
+      return norm(src.slice(s, e));
+    };
+    expect(grab(LOGIC_TS, 'export function buildCampaignLeadTelegram'))
+      .toBe(grab(TELEGRAM_TS, 'export function notifyCampaignLead'));
+  });
+
+  it('변수 계산 세 줄이 원본과 같다', () => {
+    for (const line of [
+      "const existingTag = isExistingCustomer ? `\\n⚠️ 기존 고객` : '';",
+      "const positionStr = position ? `\\n💼 ${position}` : '';",
+      "const sourceStr = source ? `\\n📍 경로: ${source}` : '';",
+    ]) {
+      expect(TELEGRAM_TS).toContain(line);
+      expect(LOGIC_TS).toContain(line);
+    }
+  });
+});
+
+describe('⑩ contacts 로직 원문이 luckySeven.ts 와 같다 (드리프트 가드)', () => {
+  it('PATCH 분기 네 줄', () => {
+    for (const line of [
+      'if (!existing.name && member.name) patch.name = member.name;',
+      'if (!existing.email && member.email) patch.email = member.email;',
+      'if (!existing.org_name && member.orgName) patch.org_name = member.orgName;',
+      "patch.notes = [activityNote.trim(), prevNotes].filter(Boolean).join('\\n');",
+    ]) {
+      expect(LOGIC_TS).toContain(line);
+    }
+    // 원본은 options.activityNote 를 쓴다 — 이름만 다르고 식은 같다
+    expect(LUCKYSEVEN_TS).toContain('if (!existing.name && member.name) patch.name = member.name;');
+    expect(LUCKYSEVEN_TS).toContain('if (!existing.email && member.email) patch.email = member.email;');
+    expect(LUCKYSEVEN_TS).toContain('if (!existing.org_name && member.orgName) patch.org_name = member.orgName;');
+    expect(LUCKYSEVEN_TS).toContain("patch.notes = [options.activityNote.trim(), prevNotes].filter(Boolean).join('\\n');");
+  });
+
+  it('INSERT 기본값이 원본과 같다', () => {
+    expect(LUCKYSEVEN_TS).toContain("contact_type: options.contactType ?? '리드',");
+    expect(LUCKYSEVEN_TS).toContain("lead_source: options.leadSource ?? '럭키세븐 5월',");
+    expect(LOGIC_TS).toContain("contact_type: options.contactType ?? '리드',");
+    expect(LOGIC_TS).toContain("lead_source: options.leadSource ?? '럭키세븐 5월',");
   });
 });

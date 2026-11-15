@@ -23,9 +23,17 @@ import {
   exceedsSendCap,
   couponDescription,
   expiresAtFromDuration,
+  phoneCountryFor,
+  activityNoteFor,
+  buildContactPatch,
+  buildContactInsert,
+  buildCampaignLeadTelegram,
+  telegramSourceLabel,
+  normalizePhone,
   MAX_SUBMISSIONS_PER_DAY,
   type CleanLead,
   type PriorTrial,
+  type ExistingContact,
 } from "./logic.ts";
 import { buildTrialEmail } from "./templates.ts";
 import { internalHeaders } from "../_shared/internal.ts";
@@ -145,6 +153,67 @@ async function findPriorTrial(
     created_at: lic.created_at,
     campaign_name: campaignName,
   };
+}
+
+// ── contacts 등록 (A) — luckySeven.ts:218-281 upsertLeadContact 와 같은 동작 ──
+// 캠페인 신청자는 전원 contacts 에 남긴다(운영 정책). 실패해도 접수는 성공이다.
+async function upsertLeadContact(
+  member: { name: string; phone: string; email: string; orgName: string },
+  options: { country?: "kr" | "jp" | "intl"; leadSource?: string; activityNote?: string } = {},
+): Promise<{ contactId: string; isExisting: boolean; activityAppended: boolean }> {
+  const phoneNorm = normalizePhone(member.phone, options.country ?? "kr");
+
+  const findRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${q(phoneNorm)}` +
+      `&select=id,name,email,org_name,contact_type,notes`,
+    { headers: DB },
+  );
+  const found = findRes.ok ? await findRes.json() : [];
+
+  if (Array.isArray(found) && found.length > 0) {
+    const existing = found[0] as ExistingContact;
+    const { patch, activityAppended } = buildContactPatch(existing, member, options.activityNote);
+    if (Object.keys(patch).length > 0) {
+      await fetch(`${SUPABASE_URL}/rest/v1/contacts?id=eq.${q(existing.id)}`, {
+        method: "PATCH",
+        headers: { ...DB, Prefer: "return=minimal" },
+        body: JSON.stringify(patch),
+      });
+    }
+    return { contactId: existing.id, isExisting: true, activityAppended };
+  }
+
+  const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/contacts`, {
+    method: "POST",
+    headers: { ...DB, Prefer: "return=representation" },
+    body: JSON.stringify(buildContactInsert(member, phoneNorm, {
+      leadSource: options.leadSource,
+      activityNote: options.activityNote,
+    })),
+  });
+  if (!insertRes.ok) throw new Error("contacts insert 실패");
+  const created = await insertRes.json();
+  const newId = (Array.isArray(created) ? created[0]?.id : created.id) as string;
+  return { contactId: newId, isExisting: false, activityAppended: !!options.activityNote };
+}
+
+// ── 텔레그램 알림 (B) — telegram.ts:9-24 sendTelegramNotification 와 같은 호출 ──
+async function notifyTelegram(text: string): Promise<void> {
+  try {
+    await fetch(`${SUPABASE_URL}/functions/v1/notify-telegram`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${ANON_KEY}`,
+        apikey: ANON_KEY,
+        ...internalHeaders(),
+      },
+      body: JSON.stringify({ text }),
+    });
+  } catch {
+    // 알림 실패는 무시 (핵심 기능 차단하지 않도록) — 원본과 같은 원칙
+    console.warn("[campaign-submit-lead] Telegram 알림 발송 실패");
+  }
 }
 
 async function patchLeadStatus(leadId: string, status: string) {
@@ -316,6 +385,39 @@ Deno.serve(async (req: Request) => {
     const insertedRows = await insRes.json().catch(() => []);
     const leadId: string | undefined = Array.isArray(insertedRows) ? insertedRows[0]?.id : undefined;
     if (!leadId) return json({ error: "제출에 실패했습니다." }, 502);
+
+    // 6-a) contacts upsert — CampaignForm.tsx:271-291 과 같은 위치·같은 값
+    //      캠페인 리드도 contacts 에 자동 등록(운영 정책). 기존 고객이면 활동이력 1줄 prepend.
+    const today = new Date().toISOString().slice(0, 10);
+    const activityNote = activityNoteFor(today, campaign.name);
+    try {
+      await upsertLeadContact(
+        {
+          name: lead.name,
+          phone: lead.phone,
+          email: lead.email ?? "",
+          orgName: lead.schoolName ?? "",
+        },
+        {
+          country: phoneCountryFor(lead.locale),
+          leadSource: campaign.name,   // 캠페인명을 lead_source로
+          activityNote,
+        },
+      );
+    } catch (e) {
+      console.warn("[campaign-submit-lead] contacts upsert 실패", e);
+    }
+
+    // 6-b) 텔레그램 알림 — CampaignForm.tsx:293-302 과 같은 내용
+    await notifyTelegram(buildCampaignLeadTelegram({
+      campaignName: campaign.name,
+      schoolName: lead.schoolName ?? undefined,
+      name: lead.name,
+      phone: lead.phone,
+      position: lead.position ?? undefined,
+      source: telegramSourceLabel(lead.source, lead.sourceEtc),
+      isExistingCustomer: existing,
+    }));
 
     // ── 여기까지가 '신청 접수'. 아래 체험권 발급은 실패해도 접수는 성공이다
     //    (campaign-trial-license.ts:8 과 같은 원칙)

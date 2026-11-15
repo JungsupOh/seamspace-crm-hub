@@ -33,10 +33,9 @@ export function phoneCountryFor(locale: string | undefined): PhoneCountry {
   return locale === 'en' ? 'intl' : locale === 'ja' ? 'jp' : 'kr';
 }
 
-/** CampaignForm.tsx:284 와 같은 규칙 — contacts.country 표기. */
-export function contactCountryFor(locale: string | undefined): string {
-  return locale === 'en' ? 'intl' : locale === 'ja' ? 'jp' : 'kr';
-}
+// 참고: CampaignForm.tsx:284 가 upsertLeadContact 에 넘기는 `country` 옵션도 같은 값이다.
+// 다만 그 값은 **contacts.country 컬럼이 아니라 전화번호 정규화 국가**로만 쓰인다
+// (luckySeven.ts:222-223). 그래서 별도 함수를 두지 않고 phoneCountryFor 를 그대로 쓴다.
 
 // ── 입력 검증 ───────────────────────────────────────
 // 브라우저(CampaignForm.tsx:197-200)에도 같은 검사가 있지만, 브라우저 검사는
@@ -225,4 +224,112 @@ export function expiresAtFromDuration(months: number, now: Date = new Date()): s
   const d = new Date(now.getTime());
   d.setMonth(d.getMonth() + months);
   return d.toISOString().slice(0, 10);
+}
+
+// ── contacts 등록 (A) ────────────────────────────────
+// src/lib/luckySeven.ts:218-281 upsertLeadContact 와 **같은 동작**.
+// 원본은 조회·분기·쓰기가 한 덩어리라 테스트가 불가능했다. 판단 부분만 떼어 둔다.
+// 호출부(CampaignForm.tsx:273-291)는 try/catch 로 감싸 **실패해도 접수는 성공**이다.
+
+/** CampaignForm.tsx:274-275 와 같은 문자열. */
+export function activityNoteFor(todayISO: string, campaignName: string): string {
+  return `[${todayISO}] 캠페인 신청 — ${campaignName}`;
+}
+
+export interface ContactMember {
+  name: string;
+  phone: string;
+  email: string;
+  orgName: string;
+}
+
+export interface ExistingContact {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  org_name?: string | null;
+  contact_type?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * 기존 contact 에 적용할 PATCH 본문. (luckySeven.ts:233-245)
+ * 빈 칸만 채우고, 활동이력은 **중복이 아닐 때만** 맨 앞에 붙인다.
+ */
+export function buildContactPatch(
+  existing: ExistingContact,
+  member: ContactMember,
+  activityNote?: string,
+): { patch: Record<string, unknown>; activityAppended: boolean } {
+  const patch: Record<string, unknown> = {};
+  if (!existing.name && member.name) patch.name = member.name;
+  if (!existing.email && member.email) patch.email = member.email;
+  if (!existing.org_name && member.orgName) patch.org_name = member.orgName;
+
+  let activityAppended = false;
+  if (activityNote && activityNote.trim()) {
+    const prevNotes = (existing.notes ?? '').toString();
+    // 같은 라인 중복 방지 (오늘 같은 캠페인 재신청 등)
+    if (!prevNotes.includes(activityNote.trim())) {
+      patch.notes = [activityNote.trim(), prevNotes].filter(Boolean).join('\n');
+      activityAppended = true;
+    }
+  }
+  return { patch, activityAppended };
+}
+
+/** 신규 contact INSERT 본문. (luckySeven.ts:260-275) */
+export function buildContactInsert(
+  member: ContactMember,
+  phoneNormalized: string,
+  options: { leadSource?: string; contactType?: string; leadStage?: string; activityNote?: string } = {},
+): Record<string, unknown> {
+  return {
+    name: member.name,
+    phone: member.phone,
+    phone_normalized: phoneNormalized,
+    email: member.email,
+    org_name: member.orgName,
+    contact_type: options.contactType ?? '리드',
+    lead_source: options.leadSource ?? '럭키세븐 5월',
+    // 스테이지는 넘어온 경우에만 기록한다 (원본 주석 참고)
+    ...(options.leadStage ? { lead_stage: options.leadStage } : {}),
+    // 신규 contact도 첫 활동이력으로 기록 (있을 때만)
+    ...(options.activityNote && options.activityNote.trim()
+      ? { notes: options.activityNote.trim() }
+      : {}),
+  };
+}
+
+// ── 텔레그램 알림 (B) ────────────────────────────────
+// src/lib/telegram.ts:101-120 notifyCampaignLead 와 **글자 단위로 같은** 메시지.
+
+/** CampaignForm.tsx:300 의 경로 표기 규칙. */
+export function telegramSourceLabel(
+  source: string | null | undefined,
+  sourceEtc: string | null | undefined,
+): string | undefined {
+  if (source === '기타') return `기타 — ${sourceEtc ?? ''}`;
+  return source ?? undefined;
+}
+
+export function buildCampaignLeadTelegram(params: {
+  campaignName: string;
+  schoolName?: string;
+  name: string;
+  phone: string;
+  position?: string;
+  source?: string;
+  isExistingCustomer?: boolean;
+}): string {
+  const { campaignName, schoolName, name, phone, position, source, isExistingCustomer } = params;
+  const existingTag = isExistingCustomer ? `\n⚠️ 기존 고객` : '';
+  const positionStr = position ? `\n💼 ${position}` : '';
+  const sourceStr = source ? `\n📍 경로: ${source}` : '';
+  return (
+    `🎯 <b>캠페인 리드 유입</b>\n\n` +
+    `📋 ${campaignName}\n` +
+    `🏫 ${schoolName || '(미입력)'}\n` +
+    `👤 ${name} / ${phone}${positionStr}${sourceStr}${existingTag}`
+  );
 }
