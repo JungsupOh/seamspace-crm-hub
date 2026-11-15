@@ -5,10 +5,12 @@ import { useEffect, useState } from 'react';
 import { Loader2, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { authedFetch } from '@/lib/authedFetch';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
+// Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (021-8b-4).
+const HEADERS = { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
 
 interface OrphanQuote {
   deal_id: string;
@@ -50,13 +52,13 @@ export default function AdminBackfillQuotePdfs() {
       try {
         // Web 출처 deal_quotes 중 같은 deal_id + quote_number 키로 deal_files가 없는 행
         // PostgREST에서는 not exists 직접 어려우니 두 단계 조회.
-        const dqRes = await fetch(
+        const dqRes = await authedFetch(
           `${SUPABASE_URL}/rest/v1/deal_quotes?source=eq.web&select=deal_id,quote_number,plan,qty,duration,unit_price,supply_price,tax_amount,final_value,buyer_name,buyer_email,org_name,quote_date&order=quote_number.desc&limit=200`,
           { headers: HEADERS },
         );
         const all = dqRes.ok ? await dqRes.json() as OrphanQuote[] : [];
 
-        const dfRes = await fetch(
+        const dfRes = await authedFetch(
           `${SUPABASE_URL}/rest/v1/deal_files?select=deal_id,slot_key&slot_key=like.quote_%25`,
           { headers: HEADERS },
         );
