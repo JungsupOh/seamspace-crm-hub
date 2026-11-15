@@ -49,6 +49,8 @@ interface ScreenCase {
   allowedAnonAuth: Array<{ why: string }>;
   /** 평범한 fetch 로 남아도 되는 rest/v1 호출의 이유. */
   allowedPlainRest: Array<{ why: string }>;
+  /** rest/v1 을 직접 부르지 않는 파일(엣지 함수만 쓰는 화면)은 import·apikey 검사를 건너뛴다. */
+  noRestOfItsOwn?: boolean;
 }
 
 const SCREENS: ScreenCase[] = [
@@ -109,6 +111,26 @@ const SCREENS: ScreenCase[] = [
     ],
     allowedPlainRest: [],
   },
+  {
+    file: 'lib/apk.ts',
+    // 공개 /apk/info 가 쓰는 조회 3개는 로그인하지 않은 방문자용이라 공개 키를 유지한다.
+    allowedAnonAuth: [{ why: ':14 PUBLIC_HEADERS — 공개 /apk/info 전용 (021-8d 담당)' }],
+    allowedPlainRest: [
+      { why: ':265 findSubscriberByEmail — ApkInfo.tsx 가 씀' },
+      { why: ':275 findSubscriberByToken — 공개 토큰 조회용' },
+      { why: ':345 listDownloadsByEmail — ApkInfo.tsx 가 씀' },
+    ],
+  },
+  {
+    file: 'pages/Apk.tsx',
+    // 이 화면 자체는 rest/v1 을 직접 부르지 않는다. DB 접근은 전부 lib/apk.ts 경유.
+    allowedAnonAuth: [
+      { why: ':83 functions/v1/apk-broadcast — 021-8a 담당' },
+      { why: ':695 functions/v1/apk-subscribe — 021-8a 담당' },
+    ],
+    allowedPlainRest: [],
+    noRestOfItsOwn: true,
+  },
 ];
 
 describe('021-8b-4 — 관리자 화면 rest/v1 호출은 로그인 토큰으로 나간다', () => {
@@ -127,11 +149,11 @@ describe('021-8b-4 — 관리자 화면 rest/v1 호출은 로그인 토큰으로
           .toHaveLength(sc.allowedPlainRest.length);
       });
 
-      it('authedFetch 를 import 한다', () => {
-        expect(code(src)).toContain("from '@/lib/authedFetch'");
+      it.skipIf(sc.noRestOfItsOwn)('authedFetch 를 import 한다', () => {
+        expect(code(src)).toMatch(/from '(@\/lib|\.)\/authedFetch'/);
       });
 
-      it('apikey 헤더에는 공개 키를 그대로 둔다 (정상)', () => {
+      it.skipIf(sc.noRestOfItsOwn)('apikey 헤더에는 공개 키를 그대로 둔다 (정상)', () => {
         expect(code(src)).toMatch(/apikey:\s*SUPABASE_KEY/);
       });
     });

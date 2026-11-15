@@ -1,3 +1,5 @@
+import { authedFetch } from './authedFetch';
+
 // APK 구독관리 — CRUD 헬퍼 + Storage 업로드 + SHA256
 // 심스페이스 Android 앱 sideload 배포 (Google Play 외 MDM 환경 대상)
 // 사용자 노출 텍스트는 모두 '심스페이스' 사용. mDiary 표기 금지.
@@ -6,25 +8,20 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const BUCKET = 'apk-files';
 
-// SELECT용 (anon SELECT 정책 있는 테이블).
-const HEADERS = {
+// 공개 화면(/apk/info)이 쓰는 조회용 — 로그인하지 않은 방문자라 공개 키를 그대로 쓴다.
+// apk_subscribers·apk_downloads 에는 anon SELECT 정책이 있다. (021-8d 범위)
+const PUBLIC_HEADERS = {
   Authorization: `Bearer ${SUPABASE_KEY}`,
   apikey: SUPABASE_KEY,
   'Content-Type': 'application/json',
 };
 
-// INSERT/UPDATE/DELETE 용 — RLS 정책 'TO authenticated' 통과를 위해 로그인 세션 access_token 사용.
-// anon key 로는 mutation 시 RLS 차단 (42501 insufficient_privilege).
-async function authHeaders(): Promise<Record<string, string>> {
-  const { supabase } = await import('./supabase');
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token ?? SUPABASE_KEY;
-  return {
-    Authorization: `Bearer ${token}`,
-    apikey: SUPABASE_KEY,
-    'Content-Type': 'application/json',
-  };
-}
+// 관리자 화면(/apk)용 — Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (021-8b-4).
+// 예전 authHeaders() 는 세션이 없으면 공개 키로 조용히 폴백했다. 그 폴백은 없앴다.
+const ADMIN_HEADERS = {
+  apikey: SUPABASE_KEY,
+  'Content-Type': 'application/json',
+};
 
 // ── Types ────────────────────────────────────────────
 export interface ApkVersion {
@@ -139,13 +136,13 @@ export async function uploadApkFile(
 
 // ── apk_versions CRUD ────────────────────────────────
 export async function listApkVersions(): Promise<ApkVersion[]> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?order=version_code.desc`, { headers: HEADERS });
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/apk_versions?order=version_code.desc`, { headers: ADMIN_HEADERS });
   if (!r.ok) throw new Error('버전 목록 조회 실패');
   return r.json();
 }
 
 export async function getLatestApkVersion(): Promise<ApkVersion | null> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?is_latest=eq.true&select=*&limit=1`, { headers: HEADERS });
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/apk_versions?is_latest=eq.true&select=*&limit=1`, { headers: ADMIN_HEADERS });
   if (!r.ok) return null;
   const rows = await r.json() as ApkVersion[];
   return rows[0] ?? null;
@@ -153,15 +150,15 @@ export async function getLatestApkVersion(): Promise<ApkVersion | null> {
 
 export async function createApkVersion(v: Omit<ApkVersion, 'id' | 'created_at'>): Promise<ApkVersion> {
   // is_latest 처리: 새 버전이 is_latest=true면 기존 row 모두 false로
-  const h = await authHeaders();
+  const h = ADMIN_HEADERS;
   if (v.is_latest) {
-    await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?is_latest=is.true`, {
+    await authedFetch(`${SUPABASE_URL}/rest/v1/apk_versions?is_latest=is.true`, {
       method: 'PATCH',
       headers: { ...h, Prefer: 'return=minimal' },
       body: JSON.stringify({ is_latest: false }),
     }).catch(() => {});
   }
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_versions`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/apk_versions`, {
     method: 'POST',
     headers: { ...h, Prefer: 'return=representation' },
     body: JSON.stringify(v),
@@ -176,9 +173,9 @@ export async function createApkVersion(v: Omit<ApkVersion, 'id' | 'created_at'>)
 
 export async function deleteApkVersion(id: string): Promise<void> {
   // DB row 삭제 전에 Storage 파일도 삭제 — 고아 파일 방지
-  const fetchRes = await fetch(
+  const fetchRes = await authedFetch(
     `${SUPABASE_URL}/rest/v1/apk_versions?id=eq.${id}&select=file_path`,
-    { headers: HEADERS },
+    { headers: ADMIN_HEADERS },
   );
   if (fetchRes.ok) {
     const rows = await fetchRes.json() as { file_path: string | null }[];
@@ -188,9 +185,9 @@ export async function deleteApkVersion(id: string): Promise<void> {
       await supabase.storage.from(BUCKET).remove([path]).catch(() => {});
     }
   }
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=eq.${id}`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=eq.${id}`, {
     method: 'DELETE',
-    headers: await authHeaders(),
+    headers: ADMIN_HEADERS,
   });
   if (!r.ok) throw new Error('버전 삭제 실패');
 }
@@ -198,9 +195,9 @@ export async function deleteApkVersion(id: string): Promise<void> {
 // ── Storage 파일만 삭제 (DB row 보존 — 발송/다운로드 이력 유지) ─────
 // file_path 를 NULL 로 마킹해서 UI에서 "파일 없음" 표시 + 다운로드 차단.
 export async function deleteApkFileOnly(id: string): Promise<void> {
-  const fetchRes = await fetch(
+  const fetchRes = await authedFetch(
     `${SUPABASE_URL}/rest/v1/apk_versions?id=eq.${id}&select=file_path`,
-    { headers: HEADERS },
+    { headers: ADMIN_HEADERS },
   );
   if (!fetchRes.ok) throw new Error('버전 조회 실패');
   const rows = await fetchRes.json() as { file_path: string | null }[];
@@ -212,9 +209,9 @@ export async function deleteApkFileOnly(id: string): Promise<void> {
   if (error) throw new Error(`Storage 파일 삭제 실패: ${error.message}`);
 
   // DB는 file_path/sha256/file_size 만 null 처리 (이력 보존)
-  const upd = await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=eq.${id}`, {
+  const upd = await authedFetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=eq.${id}`, {
     method: 'PATCH',
-    headers: { ...(await authHeaders()), Prefer: 'return=minimal' },
+    headers: { ...ADMIN_HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify({ file_path: null, sha256: null, file_size: null }),
   });
   if (!upd.ok) throw new Error('DB 마킹 실패');
@@ -230,9 +227,9 @@ export async function cleanupOldApkFiles(
   keepRecent: number = KEEP_RECENT_FILES,
 ): Promise<{ deleted: number; bytesFreed: number; kept: number }> {
   // file_path 가 살아있는 버전만 정리 대상. version_code desc.
-  const r = await fetch(
+  const r = await authedFetch(
     `${SUPABASE_URL}/rest/v1/apk_versions?file_path=not.is.null&select=id,version_code,file_path,file_size&order=version_code.desc`,
-    { headers: HEADERS },
+    { headers: ADMIN_HEADERS },
   );
   if (!r.ok) throw new Error('정리 대상 조회 실패');
   const rows = await r.json() as { id: string; version_code: number; file_path: string; file_size: number | null }[];
@@ -247,9 +244,9 @@ export async function cleanupOldApkFiles(
 
   // DB 일괄 마킹 — id IN (...) — 이력 보존, 파일 메타만 NULL
   const ids = toDelete.map(x => x.id).join(',');
-  await fetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=in.(${ids})`, {
+  await authedFetch(`${SUPABASE_URL}/rest/v1/apk_versions?id=in.(${ids})`, {
     method: 'PATCH',
-    headers: { ...(await authHeaders()), Prefer: 'return=minimal' },
+    headers: { ...ADMIN_HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify({ file_path: null, sha256: null, file_size: null }),
   });
 
@@ -259,7 +256,7 @@ export async function cleanupOldApkFiles(
 
 // ── apk_subscribers CRUD ─────────────────────────────
 export async function listApkSubscribers(): Promise<ApkSubscriber[]> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_subscribers?order=created_at.desc`, { headers: HEADERS });
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/apk_subscribers?order=created_at.desc`, { headers: ADMIN_HEADERS });
   if (!r.ok) throw new Error('구독자 목록 조회 실패');
   return r.json();
 }
@@ -267,7 +264,7 @@ export async function listApkSubscribers(): Promise<ApkSubscriber[]> {
 export async function findSubscriberByEmail(email: string): Promise<ApkSubscriber | null> {
   const r = await fetch(
     `${SUPABASE_URL}/rest/v1/apk_subscribers?email=eq.${encodeURIComponent(email)}&select=*&limit=1`,
-    { headers: HEADERS },
+    { headers: PUBLIC_HEADERS },
   );
   if (!r.ok) return null;
   const rows = await r.json() as ApkSubscriber[];
@@ -277,7 +274,7 @@ export async function findSubscriberByEmail(email: string): Promise<ApkSubscribe
 export async function findSubscriberByToken(token: string): Promise<ApkSubscriber | null> {
   const r = await fetch(
     `${SUPABASE_URL}/rest/v1/apk_subscribers?unsubscribe_token=eq.${encodeURIComponent(token)}&select=*&limit=1`,
-    { headers: HEADERS },
+    { headers: PUBLIC_HEADERS },
   );
   if (!r.ok) return null;
   const rows = await r.json() as ApkSubscriber[];
@@ -294,9 +291,9 @@ export async function createSubscriber(input: {
   memo?: string | null;
   created_by?: string | null;
 }): Promise<ApkSubscriber> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_subscribers`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/apk_subscribers`, {
     method: 'POST',
-    headers: { ...(await authHeaders()), Prefer: 'return=representation' },
+    headers: { ...ADMIN_HEADERS, Prefer: 'return=representation' },
     body: JSON.stringify({ ...input, status: 'active' }),
   });
   if (!r.ok) {
@@ -308,18 +305,18 @@ export async function createSubscriber(input: {
 }
 
 export async function updateSubscriberStatus(id: string, status: SubscriberStatus): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_subscribers?id=eq.${id}`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/apk_subscribers?id=eq.${id}`, {
     method: 'PATCH',
-    headers: { ...(await authHeaders()), Prefer: 'return=minimal' },
+    headers: { ...ADMIN_HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify({ status }),
   });
   if (!r.ok) throw new Error('상태 변경 실패');
 }
 
 export async function deleteSubscriber(id: string): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/apk_subscribers?id=eq.${id}`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/apk_subscribers?id=eq.${id}`, {
     method: 'DELETE',
-    headers: await authHeaders(),
+    headers: ADMIN_HEADERS,
   });
   if (!r.ok) throw new Error('구독자 삭제 실패');
 }
@@ -327,18 +324,18 @@ export async function deleteSubscriber(id: string): Promise<void> {
 // ── 발송/다운로드 이력 조회 ──────────────────────────
 export async function listSendHistoryByVersion(versionId: string): Promise<ApkSendHistory[]> {
   // apk_send_history 는 RLS 'TO authenticated' 만 — anon SELECT 정책 없음
-  const r = await fetch(
+  const r = await authedFetch(
     `${SUPABASE_URL}/rest/v1/apk_send_history?version_id=eq.${versionId}&order=sent_at.desc`,
-    { headers: await authHeaders() },
+    { headers: ADMIN_HEADERS },
   );
   if (!r.ok) return [];
   return r.json();
 }
 
 export async function listDownloadsByVersion(versionId: string): Promise<ApkDownload[]> {
-  const r = await fetch(
+  const r = await authedFetch(
     `${SUPABASE_URL}/rest/v1/apk_downloads?version_id=eq.${versionId}&order=downloaded_at.desc`,
-    { headers: HEADERS },
+    { headers: ADMIN_HEADERS },
   );
   if (!r.ok) return [];
   return r.json();
@@ -347,7 +344,7 @@ export async function listDownloadsByVersion(versionId: string): Promise<ApkDown
 export async function listDownloadsByEmail(email: string): Promise<ApkDownload[]> {
   const r = await fetch(
     `${SUPABASE_URL}/rest/v1/apk_downloads?email=eq.${encodeURIComponent(email)}&order=downloaded_at.desc`,
-    { headers: HEADERS },
+    { headers: PUBLIC_HEADERS },
   );
   if (!r.ok) return [];
   return r.json();
