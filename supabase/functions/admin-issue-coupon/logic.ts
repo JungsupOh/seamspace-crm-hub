@@ -34,9 +34,26 @@ export type RoleVerdict =
   | { ok: false; status: 403; error: string };
 
 /**
- * `role` 은 user_profiles.role 을 1순위로, 없으면 JWT 의 user_metadata.role 을 쓴다
- * (partner-issue-license:55 와 같은 폴백).
+ * 호출자의 역할을 정한다 — **`user_profiles.role` 만 믿는다.**
+ *
+ * ⚠️ 원본(partner-issue-license:55, admin-auth:52)은 프로필이 없으면
+ * `caller.user_metadata?.role` 로 떨어진다. 그런데 **user_metadata 는 로그인한
+ * 사용자가 스스로 고칠 수 있는 값**이다. 프로필 행이 없는 계정이 자기 메타데이터에
+ * `role: 'admin'` 을 적어 넣으면 그 폴백을 타고 관리자로 통과한다.
+ * 쿠폰을 만드는 관문에서 그 경로를 열어 둘 수 없어 **이 함수에서는 폴백을 뺐다.**
+ *
+ * 프로필이 없거나 조회에 실패하면 빈 문자열 → roleVerdict 가 403 으로 막는다
+ * (fail-closed: 모르면 거절).
  */
+export function resolveRole(
+  profile: { role?: string | null } | null | undefined,
+  _userMetadata?: Record<string, unknown> | null,
+): string {
+  // 두 번째 인자는 **의도적으로 쓰지 않는다.** 호출부가 실수로 넘기더라도
+  // 역할 판정에 반영되지 않게 자리만 남겨 둔다(원본과 대조하기 쉽도록).
+  return profile?.role ?? '';
+}
+
 export function roleVerdict(role: string | null | undefined): RoleVerdict {
   const r = (role ?? '').trim();
   if (r.startsWith('partner_')) {

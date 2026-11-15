@@ -19,7 +19,7 @@
 // 덕분에 나중에 coupons.ts 한 곳만 바꾸면 Licenses.tsx 까지 함께 전환된다.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { authVerdict, roleVerdict, validate } from './logic.ts';
+import { authVerdict, resolveRole, roleVerdict, validate } from './logic.ts';
 import { internalHeaders } from '../_shared/internal.ts';
 
 const CORS = {
@@ -61,14 +61,20 @@ Deno.serve(async (req: Request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const { data: profile } = await admin
+    const { data: profile, error: profileErr } = await admin
       .from('user_profiles')
       .select('role')
       .eq('id', caller.id)
       .single();
 
-    // 요청 본문의 신원 정보를 믿지 않는다 — 서버가 DB 에서 다시 읽는다.
-    const role: string = profile?.role ?? caller.user_metadata?.role ?? '';
+    if (profileErr) {
+      // 조회 실패·행 없음 — fail-closed. 뚫고 들어올 틈을 만들지 않는다.
+      console.warn(`[admin-issue-coupon] user_profiles 조회 실패 user=${caller.id}`);
+    }
+
+    // ⚠️ user_metadata 로 폴백하지 않는다 — 사용자가 스스로 고칠 수 있는 값이라
+    //    프로필 없는 계정이 role=admin 을 적어 넣고 통과할 수 있다(logic.resolveRole 주석).
+    const role = resolveRole(profile, caller.user_metadata);
     const verdict = roleVerdict(role);
     if (!verdict.ok) return json({ error: verdict.error }, verdict.status);
 

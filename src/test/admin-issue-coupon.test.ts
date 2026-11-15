@@ -14,6 +14,7 @@ import { resolve } from 'node:path';
 
 import {
   authVerdict,
+  resolveRole,
   roleVerdict,
   validate,
   ALLOWED_ROLES,
@@ -168,8 +169,8 @@ describe('⑤ 구조 — partner-issue-license 복제 + 응답 호환', () => {
   it('역할을 DB(user_profiles)에서 다시 읽는다 — 본문을 믿지 않는다', () => {
     expect(INDEX_TS).toContain("from('user_profiles')");
     expect(INDEX_TS).toContain(".eq('id', caller.id)");
-    expect(INDEX_TS).toContain("profile?.role ?? caller.user_metadata?.role");
-    expect(PARTNER_TS).toContain("profile?.role ?? caller.user_metadata?.role");
+    // 021-6b: 역할은 resolveRole 이 정하고, user_metadata 폴백은 없다 (⑥ 참고)
+    expect(INDEX_TS).toContain('resolveRole(profile, caller.user_metadata)');
   });
 
   it('create-coupon 호출에 internalHeaders 를 쓴다 (021-1)', () => {
@@ -196,9 +197,71 @@ describe('⑤ 구조 — partner-issue-license 복제 + 응답 호환', () => {
     expect(v).toBeLessThan(c);
   });
 
+  it('user_metadata 폴백이 핸들러에 없다 (021-6b)', () => {
+    expect(INDEX_TS).not.toContain("profile?.role ?? caller.user_metadata?.role");
+    expect(INDEX_TS).toContain('resolveRole(profile, caller.user_metadata)');
+    // 원본에는 아직 폴백이 남아 있다 — 이번 단위에서 고치지 않았음을 고정
+    expect(PARTNER_TS).toContain("profile?.role ?? caller.user_metadata?.role");
+  });
+
   it('파트너 관련 조회가 없다 — 이 함수는 파트너를 다루지 않는다', () => {
     expect(INDEX_TS).not.toContain("from('partners')");
     expect(INDEX_TS).not.toContain('partner_id');
     expect(INDEX_TS).not.toContain('can_issue_licenses');
+  });
+});
+
+// ════════════════════════════════════════════════════
+// 021-6b — user_metadata 폴백 제거 (권한 상승 차단)
+// ════════════════════════════════════════════════════
+
+describe('⑥ 역할은 user_profiles 만 믿는다 (user_metadata 폴백 없음)', () => {
+  it('🔴 프로필 없음 + user_metadata.role=admin → 거절', () => {
+    // 공격 시나리오: 가입만 한 계정이 자기 메타데이터에 role=admin 을 적는다.
+    // user_metadata 는 사용자가 스스로 고칠 수 있으므로 믿으면 안 된다.
+    const role = resolveRole(null, { role: 'admin' });
+    expect(role).toBe('');
+    const v = roleVerdict(role);
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.status).toBe(403);
+  });
+
+  it('🔴 프로필 없음 + user_metadata.role=sub_admin → 거절', () => {
+    expect(roleVerdict(resolveRole(undefined, { role: 'sub_admin' })).ok).toBe(false);
+  });
+
+  it('🔴 프로필의 role 이 null 인데 메타데이터가 admin → 거절', () => {
+    expect(resolveRole({ role: null }, { role: 'admin' })).toBe('');
+    expect(roleVerdict(resolveRole({ role: null }, { role: 'admin' })).ok).toBe(false);
+  });
+
+  it('메타데이터가 guest 라도 프로필이 admin 이면 통과 — 프로필이 유일한 근거', () => {
+    expect(resolveRole({ role: 'admin' }, { role: 'guest' })).toBe('admin');
+    expect(roleVerdict(resolveRole({ role: 'admin' }, { role: 'guest' })).ok).toBe(true);
+  });
+
+  it('메타데이터가 비어 있어도 프로필만으로 판정한다', () => {
+    expect(resolveRole({ role: 'sub_admin' }, null)).toBe('sub_admin');
+    expect(resolveRole({ role: 'sub_admin' })).toBe('sub_admin');
+  });
+
+  it('프로필이 파트너면 그대로 파트너로 판정되어 403', () => {
+    expect(resolveRole({ role: 'partner_admin' }, { role: 'admin' })).toBe('partner_admin');
+    expect(roleVerdict(resolveRole({ role: 'partner_admin' }, { role: 'admin' })).ok).toBe(false);
+  });
+
+  it('logic.ts 안에 user_metadata 를 읽는 코드가 없다', () => {
+    const LOGIC_TS = readFileSync(
+      resolve(ROOT, 'supabase/functions/admin-issue-coupon/logic.ts'), 'utf8',
+    );
+    // 주석에는 설명으로 등장하지만, 코드에서 값을 꺼내 쓰지는 않는다
+    expect(LOGIC_TS).not.toContain('_userMetadata?.role');
+    expect(LOGIC_TS).not.toContain('userMetadata.role');
+    expect(LOGIC_TS).toContain("return profile?.role ?? '';");
+  });
+
+  it('프로필 조회 실패를 fail-closed 로 다룬다', () => {
+    expect(INDEX_TS).toContain('error: profileErr');
+    expect(INDEX_TS).toContain('user_profiles 조회 실패');
   });
 });
