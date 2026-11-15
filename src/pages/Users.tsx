@@ -250,16 +250,14 @@ export default function Users() {
         toast.warning('사용자는 생성됐지만 이메일 발송에 실패했습니다: ' + (e as Error).message);
       }
 
-      // Upsert profile with correct status
-      if (authUser) {
-        await supabase.from('user_profiles').upsert({
-          id: authUser.id,
-          email: inviteEmail.trim().toLowerCase(),
-          name: inviteName.trim() || null,
-          role: inviteRole,
-          is_first_login: true,
-          status: emailSent ? 'invited' : 'invite_failed',
-          created_by: currentUser?.id ?? null,
+      // 프로필은 서버(admin-auth createUser)가 이미 채운다 — id·email·name·role·
+      // is_first_login·created_by(호출자 id). 브라우저에서 user_profiles 를 직접
+      // 쓰지 않는다(021-8b-1: 로그인만 하면 아무나 자기 role 을 바꿀 수 있던 경로).
+      // 트리거 기본값이 'invited' 라서, 메일이 실패했을 때만 상태를 보정한다.
+      if (authUser && !emailSent) {
+        await adminAuthFetch('updateProfile', {
+          userId: authUser.id,
+          updates: { status: 'invite_failed' },
         });
       }
 
@@ -317,7 +315,7 @@ export default function Users() {
         role: resendTarget.role,
         invitedBy: currentUser?.email ?? '관리자',
       });
-      await supabase.from('user_profiles').update({ status: 'invited' }).eq('id', resendTarget.id);
+      await adminAuthFetch('updateProfile', { userId: resendTarget.id, updates: { status: 'invited' } });
       toast.success(`초대 메일을 ${resendTarget.email}로 재발송했습니다.`);
     } catch (e) {
       toast.warning(`비밀번호는 재발급됐지만 메일 발송 실패: ${(e as Error).message}`);
@@ -330,13 +328,10 @@ export default function Users() {
   // ----- Toggle Active/Inactive -----
   const handleToggleActive = async (user: UserProfileRow) => {
     const newStatus: UserStatus = user.status === 'inactive' ? 'active' : 'inactive';
-    const { error } = await supabase
-      .from('user_profiles')
-      .update({ status: newStatus })
-      .eq('id', user.id);
-
-    if (error) {
-      toast.error('상태 변경 실패: ' + error.message);
+    try {
+      await adminAuthFetch('updateProfile', { userId: user.id, updates: { status: newStatus } });
+    } catch (e) {
+      toast.error('상태 변경 실패: ' + (e as Error).message);
       return;
     }
     toast.success(newStatus === 'inactive' ? `${user.email} 계정을 비활성화했습니다.` : `${user.email} 계정을 활성화했습니다.`);
@@ -360,11 +355,8 @@ export default function Users() {
       return;
     }
 
-    // Mark as first login again
-    await supabase
-      .from('user_profiles')
-      .update({ is_first_login: true })
-      .eq('id', user.id);
+    // Mark as first login again (서버 경유 — 021-8b-1)
+    await adminAuthFetch('updateProfile', { userId: user.id, updates: { is_first_login: true } });
 
     // Send reset email
     try {

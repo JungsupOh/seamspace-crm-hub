@@ -127,6 +127,8 @@ serve(async (req) => {
               role: rv.role,
               partnerId: meta.partner_id,
               name: meta.name,
+              // 만든 사람은 **서버가 정한다** (021-8b-1). 요청 본문 값을 쓰지 않는다.
+              createdBy: caller.id,
             }))
             .eq('id', newUserId);
 

@@ -325,9 +325,11 @@ describe('⑨ updateProfile — 허용 필드 (A-2)', () => {
     expect(PROFILE_UPDATE_FIELDS).toHaveLength(5);
   });
 
-  it('Users.tsx 는 updateProfile 을 쓰지 않는다 (브라우저 upsert — C 참고)', () => {
-    expect(USERS_TSX).not.toContain("adminAuthFetch('updateProfile'");
-    expect(USERS_TSX).toContain("from('user_profiles').upsert");
+  it('Users.tsx 도 이제 updateProfile 을 쓴다 (021-8b-1 에서 전환)', () => {
+    // 021-6e 시점에는 브라우저가 user_profiles 를 직접 upsert 했고, 이 줄이
+    // 그 사실을 고정하고 있었다. 021-8b-1 에서 그 우회 경로를 없앴다(⑬ 참고).
+    expect(USERS_TSX).toContain("adminAuthFetch('updateProfile'");
+    expect(USERS_TSX).not.toContain("from('user_profiles').upsert");
   });
 
   it('Partners.tsx 가 보내는 본문이 그대로 통과한다', () => {
@@ -509,5 +511,95 @@ describe('⑫ partner-issue-license 폴백 제거 (B)', () => {
     expect(PIL).toContain("if (isPartner && role !== 'partner_admin')");
     expect(PIL).toContain('can_issue_licenses');
     expect(PIL).toContain('internalHeaders()');
+  });
+});
+
+// ════════════════════════════════════════════════════
+// 021-8b-1 — Users.tsx 의 user_profiles 직접 쓰기 제거
+// ════════════════════════════════════════════════════
+// 021-6e 가 admin-auth 에 권한 제한을 넣었지만, 브라우저가 user_profiles 를
+// 직접 쓰면 그 제한이 통째로 우회된다(021-6e §C, 021-8D §A-4 #1).
+// 이 묶음은 "우회 경로가 코드에 없다" 를 고정한다.
+
+describe('⑬ Users.tsx 가 user_profiles 를 직접 쓰지 않는다 (021-8b-1)', () => {
+  /** 주석을 걷어낸 실행 코드만 — 주석에 테이블명이 설명으로 등장한다. */
+  const codeOnly = USERS_TSX.split('\n')
+    .filter(l => !l.trim().startsWith('//'))
+    .join('\n');
+
+  it('🔴 supabase.from(\'user_profiles\') 로 쓰는 호출이 0건', () => {
+    // upsert / update / insert / delete 가 user_profiles 에 직접 걸리면 실패
+    for (const op of ['upsert', 'insert', 'delete']) {
+      expect(codeOnly, op).not.toMatch(
+        new RegExp(`from\\(['"]user_profiles['"]\\)[\\s\\S]{0,80}\\.${op}\\(`),
+      );
+    }
+    // .update( 는 멀티라인 체이닝도 잡는다
+    expect(codeOnly).not.toMatch(/from\(['"]user_profiles['"]\)[\s\S]{0,80}\.update\(/);
+  });
+
+  it('남은 user_profiles 직접 접근은 읽기(select) 하나뿐', () => {
+    const hits = [...codeOnly.matchAll(/from\(['"]user_profiles['"]\)/g)];
+    expect(hits).toHaveLength(1);
+    // 그 한 곳은 select 로 이어져야 한다
+    const after = codeOnly.slice(hits[0].index!, hits[0].index! + 120);
+    expect(after).toContain('.select(');
+  });
+
+  it('쓰기는 전부 adminAuthFetch 로 나간다', () => {
+    for (const action of ['createUser', 'updateUser', 'updateProfile', 'deleteUser']) {
+      expect(codeOnly, action).toContain(`adminAuthFetch('${action}'`);
+    }
+  });
+
+  it('초대 흐름이 보내는 본문 — createUser 는 role 을 meta 로, created_by 는 보내지 않는다', () => {
+    const i = codeOnly.indexOf("adminAuthFetch('createUser'");
+    const blk = codeOnly.slice(i, i + 320);
+    expect(blk).toContain('user_metadata');
+    expect(blk).toContain('role: inviteRole');
+    // 🔑 created_by 를 클라이언트가 보내지 않는다 (서버가 호출자 id 로 정한다)
+    expect(blk).not.toContain('created_by');
+    expect(blk).not.toContain('currentUser?.id');
+  });
+
+  it('메일 실패 시에만 status 를 invite_failed 로 보정한다', () => {
+    expect(codeOnly).toContain("updates: { status: 'invite_failed' }");
+    expect(codeOnly).toContain('!emailSent');
+  });
+
+  it('보정에 쓰는 필드가 updateProfile 허용 목록 안에 있다', () => {
+    for (const f of ['status', 'is_first_login']) {
+      expect([...PROFILE_UPDATE_FIELDS]).toContain(f);
+    }
+  });
+});
+
+describe('⑭ created_by 는 서버가 정한다 (021-8b-1)', () => {
+  const CALLER = '11111111-2222-4333-8444-555555555555';
+
+  it('createdBy 를 주면 created_by 가 들어간다', () => {
+    expect(buildProfileUpdate({ role: 'guest', createdBy: CALLER }))
+      .toEqual({ role: 'guest', created_by: CALLER });
+  });
+
+  it('UUID 가 아니면 넣지 않는다', () => {
+    for (const bad of ['', '   ', 'not-a-uuid', undefined]) {
+      expect('created_by' in buildProfileUpdate({ role: 'guest', createdBy: bad as string })).toBe(false);
+    }
+  });
+
+  it('🔴 created_by 는 updateProfile 허용 목록에 **없다** — 클라이언트가 못 바꾼다', () => {
+    expect([...PROFILE_UPDATE_FIELDS]).not.toContain('created_by');
+    const v = validateProfileUpdates({ created_by: CALLER });
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.error).toContain('created_by');
+  });
+
+  it('핸들러가 caller.id 를 넘긴다 (요청 본문 값이 아니다)', () => {
+    const i = INDEX_TS.indexOf('buildProfileUpdate({');
+    const blk = INDEX_TS.slice(i, i + 260);
+    expect(blk).toContain('createdBy: caller.id');
+    expect(blk).not.toContain('meta.created_by');
+    expect(blk).not.toContain('body.created_by');
   });
 });

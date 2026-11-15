@@ -97,8 +97,18 @@ export function buildProfileUpdate(params: {
   role: AssignableRole;
   partnerId?: unknown;
   name?: unknown;
+  /**
+   * 계정을 만든 사람(호출자)의 id. **서버만 정한다** (021-8b-1).
+   * 요청 본문으로 받지 않는다 — `PROFILE_UPDATE_FIELDS` 에 `created_by` 가 없는 이유다.
+   * 예전에는 브라우저(`Users.tsx`)가 `created_by` 를 직접 써서 위조할 수 있었다.
+   */
+  createdBy?: string;
 }): Record<string, unknown> {
   const out: Record<string, unknown> = { role: params.role };
+
+  if (typeof params.createdBy === 'string' && UUID_RE.test(params.createdBy.trim())) {
+    out.created_by = params.createdBy.trim();
+  }
 
   const pid = typeof params.partnerId === 'string' ? params.partnerId.trim() : '';
   if (pid && UUID_RE.test(pid)) out.partner_id = pid;
