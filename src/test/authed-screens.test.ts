@@ -62,6 +62,17 @@ const SCREENS: ScreenCase[] = [
     allowedAnonAuth: [],
     allowedPlainRest: [],
   },
+  {
+    file: 'pages/Licenses.tsx',
+    // 엣지 함수 호출 4건은 이 단위 범위가 아니다(021-8a).
+    allowedAnonAuth: [
+      { why: 'functions/v1/create-coupon' },
+      { why: 'functions/v1/send-coupon' },
+      { why: 'functions/v1/sync-new-coupons' },
+      { why: 'functions/v1/get-coupon-status' },
+    ],
+    allowedPlainRest: [],
+  },
 ];
 
 describe('021-8b-4 — 관리자 화면 rest/v1 호출은 로그인 토큰으로 나간다', () => {

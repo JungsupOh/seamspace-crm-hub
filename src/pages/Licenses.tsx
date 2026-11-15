@@ -17,6 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { getAllLicenses, updateLicenseStatus, updateLicenseDeal, attachCouponToDeal, deleteDealLicense, hideMdiaryCoupon, DealLicenseRecord, LicenseStatus, saveDealLicenses } from '@/lib/storage';
 import { toast } from 'sonner';
 import { useDeals } from '@/hooks/use-airtable';
+import { authedFetch } from '@/lib/authedFetch';
 import { airtable, AirtableRecord } from '@/lib/airtable';
 import { ContactFields } from '@/types/airtable';
 import * as XLSX from 'xlsx';
@@ -134,7 +135,7 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
       // Supabase가 에러 반환 시 배열이 아닌 객체를 돌려주는 경우 대비 — Array.isArray 방어
       const safeJson = async <T,>(url: string): Promise<T[]> => {
         try {
-          const r = await fetch(url, { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } });
+          const r = await authedFetch(url, { headers: { apikey: SUPABASE_KEY } });
           if (!r.ok) return [];
           const data = await r.json();
           return Array.isArray(data) ? data : [];
@@ -231,8 +232,8 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
   const { data: campaigns } = useQuery({
     queryKey: ['campaigns'],
     queryFn: async () => {
-      const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?select=id,name,status,start_date,end_date,description&order=start_date.desc.nullslast`, {
-        headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY },
+      const r = await authedFetch(`${SUPABASE_URL}/rest/v1/campaigns?select=id,name,status,start_date,end_date,description&order=start_date.desc.nullslast`, {
+        headers: { apikey: SUPABASE_KEY },
       });
       return r.json() as Promise<{ id: string; name: string; status: string; start_date?: string; end_date?: string; description?: string }[]>;
     },
@@ -247,9 +248,9 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
   const loadRecipientsFromDeal = async (dealId: string) => {
     try {
       // 1) deal_users 테이블에서 사용자 로드
-      const usersRes = await fetch(
+      const usersRes = await authedFetch(
         `${SUPABASE_URL}/rest/v1/deal_users?deal_id=eq.${encodeURIComponent(dealId)}&order=is_primary.desc,created_at.asc`,
-        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+        { headers: { apikey: SUPABASE_KEY } }
       );
       const users = usersRes.ok ? await usersRes.json() : [];
 
@@ -270,9 +271,9 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
       }
 
       // 2) 기존 deal_licenses에서 로드 (fallback)
-      const res = await fetch(
+      const res = await authedFetch(
         `${SUPABASE_URL}/rest/v1/deal_licenses?deal_id=eq.${dealId}&order=created_at.asc`,
-        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+        { headers: { apikey: SUPABASE_KEY } }
       );
       const data: DealLicenseRecord[] = await res.json();
       setRecipients(data.map(r => ({
@@ -406,10 +407,9 @@ function CouponSendDialog({ open, onClose }: CouponSendDialogProps) {
           status:        '대기',
         }));
       if (rows.length > 0) {
-        await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
+        await authedFetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${SUPABASE_KEY}`,
             apikey: SUPABASE_KEY,
             'Content-Type': 'application/json',
             Prefer: 'return=minimal',
@@ -834,7 +834,7 @@ export default function Licenses() {
   const handleAutoMatch = async () => {
     setAutoMatching(true);
     setAutoMatchResult(null);
-    const headers = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' };
+    const headers = { apikey: SUPABASE_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' };
 
     try {
       // 1. Airtable 전체 고객 로드 → 이름별 Map
@@ -851,10 +851,10 @@ export default function Licenses() {
 
       // 2. 미연결 mdiary_coupons (link_confirmed IS NULL, extracted_name 있는 것)
       setAutoMatchProgress('미연결 쿠폰 목록 불러오는 중...');
-      const cRes = await fetch(
+      const cRes = await authedFetch(
         `${SUPABASE_URL}/rest/v1/mdiary_coupons?link_confirmed=is.null&extracted_name=not.is.null` +
         `&select=id,coupon_code,extracted_name,is_used,group_name,edu_office_name,descript,created_at&limit=5000`,
-        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
+        { headers: { apikey: SUPABASE_KEY } }
       );
       const unlinked: Array<{
         id: number; coupon_code: string; extracted_name: string; is_used: boolean;
@@ -885,7 +885,7 @@ export default function Licenses() {
           // 정확히 1명 매칭 → 전체 연결
           const contactId = matches[0];
           await Promise.all(coupons.map(c =>
-            fetch(`${SUPABASE_URL}/rest/v1/mdiary_coupons?id=eq.${c.id}`, {
+            authedFetch(`${SUPABASE_URL}/rest/v1/mdiary_coupons?id=eq.${c.id}`, {
               method: 'PATCH', headers,
               body: JSON.stringify({ link_confirmed: true, linked_contact_id: contactId }),
             })
@@ -922,7 +922,7 @@ export default function Licenses() {
 
           // 같은 이름의 모든 쿠폰 연결
           await Promise.all(coupons.map(c =>
-            fetch(`${SUPABASE_URL}/rest/v1/mdiary_coupons?id=eq.${c.id}`, {
+            authedFetch(`${SUPABASE_URL}/rest/v1/mdiary_coupons?id=eq.${c.id}`, {
               method: 'PATCH', headers,
               body: JSON.stringify({ link_confirmed: true, linked_contact_id: newContactId }),
             })
