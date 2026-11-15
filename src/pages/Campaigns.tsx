@@ -24,6 +24,7 @@ import { getRecentSendLogs, canSendUH2821, todayUHStage, type AlimtalkRecipient 
 import { normalizePhone } from '@/lib/phone';
 import { parseLeadExcel, type ParsedLeadRow, type LeadParseResult } from '@/lib/campaign-lead-import';
 import { upsertLeadContact } from '@/lib/luckySeven';
+import { authedFetch } from '@/lib/authedFetch';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { MessageSquare } from 'lucide-react';
@@ -31,7 +32,8 @@ import { MessageSquare } from 'lucide-react';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
+// Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (021-8b-4).
+const HEADERS = { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
 
 // ── Types ─────────────────────────────────────────
 import type { CouponSettings } from '@/lib/campaign-coupons';
@@ -146,13 +148,13 @@ interface CampaignLead {
 
 // ── API ───────────────────────────────────────────
 async function getCampaigns(): Promise<Campaign[]> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?order=created_at.desc`, { headers: HEADERS });
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/campaigns?order=created_at.desc`, { headers: HEADERS });
   if (!r.ok) throw new Error('캠페인 조회 실패');
   return r.json();
 }
 
 async function createCampaign(c: Omit<Campaign, 'id' | 'created_at'>): Promise<Campaign> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/campaigns`, {
     method: 'POST',
     headers: { ...HEADERS, Prefer: 'return=representation' },
     body: JSON.stringify(c),
@@ -167,7 +169,7 @@ async function createCampaign(c: Omit<Campaign, 'id' | 'created_at'>): Promise<C
 }
 
 async function updateCampaign(id: string, c: Partial<Campaign>): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${id}`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${id}`, {
     method: 'PATCH',
     headers: HEADERS,
     body: JSON.stringify(c),
@@ -180,14 +182,14 @@ async function updateCampaign(id: string, c: Partial<Campaign>): Promise<void> {
 }
 
 async function deleteCampaign(id: string): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${id}`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${id}`, {
     method: 'DELETE', headers: HEADERS,
   });
   if (!r.ok) throw new Error('캠페인 삭제 실패');
 }
 
 async function getCampaignLicenses(campaignId: string): Promise<CampaignLicense[]> {
-  const r = await fetch(
+  const r = await authedFetch(
     `${SUPABASE_URL}/rest/v1/campaign_licenses?campaign_id=eq.${campaignId}&order=created_at.asc`,
     { headers: HEADERS }
   );
@@ -198,7 +200,7 @@ async function getCampaignLicenses(campaignId: string): Promise<CampaignLicense[
 // 모든 캠페인의 이용권을 한 번에 조회 (캠페인 페이지 로드 최적화).
 // useQuery({ queryKey: ['all_campaign_licenses'], queryFn: getAllCampaignLicenses, select: 캠페인별 필터 })로 사용.
 async function getAllCampaignLicenses(): Promise<CampaignLicense[]> {
-  const r = await fetch(
+  const r = await authedFetch(
     `${SUPABASE_URL}/rest/v1/campaign_licenses?order=created_at.asc&limit=10000`,
     { headers: HEADERS }
   );
@@ -208,7 +210,7 @@ async function getAllCampaignLicenses(): Promise<CampaignLicense[]> {
 }
 
 async function addCampaignLicense(row: Omit<CampaignLicense, 'id' | 'created_at'>): Promise<CampaignLicense> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
     method: 'POST',
     headers: { ...HEADERS, Prefer: 'return=representation' },
     body: JSON.stringify(row),
@@ -225,21 +227,21 @@ async function addCampaignLicense(row: Omit<CampaignLicense, 'id' | 'created_at'
 }
 
 async function deleteCampaignLicense(id: string): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?id=eq.${id}`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?id=eq.${id}`, {
     method: 'DELETE', headers: HEADERS,
   });
   if (!r.ok) throw new Error('삭제 실패');
 }
 
 async function updateCampaignLicense(id: string, patch: Partial<CampaignLicense>): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?id=eq.${id}`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?id=eq.${id}`, {
     method: 'PATCH', headers: HEADERS, body: JSON.stringify(patch),
   });
   if (!r.ok) throw new Error('수정 실패');
 }
 
 async function bulkAddCampaignLicenses(rows: Omit<CampaignLicense, 'id' | 'created_at'>[]): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
     method: 'POST',
     headers: { ...HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify(rows),
@@ -249,7 +251,7 @@ async function bulkAddCampaignLicenses(rows: Omit<CampaignLicense, 'id' | 'creat
 
 // ── 리드 API ──────────────────────────────────────
 async function getCampaignLeads(campaignId: string): Promise<CampaignLead[]> {
-  const r = await fetch(
+  const r = await authedFetch(
     `${SUPABASE_URL}/rest/v1/campaign_leads?campaign_id=eq.${campaignId}&order=created_at.desc`,
     { headers: HEADERS }
   );
@@ -260,7 +262,7 @@ async function getCampaignLeads(campaignId: string): Promise<CampaignLead[]> {
 
 // 모든 캠페인의 리드를 한 번에 조회 (캠페인 페이지 로드 최적화).
 async function getAllCampaignLeads(): Promise<CampaignLead[]> {
-  const r = await fetch(
+  const r = await authedFetch(
     `${SUPABASE_URL}/rest/v1/campaign_leads?order=created_at.desc&limit=20000`,
     { headers: HEADERS }
   );
@@ -270,14 +272,14 @@ async function getAllCampaignLeads(): Promise<CampaignLead[]> {
 }
 
 async function updateCampaignLead(id: string, patch: Partial<CampaignLead>): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${id}`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${id}`, {
     method: 'PATCH', headers: HEADERS, body: JSON.stringify(patch),
   });
   if (!r.ok) throw new Error('리드 업데이트 실패');
 }
 
 async function deleteCampaignLead(id: string): Promise<void> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${id}`, {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${id}`, {
     method: 'DELETE', headers: HEADERS,
   });
   if (!r.ok) throw new Error('리드 삭제 실패');
@@ -340,7 +342,7 @@ async function bulkAddCampaignLeads(rows: NewCampaignLead[]): Promise<CampaignLe
   const created: CampaignLead[] = [];
   for (let i = 0; i < rows.length; i += 50) {
     const chunk = rows.slice(i, i + 50);
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads`, {
+    const r = await authedFetch(`${SUPABASE_URL}/rest/v1/campaign_leads`, {
       method: 'POST',
       headers: { ...HEADERS, Prefer: 'return=representation' },
       body: JSON.stringify(chunk),
@@ -355,7 +357,7 @@ async function bulkAddCampaignLeads(rows: NewCampaignLead[]): Promise<CampaignLe
 // deal_licenses에서 phone + 발급일 목록 가져옴.
 // 같은 phone에 여러 deal이 있을 수 있어 가장 빠른(이른) created_at만 보관 (캠페인 트라이얼 후 생긴 deal만 전환으로 카운트).
 async function getConvertedPhones(): Promise<Map<string, string>> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/deal_licenses?select=contact_phone,created_at&order=created_at.asc`, { headers: HEADERS });
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/deal_licenses?select=contact_phone,created_at&order=created_at.asc`, { headers: HEADERS });
   if (!r.ok) return new Map();
   const data: { contact_phone: string; created_at: string }[] = await r.json();
   const phoneToFirstDealAt = new Map<string, string>();
@@ -1269,9 +1271,9 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   const { data: campaignCoupons } = useQuery({
     queryKey: ['campaign_coupons', campaign.id],
     queryFn: async () => {
-      const r = await fetch(
+      const r = await authedFetch(
         `${SUPABASE_URL}/rest/v1/shop_coupons?campaign_id=eq.${campaign.id}&select=id,is_used,used_order_id`,
-        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+        { headers: { apikey: SUPABASE_KEY } },
       );
       return r.ok ? (await r.json() as { id: number; is_used: boolean; used_order_id: string | null }[]) : [];
     },
@@ -1285,9 +1287,9 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
     queryFn: async () => {
       if (usedOrderIds.length === 0) return [];
       const inFilter = `(${usedOrderIds.map(id => `"${id}"`).join(',')})`;
-      const r = await fetch(
+      const r = await authedFetch(
         `${SUPABASE_URL}/rest/v1/shop_orders?order_id=in.${inFilter}&select=order_id,total_amount`,
-        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
+        { headers: { apikey: SUPABASE_KEY } },
       );
       return r.ok ? (await r.json() as { order_id: string; total_amount: number }[]) : [];
     },
@@ -1440,8 +1442,8 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     queryFn: async (): Promise<Map<string, { otherCampaignTrial: boolean; purchased: boolean }>> => {
       const map = new Map<string, { otherCampaignTrial: boolean; purchased: boolean }>();
       const [allLicsRes, purchasedRes] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?select=contact_phone,campaign_id`, { headers: HEADERS }),
-        fetch(`${SUPABASE_URL}/rest/v1/contacts?contact_type=eq.${encodeURIComponent('구매고객')}&select=phone_normalized`, { headers: HEADERS }),
+        authedFetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?select=contact_phone,campaign_id`, { headers: HEADERS }),
+        authedFetch(`${SUPABASE_URL}/rest/v1/contacts?contact_type=eq.${encodeURIComponent('구매고객')}&select=phone_normalized`, { headers: HEADERS }),
       ]);
       const allLics: { contact_phone?: string; campaign_id?: string }[] = allLicsRes.ok ? await allLicsRes.json() : [];
       const purchased: { phone_normalized?: string }[] = purchasedRes.ok ? await purchasedRes.json() : [];
@@ -1622,7 +1624,7 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
       try {
         const phoneNorm = (lead.phone_normalized || lead.phone.replace(/\D/g, ''));
         contactId = await withRetry(async (): Promise<string | null> => {
-          const existingRes = await fetch(
+          const existingRes = await authedFetch(
             `${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${encodeURIComponent(phoneNorm)}&select=id`,
             { headers: HEADERS }
           );
@@ -1630,7 +1632,7 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
           const existing = await existingRes.json();
           if (Array.isArray(existing) && existing.length > 0) return existing[0].id;
 
-          const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/contacts`, {
+          const insertRes = await authedFetch(`${SUPABASE_URL}/rest/v1/contacts`, {
             method: 'POST',
             headers: { ...HEADERS, Prefer: 'return=representation' },
             body: JSON.stringify({
@@ -1763,7 +1765,7 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
       if (deleteTarget.origin === 'form') {
         const leadId = deleteTarget.id.replace(/^lead:/, '');
         // 연결된 licenses도 함께 삭제 (FK ON DELETE SET NULL이면 lead_id만 끊김 — 여기선 함께 제거)
-        const licsRes = await fetch(
+        const licsRes = await authedFetch(
           `${SUPABASE_URL}/rest/v1/campaign_licenses?lead_id=eq.${leadId}`,
           { method: 'DELETE', headers: HEADERS }
         ).catch(() => null);

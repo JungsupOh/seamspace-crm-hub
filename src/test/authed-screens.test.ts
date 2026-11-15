@@ -101,6 +101,14 @@ const SCREENS: ScreenCase[] = [
     ],
     allowedPlainRest: [],
   },
+  {
+    file: 'pages/Campaigns.tsx',
+    allowedAnonAuth: [
+      { why: ':1124 Storage 업로드(campaign-images 버킷) — 021-8e 담당' },
+      { why: ':1218 functions/v1/get-coupon-status — 021-8a 담당' },
+    ],
+    allowedPlainRest: [],
+  },
 ];
 
 describe('021-8b-4 — 관리자 화면 rest/v1 호출은 로그인 토큰으로 나간다', () => {
