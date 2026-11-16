@@ -11,6 +11,7 @@ import Contacts from "./pages/Contacts";
 import Deals from "./pages/Deals";
 import Partners from "./pages/Partners";
 import Campaigns from "./pages/Campaigns";
+import Leads from "./pages/Leads";
 import CampaignForm from "./pages/CampaignForm";
 import Licenses from "./pages/Licenses";
 import PartnerPortal from "./pages/PartnerPortal";
@@ -251,6 +252,16 @@ function AppRoutes() {
           <RequireAuth>
             <AppLayout>
               <Campaigns />
+            </AppLayout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/leads"
+        element={
+          <RequireAuth>
+            <AppLayout>
+              <Leads />
             </AppLayout>
           </RequireAuth>
         }
