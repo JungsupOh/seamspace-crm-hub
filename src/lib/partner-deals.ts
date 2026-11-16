@@ -1,10 +1,12 @@
 // ── 파트너 딜 CRUD ──────────────────────────────────
 
+import { authedFetch } from '@/lib/authedFetch';
+
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const BASE_URL = `${SUPABASE_URL}/rest/v1/partner_deals`;
+// Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (HARD-A H-4).
 const HEADERS: Record<string, string> = {
-  Authorization: `Bearer ${SUPABASE_KEY}`,
   apikey: SUPABASE_KEY,
   'Content-Type': 'application/json',
 };
@@ -52,7 +54,7 @@ export interface PartnerDeal {
 }
 
 export async function getPartnerDeals(partnerId: string): Promise<PartnerDeal[]> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${BASE_URL}?partner_id=eq.${encodeURIComponent(partnerId)}&order=seq_number.asc.nullslast,created_at.asc`,
     { headers: HEADERS }
   );
@@ -61,7 +63,7 @@ export async function getPartnerDeals(partnerId: string): Promise<PartnerDeal[]>
 }
 
 export async function getAllPartnerDeals(): Promise<PartnerDeal[]> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${BASE_URL}?order=created_at.desc&limit=5000`,
     { headers: HEADERS }
   );
@@ -72,7 +74,7 @@ export async function getAllPartnerDeals(): Promise<PartnerDeal[]> {
 export async function createPartnerDeal(
   record: Omit<PartnerDeal, 'id' | 'created_at' | 'updated_at'>
 ): Promise<PartnerDeal> {
-  const res = await fetch(BASE_URL, {
+  const res = await authedFetch(BASE_URL, {
     method: 'POST',
     headers: { ...HEADERS, Prefer: 'return=representation' },
     body: JSON.stringify(record),
@@ -89,7 +91,7 @@ export async function updatePartnerDeal(
   id: string,
   updates: Partial<Omit<PartnerDeal, 'id' | 'created_at'>>
 ): Promise<void> {
-  const res = await fetch(`${BASE_URL}?id=eq.${id}`, {
+  const res = await authedFetch(`${BASE_URL}?id=eq.${id}`, {
     method: 'PATCH',
     headers: HEADERS,
     body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
@@ -106,7 +108,7 @@ export async function syncPartnerDealDates(
   if (dates.license_issue_date !== undefined) updates.license_issue_date = dates.license_issue_date || null as unknown as string;
   if (dates.deposit_date !== undefined) updates.deposit_date = dates.deposit_date || null as unknown as string;
   if (Object.keys(updates).length === 0) return;
-  await fetch(`${BASE_URL}?linked_deal_id=eq.${encodeURIComponent(linkedDealId)}`, {
+  await authedFetch(`${BASE_URL}?linked_deal_id=eq.${encodeURIComponent(linkedDealId)}`, {
     method: 'PATCH',
     headers: HEADERS,
     body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
@@ -114,7 +116,7 @@ export async function syncPartnerDealDates(
 }
 
 export async function deletePartnerDeal(id: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}?id=eq.${id}`, {
+  const res = await authedFetch(`${BASE_URL}?id=eq.${id}`, {
     method: 'DELETE',
     headers: HEADERS,
   });
@@ -125,7 +127,7 @@ export async function deletePartnerDeal(id: string): Promise<void> {
 const BUYERS_URL = `${SUPABASE_URL}/rest/v1/partner_deal_buyers`;
 
 export async function getDealBuyers(dealId: string): Promise<PartnerDealBuyer[]> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${BUYERS_URL}?partner_deal_id=eq.${encodeURIComponent(dealId)}&order=created_at.asc`,
     { headers: HEADERS }
   );
@@ -139,7 +141,7 @@ export async function getBuyersByPartner(partnerId: string): Promise<PartnerDeal
   if (deals.length === 0) return [];
   const dealIds = deals.map(d => d.id);
   const filter = dealIds.map(id => `"${id}"`).join(',');
-  const res = await fetch(
+  const res = await authedFetch(
     `${BUYERS_URL}?partner_deal_id=in.(${filter})&order=created_at.asc`,
     { headers: HEADERS }
   );
@@ -153,7 +155,7 @@ export async function createDealBuyers(
 ): Promise<PartnerDealBuyer[]> {
   if (buyers.length === 0) return [];
   const rows = buyers.map(b => ({ ...b, partner_deal_id: dealId }));
-  const res = await fetch(BUYERS_URL, {
+  const res = await authedFetch(BUYERS_URL, {
     method: 'POST',
     headers: { ...HEADERS, Prefer: 'return=representation' },
     body: JSON.stringify(rows),
@@ -174,7 +176,7 @@ export async function updateDealBuyer(
   id: string,
   fields: Partial<Omit<PartnerDealBuyer, 'id' | 'partner_deal_id' | 'created_at' | 'updated_at'>>
 ): Promise<void> {
-  const res = await fetch(`${BUYERS_URL}?id=eq.${encodeURIComponent(id)}`, {
+  const res = await authedFetch(`${BUYERS_URL}?id=eq.${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { ...HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify({ ...fields, updated_at: new Date().toISOString() }),
@@ -186,7 +188,7 @@ export async function updateDealBuyer(
 export async function deleteDealBuyersByIds(ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   const list = ids.map(encodeURIComponent).join(',');
-  const res = await fetch(`${BUYERS_URL}?id=in.(${list})`, {
+  const res = await authedFetch(`${BUYERS_URL}?id=in.(${list})`, {
     method: 'DELETE',
     headers: HEADERS,
   });
@@ -194,7 +196,7 @@ export async function deleteDealBuyersByIds(ids: string[]): Promise<void> {
 }
 
 export async function deleteDealBuyers(dealId: string): Promise<void> {
-  const res = await fetch(`${BUYERS_URL}?partner_deal_id=eq.${dealId}`, {
+  const res = await authedFetch(`${BUYERS_URL}?partner_deal_id=eq.${dealId}`, {
     method: 'DELETE',
     headers: HEADERS,
   });

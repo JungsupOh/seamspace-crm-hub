@@ -5,14 +5,15 @@
 
 import { supabase } from '@/lib/supabase';
 import { sendPurchaseLicenseEmail } from '@/lib/email';
+import { authedFetch } from '@/lib/authedFetch';
 import { makeT, type PartnerLocale } from '@/lib/partner-i18n';
 import { notifyPartnerLicenseEmailFailed, notifyPartnerLicenseRevoked } from '@/lib/telegram';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const BASE_URL = `${SUPABASE_URL}/rest/v1/partner_licenses`;
+// Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (HARD-A H-4).
 const HEADERS: Record<string, string> = {
-  Authorization: `Bearer ${SUPABASE_KEY}`,
   apikey: SUPABASE_KEY,
   'Content-Type': 'application/json',
 };
@@ -61,7 +62,7 @@ export interface IssueLicenseInput {
 }
 
 export async function getPartnerLicenses(partnerId: string): Promise<PartnerLicense[]> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${BASE_URL}?partner_id=eq.${encodeURIComponent(partnerId)}&order=created_at.desc`,
     { headers: HEADERS },
   );
@@ -127,7 +128,7 @@ export async function issueLicense(input: IssueLicenseInput): Promise<{ coupon_c
     });
     emailSent = true;
     if (data.license_id) {
-      await fetch(`${BASE_URL}?id=eq.${data.license_id}`, {
+      await authedFetch(`${BASE_URL}?id=eq.${data.license_id}`, {
         method: 'PATCH',
         headers: { ...HEADERS, Prefer: 'return=minimal' },
         body: JSON.stringify({ email_sent: true }),
@@ -212,7 +213,7 @@ export async function getCouponGroupInfo(couponCode: string): Promise<CouponGrou
     headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
     body: JSON.stringify({ codes: [couponCode] }),
   }).catch(() => {});
-  const res = await fetch(
+  const res = await authedFetch(
     `${SUPABASE_URL}/rest/v1/mdiary_coupons?coupon_code=eq.${encodeURIComponent(couponCode)}&select=used_group_id,group_name,member_count,service_expire_at,admin_name`,
     { headers: HEADERS },
   );
@@ -223,7 +224,7 @@ export async function getCouponGroupInfo(couponCode: string): Promise<CouponGrou
 
 /** 이용권을 특정 구매자에 귀속 (구매자 지정 이전에 발급된 건 정리용) */
 export async function setLicenseBuyer(licenseId: string, buyerId: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}?id=eq.${licenseId}`, {
+  const res = await authedFetch(`${BASE_URL}?id=eq.${licenseId}`, {
     method: 'PATCH',
     headers: { ...HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify({ partner_deal_buyer_id: buyerId }),
@@ -250,7 +251,7 @@ export async function resendLicenseEmail(lic: PartnerLicense, partnerName?: stri
     partnerEmail,
     locale,
   });
-  await fetch(`${BASE_URL}?id=eq.${lic.id}`, {
+  await authedFetch(`${BASE_URL}?id=eq.${lic.id}`, {
     method: 'PATCH',
     headers: { ...HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify({ email_sent: true }),

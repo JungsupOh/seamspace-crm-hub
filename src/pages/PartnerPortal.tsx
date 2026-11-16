@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AmountInput } from '@/components/AmountInput';
 import { LocalizedDateInput } from '@/components/LocalizedDateInput';
 import { makeT, formatMoney, currencyUnit, formatIntlPhone } from '@/lib/partner-i18n';
+import { authedFetch } from '@/lib/authedFetch';
 import { issueLicense, getPartnerLicenses, resendLicenseEmail, revokeLicense, expireLicenseGroup, getCouponGroupInfo, setLicenseBuyer, type PartnerLicense, type CouponGroupInfo } from '@/lib/partner-licenses';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -144,8 +145,10 @@ export default function PartnerPortal() {
   // 파트너 정보 로드
   useEffect(() => {
     if (!userProfile?.partner_id) return;
-    fetch(`${SUPABASE_URL}/rest/v1/partners?id=eq.${userProfile.partner_id}&select=id,name,commission_rate,contact_name,contact_email`, {
-      headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY },
+    // 로그인한 파트너 본인의 토큰으로 읽는다 (HARD-A H-4).
+    // partners 의 authenticated_read_own_partner 정책이 "자기 소속만" 으로 좁혀 준다.
+    authedFetch(`${SUPABASE_URL}/rest/v1/partners?id=eq.${userProfile.partner_id}&select=id,name,commission_rate,contact_name,contact_email`, {
+      headers: { apikey: SUPABASE_KEY },
     })
       .then(r => r.json())
       .then(rows => { if (rows[0]) setPartner(rows[0]); })
