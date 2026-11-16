@@ -131,6 +131,17 @@ const SCREENS: ScreenCase[] = [
     allowedPlainRest: [],
     noRestOfItsOwn: true,
   },
+  {
+    file: 'lib/alimtalk.ts',
+    // :15 FN_HEADERS 는 엣지 함수 send-alimtalk 호출용이라 공개 키를 그대로 둔다.
+    allowedAnonAuth: [{ why: ':15 FN_HEADERS — functions/v1/send-alimtalk (021-8a 담당)' }],
+    allowedPlainRest: [],
+  },
+  {
+    file: 'lib/partner-expiry.ts',
+    allowedAnonAuth: [],
+    allowedPlainRest: [],
+  },
 ];
 
 describe('021-8b-4 — 관리자 화면 rest/v1 호출은 로그인 토큰으로 나간다', () => {

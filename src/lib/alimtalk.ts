@@ -1,11 +1,12 @@
+import { authedFetch } from './authedFetch';
+
 // 알림톡 발송 클라이언트 + 발송 이력 조회
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-// REST API 조회용 (apikey + Authorization)
+// REST API 조회용 — Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (021-8b-4).
 const REST_HEADERS = {
   apikey:        SUPABASE_KEY,
-  Authorization: `Bearer ${SUPABASE_KEY}`,
   "Content-Type": "application/json",
 };
 
@@ -72,7 +73,7 @@ export async function getRecentSendLogs(): Promise<SendLogEntry[]> {
     + `?success=eq.true&sent_at=gte.${since}`
     + `&select=id,license_id,license_source,tpl_code,stage,sent_at,success`
     + `&order=sent_at.desc`;
-  const res = await fetch(url, { headers: REST_HEADERS });
+  const res = await authedFetch(url, { headers: REST_HEADERS });
   if (!res.ok) return [];
   return await res.json();
 }

@@ -1,7 +1,10 @@
+import { authedFetch } from './authedFetch';
+
 // 파트너 만기 안내 메일 발송 내역 조회 (partner-expiry-notify 엣지 함수가 기록)
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY };
+// Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (021-8b-4).
+const HEADERS = { apikey: SUPABASE_KEY };
 
 export interface PartnerExpiryEmail {
   id: string;
@@ -25,7 +28,7 @@ export async function getPartnerExpiryEmails(limit = 50): Promise<PartnerExpiryE
   const url = `${SUPABASE_URL}/rest/v1/partner_expiry_emails`
     + `?select=id,partner_id,partner_name,partner_email,org_name,soonest_expire_at,soonest_dday,license_count,subject,html,status,error,triggered_by,sent_at`
     + `&order=sent_at.desc&limit=${limit}`;
-  const res = await fetch(url, { headers: HEADERS });
+  const res = await authedFetch(url, { headers: HEADERS });
   if (!res.ok) return [];
   return res.json();
 }
