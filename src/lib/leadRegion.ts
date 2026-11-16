@@ -9,6 +9,8 @@
 //    'intl' 1건(009-1). 그래서 코드·영문명·한글명을 모두 받아들이고,
 //    모르는 값은 **임의로 끼워 맞추지 않고** '기타'로 모은다(목록에서 바로 찾아 배정하게).
 
+import { toCountryCode } from './countries';
+
 export type Region =
   | 'KR' | 'US' | 'GB' | 'EU' | 'GCC' | 'IN' | 'SEA' | 'JP' | 'LATAM' | 'CA'
   | 'OTHER' | 'UNKNOWN';
@@ -138,6 +140,13 @@ export function normalizeCountry(v: unknown): string | null {
   const raw = stripAnnotation(v);
   if (!raw) return null;
   const upper = raw.toUpperCase();
+
+  // ① 국가 코드표(countries.ts, LEAD-UI2 R3)를 먼저 본다 — 한글·영문·별칭·코드를
+  //    한 표에서 찾는다. 아래 NAME_TO_CODE 는 그보다 먼저 있던 표라 보조로 남긴다.
+  //    (운영에 `Ireland` 가 코드로 안 바뀐 채 들어간 적이 있다 — 그 표에 없었다.)
+  const fromTable = toCountryCode(raw);
+  if (fromTable) return fromTable;
+
   const named = NAME_TO_CODE[upper];
   if (named) return named === 'CA_COUNTRY' ? 'CA' : named;
   // 이미 2자 코드인 경우
