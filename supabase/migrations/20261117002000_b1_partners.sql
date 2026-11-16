@@ -1,0 +1,23 @@
+-- ⚠️ 미적용. HARD-B1. 선행: 20261117000000_b1_role_helper.sql
+-- ==========================================================
+-- partners — 공개 키 전체 허용 정책을 닫는다
+-- ==========================================================
+-- 롤백   : audit/rollback_b1_partners.sql
+-- 드라이런: audit/dryrun_b1_partners.sql
+--
+-- 왜 닫아도 되나
+--   공개 키로 **전 파트너의 정산 계좌·사업자번호**가 열려 있었다(009-4).
+--   포털은 H-4 에서 로그인 토큰으로 전환됐고, 읽기는 기존 authenticated_read_own_partner
+--   (자기 소속 OR admin·sub_admin)가 담당한다. 쓰기(INSERT/UPDATE/DELETE)는 021-8b-2 가 넣은
+--   authenticated 전체 허용이 남아 있는데, 그걸 admin 전용으로 좁히는 일은 **H-4 정책②**
+--   (20261116001000_narrow_8b2_policies_h4.sql)가 맡는다. 여기서는 anon 만 닫는다.
+--
+-- 삭제하는 정책 (운영본 정의 그대로)
+--   "anon_all_partners"  ALL / {anon} / PERMISSIVE
+--      USING      = true
+--      WITH CHECK = true
+--
+-- 남는 정책: authenticated_read_own_partner(SELECT) + 021-8b-2 의 I/U/D (→ 정책② 에서 좁힘)
+-- ==========================================================
+
+drop policy if exists "anon_all_partners" on public.partners;

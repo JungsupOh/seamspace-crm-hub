@@ -1,0 +1,21 @@
+-- ⚠️ 미적용. HARD-B1. 선행: 20261117000000_b1_role_helper.sql
+-- ==========================================================
+-- partner_expiry_emails — 공개 키 전체 허용 정책을 닫는다
+-- ==========================================================
+-- 롤백   : audit/rollback_b1_partner_expiry_emails.sql
+-- 드라이런: audit/dryrun_b1_partner_expiry_emails.sql
+--
+-- 왜 닫아도 되나
+--   조회 1곳(lib/partner-expiry.ts)뿐이고 021-8b-4 에서 전환됐다.
+--   기록은 partner-expiry-notify(SERVICE_ROLE)가 하므로 RLS 와 무관하다.
+--
+-- 삭제하는 정책 (운영본 정의 그대로)
+--   "partner_expiry_emails_all"  ALL / {anon,authenticated} / PERMISSIVE
+--      USING      = true
+--      WITH CHECK = true
+--
+-- 남는 정책: partner_scoped_partner_expiry_emails  (H-4 에서 적용됨)
+--   자기 partner_id 것만 OR admin·sub_admin 전체 → 포털과 관리자 화면이 그대로 동작한다.
+-- ==========================================================
+
+drop policy if exists "partner_expiry_emails_all" on public.partner_expiry_emails;

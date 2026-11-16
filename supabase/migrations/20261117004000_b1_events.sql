@@ -1,0 +1,21 @@
+-- ⚠️ 미적용. HARD-B1. 선행: 20261117000000_b1_role_helper.sql
+-- ==========================================================
+-- events — 공개 키 전체 허용 정책을 닫는다
+-- ==========================================================
+-- 롤백   : audit/rollback_b1_events.sql
+-- 드라이런: audit/dryrun_b1_events.sql
+--
+-- 왜 닫아도 되나
+--   브라우저 코드(src 전체)와 엣지 함수 모두에서 접근 **0건**. 쓰이지 않는 테이블이다.
+--
+-- ⚠️ 정책이 하나도 남지 않으므로 로그인 사용자도 접근할 수 없게 된다. 접근 0건을 코드로 확인했다.
+--
+-- 삭제하는 정책 (운영본 정의 그대로)
+--   "all_events"  ALL / {public} / PERMISSIVE
+--      USING      = true
+--      WITH CHECK = true
+--
+-- 남는 정책: 없음 → RLS 가 anon·authenticated 를 모두 막는다(service_role 만 접근).
+-- ==========================================================
+
+drop policy if exists "all_events" on public.events;

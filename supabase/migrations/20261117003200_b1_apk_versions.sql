@@ -1,0 +1,25 @@
+-- ⚠️ 미적용. HARD-B1. 선행: 20261117000000_b1_role_helper.sql
+-- ==========================================================
+-- apk_versions — 공개 키 전체 허용 정책을 닫는다
+-- ==========================================================
+-- 롤백   : audit/rollback_b1_apk_versions.sql
+-- 드라이런: audit/dryrun_b1_apk_versions.sql
+--
+-- 왜 닫아도 되나
+--   관리자 APK 화면이 021-8b-4 에서 전환됐고(lib/apk.ts 10곳 authed),
+--   공개 /apk/* 페이지는 이 테이블을 **직접 읽지 않는다**(apk-download-verify·apk-subscribe
+--   엣지 함수가 SERVICE_ROLE 로 읽는다).
+--
+-- ⚠️ 확인 불가: **배포된 안드로이드 앱이 공개 키로 apk_versions 를 직접 읽는지**는
+--    이 저장소에서 알 수 없다. 적용 직후 익명 키 조회가 0건이 되므로, 그런 클라이언트가
+--    있다면 업데이트 확인이 끊긴다. James 확인 후 적용할 것 (§D-2).
+--
+-- 삭제하는 정책 (운영본 정의 그대로)
+--   "apk_versions_read_anon"  SELECT / {anon} / PERMISSIVE
+--      USING      = true
+--      WITH CHECK = (없음)
+--
+-- 남는 정책: apk_versions_all_authenticated (ALL/authenticated)
+-- ==========================================================
+
+drop policy if exists "apk_versions_read_anon" on public.apk_versions;
