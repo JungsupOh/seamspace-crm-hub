@@ -261,9 +261,16 @@ export default function Leads() {
       {/* 목록 ↔ 상세 (Gmail 방식, 요구 R5) */}
       <div className="flex gap-4 items-start">
         {/* 왼쪽: 탭 + 목록. 좁은 화면에서는 상세가 열리면 숨는다. */}
-        <div className={`${selected ? 'hidden lg:block' : 'block'} flex-1 min-w-0`}>
+        <div className={`${selected ? 'hidden lg:block' : 'block'} flex-1 min-w-0 relative`}>
           <Tabs value={tab} onValueChange={setTab}>
-            <TabsList>
+            {/* ⚠️ 겹침 수정(UI2 fix1): shadcn 기본 TabsList 는 `inline-flex h-10` 이고
+                TabsTrigger 는 `whitespace-nowrap` 이라 **줄바꿈도 축소도 하지 않는다.**
+                상세가 열리면 왼쪽 칸이 좁아지는데(lg 에서 약 400px) 탭줄 자연 폭은
+                약 556px 이라 156px 이 바깥으로 흘러나왔고, DOM 에서 나중에 오는
+                상세 패널이 그 위에 그려져 마지막 탭(단계별)을 가렸다.
+                `flex-wrap` + `h-auto` 로 좁아지면 두 줄이 되게 한다 — 탭을 잘라 내지
+                않으므로 어떤 폭에서도 네 개가 모두 눌린다. */}
+            <TabsList className="flex-wrap h-auto min-h-10 gap-1 justify-start">
               <TabsTrigger value="due">
                 <CalendarClock className="h-4 w-4 mr-1.5" />오늘 할 팔로업
                 {due.length > 0 && <Badge variant="secondary" className="ml-1.5">{due.length}</Badge>}
@@ -332,9 +339,12 @@ export default function Leads() {
           )}
         </div>
 
-        {/* 오른쪽: 상세. 좁은 화면에서는 전체 폭으로 열린다. */}
+        {/* 오른쪽: 상세. 좁은 화면에서는 전체 폭으로 열린다.
+            폭을 단계적으로 둔다 — lg(1024~1279px)에서 560px 이면 왼쪽이 400px 까지
+            눌려 탭줄이 넘쳤다(UI2 fix1). `relative z-10` 과 `bg-background` 는
+            앞으로 무엇이 넘치더라도 상세가 그 아래로 깔리지 않게 하는 안전장치다. */}
         {selected && (
-          <div className="w-full lg:w-[560px] xl:w-[620px] shrink-0 rounded-lg border p-4">
+          <div className="w-full lg:w-[440px] xl:w-[560px] 2xl:w-[620px] shrink-0 relative z-10 rounded-lg border bg-background p-4">
             <Button variant="ghost" size="sm" className="lg:hidden mb-2 -ml-2"
               onClick={() => selectLead(null)}>
               <ArrowLeft className="h-4 w-4 mr-1.5" />목록으로

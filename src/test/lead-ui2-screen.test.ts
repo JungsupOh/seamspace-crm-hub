@@ -177,6 +177,29 @@ describe('R5 · 분할 화면', () => {
     expect(page).toContain("t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'");
   });
 
+  // UI2 fix1 — 상세가 열리면 왼쪽 칸이 좁아지는데, shadcn 기본 TabsList 는
+  // `inline-flex h-10` + TabsTrigger `whitespace-nowrap` 이라 줄바꿈도 축소도
+  // 하지 않는다. 그래서 탭줄이 바깥으로 흘러나와 상세 패널에 가려졌다(단계별 탭).
+  it('탭줄이 좁아지면 줄바꿈된다 (상세 패널에 가리지 않게)', () => {
+    const at = page.indexOf('<TabsList');
+    expect(at).toBeGreaterThan(-1);
+    const tag = page.slice(at, page.indexOf('>', at));
+    expect(tag, '탭줄이 줄바꿈되지 않으면 좁은 폭에서 탭이 가려진다').toContain('flex-wrap');
+    expect(tag, '고정 높이면 두 줄이 돼도 늘어나지 않는다').toContain('h-auto');
+  });
+
+  it('상세 패널 폭이 단계적이다 (lg 에서 왼쪽을 덜 누르게)', () => {
+    expect(page).toContain('lg:w-[440px]');
+    expect(page).toContain('xl:w-[560px]');
+  });
+
+  it('상세 패널이 배경과 쌓임 순서를 가진다 (무엇이 넘쳐도 아래로 깔리지 않게)', () => {
+    const at = page.indexOf('lg:w-[440px]');
+    const seg = page.slice(at - 120, at + 200);
+    expect(seg).toContain('z-10');
+    expect(seg).toContain('bg-background');
+  });
+
   it('좁은 화면에서는 상세가 전체 폭으로 열리고 "목록으로" 가 있다', () => {
     expect(page).toContain("selected ? 'hidden lg:block' : 'block'");
     expect(page).toContain('목록으로');
