@@ -67,8 +67,9 @@ const SCREENS: ScreenCase[] = [
   {
     file: 'pages/Licenses.tsx',
     // 엣지 함수 호출 4건은 이 단위 범위가 아니다(021-8a).
+    // create-coupon 직접 호출은 HARD-A H-2 에서 admin-issue-coupon 경유로 바뀌었고
+    // (사본을 lib/coupons.ts 로 합쳤다), 나머지 엣지 함수 3개는 021-8a 담당이다.
     allowedAnonAuth: [
-      { why: 'functions/v1/create-coupon' },
       { why: 'functions/v1/send-coupon' },
       { why: 'functions/v1/sync-new-coupons' },
       { why: 'functions/v1/get-coupon-status' },

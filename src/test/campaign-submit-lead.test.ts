@@ -731,9 +731,33 @@ describe('⑬ 쿠폰과 체험권이 서로를 막지 않는다 (index.ts 구조
     expect(coupon).toBeLessThan(trial);
   });
 
-  it('원본 CampaignForm 도 쿠폰이 체험권보다 앞이다', () => {
+  // HARD-A H-2 로 브라우저가 이 흐름을 직접 수행하지 않게 됐다.
+  // 예전 테스트는 "원본 CampaignForm 의 쿠폰→체험권 순서"를 서버 사본과 대조했는데,
+  // 이제 원본이 없다 — 서버가 유일한 구현이다. 그래서 드리프트 가드의 목적(두 벌이
+  // 어긋나지 않게)을 **새 불변식**으로 바꿔 못 박는다: 브라우저는 위임만 한다.
+  it('CampaignForm 은 이 흐름을 직접 수행하지 않고 서버 함수에 위임한다', () => {
     const form = readFileSync(resolve(ROOT, 'src/pages/CampaignForm.tsx'), 'utf8');
-    expect(form.indexOf('issueCampaignCoupon')).toBeLessThan(form.indexOf('issueTrialLicense({'));
+    const code = form.split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+
+    // 직접 발급·등록·알림을 하지 않는다
+    expect(code).not.toContain('issueCampaignCoupon(');
+    expect(code).not.toContain('issueTrialLicense(');
+    expect(code).not.toContain('upsertLeadContact(');
+    expect(code).not.toContain('notifyCampaignLead(');
+    // campaign_leads 에 직접 INSERT 하지 않는다
+    expect(code).not.toMatch(/rest\/v1\/campaign_leads/);
+
+    // 대신 서버 함수를 부른다
+    expect(code).toContain('submitCampaignLead(');
+  });
+
+  it('서버 함수를 부르는 모듈이 campaign-submit-lead 를 가리킨다', () => {
+    const mod = readFileSync(resolve(ROOT, 'src/lib/campaignSubmit.ts'), 'utf8');
+    expect(mod).toContain('functions/v1/campaign-submit-lead');
+    // 완료 화면이 쓰는 필드가 서버 응답 모양과 같다
+    for (const field of ['coupon', 'trial', 'leadId', 'priorCampaignName', 'priorIssuedAt']) {
+      expect(mod, field).toContain(field);
+    }
   });
 
   it('쿠폰 발급이 try/catch 로 감싸져 체험권을 막지 않는다', () => {

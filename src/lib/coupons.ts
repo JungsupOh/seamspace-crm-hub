@@ -1,14 +1,31 @@
 // ── 쿠폰 생성·발송 공용 API ─────────────────────────
 
+import { authedFetch } from '@/lib/authedFetch';
+
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 export type SendType = 'buyer' | 'trial';
 
+/**
+ * 관리자 쿠폰 생성 — `admin-issue-coupon` 경유 (HARD-A H-2).
+ *
+ * 전에는 `create-coupon` 을 **공개 키로 직접** 불렀다. 그 함수는 인증을 보지 않아
+ * 번들에서 키만 꺼내면 누구나 쿠폰을 무제한으로 만들 수 있었다(009-6 발견).
+ * 이제 로그인 세션 토큰으로 `admin-issue-coupon` 을 부르고, 그 함수가 호출자 역할이
+ * admin·sub_admin 인지 확인한 뒤 내부에서 create-coupon 을 호출한다(021-6).
+ *
+ * 응답 모양(`{ coupon_code }`)과 이 함수의 시그니처·오류 문구는 그대로다 —
+ * 호출부는 고치지 않아도 된다.
+ *
+ * 공개 경로(공개 캠페인 폼·럭키세븐 폼)는 더 이상 이 함수를 쓰지 않는다.
+ * 캠페인 신청은 서버 함수 campaign-submit-lead 가 대신하고(H-2), 럭키세븐 공개 폼은
+ * 라우트에서 분리됐다(H-1). 그래서 "로그인 필요" 로 바꿔도 공개 경로가 깨지지 않는다.
+ */
 export async function apiCreateCoupon(description: string, duration: string, user_limit: string): Promise<string> {
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/create-coupon`, {
+  const res = await authedFetch(`${SUPABASE_URL}/functions/v1/admin-issue-coupon`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_KEY}` },
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
     body: JSON.stringify({ description, duration, user_limit }),
   });
   const data = await res.json();

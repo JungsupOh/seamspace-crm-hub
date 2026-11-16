@@ -18,6 +18,8 @@ import { getAllLicenses, updateLicenseStatus, updateLicenseDeal, attachCouponToD
 import { toast } from 'sonner';
 import { useDeals } from '@/hooks/use-airtable';
 import { authedFetch } from '@/lib/authedFetch';
+// 쿠폰 생성은 공용 모듈을 쓴다 — 이 파일에 있던 사본을 합쳤다 (021-4 §2-2, HARD-A H-2).
+import { apiCreateCoupon } from '@/lib/coupons';
 import { airtable, AirtableRecord } from '@/lib/airtable';
 import { ContactFields } from '@/types/airtable';
 import * as XLSX from 'xlsx';
@@ -48,17 +50,6 @@ interface Recipient {
   coupon_code: string;
   status: 'pending' | 'generating' | 'sending' | 'done' | 'error';
   error?: string;
-}
-
-async function apiCreateCoupon(description: string, duration: string, user_limit: string): Promise<string> {
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/create-coupon`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_KEY}` },
-    body: JSON.stringify({ description, duration, user_limit }),
-  });
-  const data = await res.json();
-  if (!res.ok || data.error) throw new Error(data.error || '쿠폰 생성 실패');
-  return data.coupon_code;
 }
 
 async function apiSendCoupon(r: Recipient, sendType: SendType): Promise<void> {

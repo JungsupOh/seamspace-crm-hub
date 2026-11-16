@@ -7,16 +7,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2, Search, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
-import { notifyCampaignLead } from '@/lib/telegram';
-import { normalizePhone } from '@/lib/phone';
+import { submitCampaignLead } from '@/lib/campaignSubmit';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
 
-import { issueCampaignCoupon, type CouponSettings } from '@/lib/campaign-coupons';
-import { issueTrialLicense, type TrialLicenseSettings, type IssueOutcome } from '@/lib/campaign-trial-license';
-import { upsertLeadContact } from '@/lib/luckySeven';
+// 리드 등록·contacts·텔레그램·쿠폰·체험권 발급은 서버 함수 campaign-submit-lead 가 한다
+// (HARD-A H-2). 여기서는 타입만 가져온다.
+import { type CouponSettings } from '@/lib/campaign-coupons';
+import { type TrialLicenseSettings, type IssueOutcome } from '@/lib/campaign-trial-license';
 import { QUICK_GUIDE_FILES, TUTORIAL_URL, guideFileUrl } from '@/lib/quickGuide';
 import { DEFAULT_FORM_SETTINGS, type FormSettings } from './Campaigns';
 
@@ -67,6 +67,8 @@ export default function CampaignForm() {
   const [showSchoolDropdown, setShowSchoolDropdown] = useState(false);
   const schoolRef = useRef<HTMLDivElement>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  // 신청 1건당 멱등 키 1개. 성공 전 재시도에서는 같은 값을 다시 보낸다 (HARD-A H-2).
+  const submissionIdRef = useRef<string | null>(null);
 
   const [position, setPosition] = useState('');
   const [name, setName] = useState('');
@@ -175,21 +177,9 @@ export default function CampaignForm() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // 3. 기존 고객 판별: contacts에서 phone_normalized 매칭 + campaign_licenses에서 contact_phone 매칭
-  const checkExistingCustomer = async (phoneNorm: string): Promise<boolean> => {
-    try {
-      const [contactsRes, licsRes] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${encodeURIComponent(phoneNorm)}&select=contact_type`, { headers: HEADERS }),
-        fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses?contact_phone=ilike.*${encodeURIComponent(phoneNorm)}*&select=id`, { headers: HEADERS }),
-      ]);
-      const contacts = contactsRes.ok ? await contactsRes.json() : [];
-      const lics = licsRes.ok ? await licsRes.json() : [];
-      // 구매고객이거나, 체험권 수령 이력이 있으면 기존 고객
-      const isPurchased = Array.isArray(contacts) && contacts.some((c: { contact_type?: string }) => c.contact_type === '구매고객');
-      const hasTrialHistory = Array.isArray(lics) && lics.length > 0;
-      return isPurchased || hasTrialHistory;
-    } catch { return false; }
-  };
+  // 3. 기존 고객 판별은 **서버가 한다** (campaign-submit-lead).
+  //    브라우저가 contacts·campaign_licenses 를 공개 키로 읽던 코드를 지웠다 (HARD-A H-2).
+  //    판정 규칙은 서버 logic.ts 의 isExistingCustomer 가 글자 단위로 같다.
 
   // 4. 폼 제출
   const handleSubmit = async () => {
@@ -230,10 +220,7 @@ export default function CampaignForm() {
 
     setSubmitting(true);
     try {
-      const phoneNorm = normalizePhone(phone, isEN ? 'intl' : isJP ? 'jp' : 'kr');
-      const isExisting = await checkExistingCustomer(phoneNorm);
-
-      // custom_fields 정리
+      // custom_fields 정리 — 원본과 같은 규칙(값이 있는 것만, 순서 유지)
       const customFields: Record<string, string> = {};
       if (formCfg.usage_plan.enabled && usagePlan.trim()) customFields.usage_plan = usagePlan.trim();
       formCfg.custom_questions.forEach((q, i) => {
@@ -241,112 +228,34 @@ export default function CampaignForm() {
         if (v) customFields[`custom_q${i + 1}`] = v;
       });
 
-      const payload = {
-        campaign_id:           campaign.id,
-        school_name:           formCfg.school.enabled ? (schoolInfo?.name || schoolQuery.trim()) : null,
-        school_code:           null,
-        school_kind:           formCfg.school.enabled ? (schoolInfo?.kind || null) : null,
-        position:              formCfg.role.enabled ? position.trim() : null,
-        name:                  name.trim(),
-        phone:                 phone,
-        phone_normalized:      phoneNorm,
-        email:                 email.trim(),
-        source:                formCfg.source.enabled ? source : null,
-        source_etc:            formCfg.source.enabled && source === '기타' ? sourceEtc.trim() : null,
-        marketing_consent:     marketingConsent,
-        status:                '신규',
-        is_existing_customer:  isExisting,
-        custom_fields:         Object.keys(customFields).length > 0 ? customFields : null,
-      };
+      // 신청 1건 = 멱등 키 1개. 재시도해도 같은 키를 보내 중복 접수를 막는다.
+      if (!submissionIdRef.current) submissionIdRef.current = crypto.randomUUID();
 
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/campaign_leads`, {
-        method: 'POST',
-        headers: { ...HEADERS, Prefer: 'return=representation' },
-        body: JSON.stringify(payload),
+      const result = await submitCampaignLead({
+        campaignId:   campaign.id,
+        submissionId: submissionIdRef.current,
+        locale:       lang,
+        lead: {
+          name:              name.trim(),
+          phone:             phone,
+          email:             email.trim(),
+          schoolName:        formCfg.school.enabled ? (schoolInfo?.name || schoolQuery.trim()) : null,
+          schoolKind:        formCfg.school.enabled ? (schoolInfo?.kind || null) : null,
+          position:          formCfg.role.enabled ? position.trim() : null,
+          source:            formCfg.source.enabled ? source : null,
+          sourceEtc:         formCfg.source.enabled && source === '기타' ? sourceEtc.trim() : null,
+          marketingConsent:  marketingConsent,
+          customFields:      Object.keys(customFields).length > 0 ? customFields : null,
+        },
       });
 
-      if (!res.ok) throw new Error('제출 실패');
-      const insertedRows = await res.json().catch(() => []);
-      const insertedLead: { id?: string } = Array.isArray(insertedRows) ? insertedRows[0] ?? {} : {};
-
-      // contacts upsert — 캠페인 리드도 contacts에 자동 등록 (메모리 정책)
-      // 기존 고객 매칭 시 활동이력에 캠페인 신청 내역 1줄 prepend
-      try {
-        const today = new Date().toISOString().slice(0, 10);
-        const activityNote = `[${today}] 캠페인 신청 — ${campaign.name}`;
-        await upsertLeadContact(
-          {
-            name: payload.name,
-            phone: payload.phone,
-            email: payload.email ?? '',
-            orgName: payload.school_name ?? '',
-          },
-          {
-            country: isEN ? 'intl' : isJP ? 'jp' : 'kr',
-            leadSource: campaign.name,  // 캠페인명을 lead_source로
-            activityNote,
-          },
-        );
-      } catch (e) {
-        console.warn('[CampaignForm] contacts upsert 실패', e);
-      }
-
-      // 텔레그램 알림
-      notifyCampaignLead({
-        campaignName: campaign.name,
-        schoolName: payload.school_name,
-        name: payload.name,
-        phone: payload.phone,
-        position: payload.position,
-        source: payload.source === '기타' ? `기타 — ${payload.source_etc ?? ''}` : payload.source,
-        isExistingCustomer: isExisting,
-      });
-
-      // 캠페인 쿠폰 자동 발급 (설정된 경우만)
-      if (campaign.coupon_settings?.enabled && insertedLead.id) {
-        try {
-          const issued = await issueCampaignCoupon({
-            campaign,
-            lead: {
-              id: insertedLead.id,
-              phone_normalized: phoneNorm,
-              name: payload.name,
-              phone: payload.phone,
-            },
-          });
-          if (issued) {
-            setIssuedCouponCode(issued.code);
-          }
-        } catch (e) {
-          console.warn('[CampaignForm] 쿠폰 발급 실패', e);
-          // 리드 등록 자체는 성공 처리
-        }
-      }
-
-      // 체험 이용권 자동 발급 (설정 + auto_issue 활성)
-      if (campaign.trial_license_settings?.enabled && campaign.trial_license_settings.auto_issue && insertedLead.id) {
-        try {
-          const result = await issueTrialLicense({
-            campaign,
-            lead: {
-              id: insertedLead.id,
-              name: payload.name,
-              phone: payload.phone,
-              phone_normalized: phoneNorm,
-              email: payload.email,
-              school_name: payload.school_name,
-            },
-            locale: lang,
-          });
-          if (result?.code) {
-            setIssuedTrialCode(result.code);
-            setTrialOutcome(result.outcome);
-            setPriorCampaignName(result.priorCampaignName ?? null);
-            setPriorIssuedAt(result.priorIssuedAt ?? null);
-          }
-        } catch (e) {
-          console.warn('[CampaignForm] 체험 이용권 발급 실패', e);
-        }
+      // 완료 화면이 쓰는 값만 옮겨 담는다 — 화면 로직·문구는 그대로다.
+      if (result.coupon?.code) setIssuedCouponCode(result.coupon.code);
+      if (result.trial?.code) {
+        setIssuedTrialCode(result.trial.code);
+        setTrialOutcome(result.trial.outcome);
+        setPriorCampaignName(result.trial.priorCampaignName ?? null);
+        setPriorIssuedAt(result.trial.priorIssuedAt ?? null);
       }
 
       setSubmitted(true);
