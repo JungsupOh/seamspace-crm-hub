@@ -1,0 +1,29 @@
+-- ⚠️ 미적용. HARD-B2c. **서버 함수 배포 + 프런트 배포 + 스모크 통과 뒤**에 적용한다.
+-- ============================================================
+-- mdiary_coupons — 공개 키 정책을 닫는다
+-- ============================================================
+-- 롤백   : audit/rollback_b2c_mdiary_coupons.sql
+-- 드라이런: audit/dryrun_b2c_mdiary_coupons.sql
+-- 선행   : 20261117000000_b1_role_helper.sql (app_is_admin — 운영 적용됨)
+--
+-- 왜 닫아도 되나
+--   공개 라우트에서 도달하는 호출이 **0건**이다(호출 그래프). 쿠폰 코드 4,593개가
+--   로그인 없이 통째로 읽히고 있었다.
+--
+--   남는 정책만으로 관리자·파트너가 모두 동작한다 — 운영본 정의를 읽어 확인했다:
+--   partner_scoped_mdiary_coupons_select 가 파트너(partner_licenses 로 자기 것)와
+--   **admin·sub_admin 을 이미 함께 허용**한다. 그래서 대체 정책을 새로 만들지 않는다.
+--
+-- 삭제하는 정책 (운영본 정의 그대로)
+--   "all read"  SELECT / {public}
+--      USING      = true
+--      WITH CHECK = (없음)
+--
+-- 대체 정책을 새로 만들지 않는다(남아 있는 정책이 이미 올바른 범위다).
+-- 적용 뒤 남는 정책:
+--   "authenticated update"  UPDATE / {authenticated}
+--   "partner_scoped_mdiary_coupons_select"  SELECT / {authenticated}
+--   "service insert"  INSERT / {service_role}
+-- ============================================================
+
+drop policy if exists "all read" on public.mdiary_coupons;
