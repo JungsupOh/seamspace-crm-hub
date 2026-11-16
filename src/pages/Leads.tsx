@@ -9,7 +9,8 @@
 //
 // ⚠️ 보안: DB 호출은 전부 `leadsApi.ts` 를 거치고, 그쪽은 authedFetch(로그인 토큰)만 쓴다.
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
@@ -21,7 +22,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DataTableSkeleton } from '@/components/DataTableSkeleton';
-import { AlertCircle, CalendarClock, Clock, Flag, Plus, Upload } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { AlertCircle, ArrowLeft, CalendarClock, Clock, Flag, Plus, Upload } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { LeadDetail } from '@/components/leads/LeadDetail';
+import { countryLabel, countryShort } from '@/lib/countries';
+import { emailStatusLabel, excludeArchived, isMailable } from '@/lib/leadEdit';
 
 import {
   deleteImportBatch, getActivities, getCampaignNames, getLeads, insertLeads, patchLead,
@@ -57,6 +63,11 @@ export default function Leads() {
     return m;
   }, [campaigns]);
 
+  const { userProfile, currentUser } = useAuth();
+  const actor = useMemo(
+    () => ({ name: userProfile?.name ?? userProfile?.email ?? null, userId: currentUser?.id ?? null }),
+    [userProfile, currentUser]);
+
   // ── 필터 ──
   const [fMarket, setFMarket] = useState<string>(ALL);
   const [fRegion, setFRegion] = useState<string>(ALL);
@@ -64,11 +75,35 @@ export default function Leads() {
   const [fCountry, setFCountry] = useState<string>(ALL);
   const [fOwner, setFOwner] = useState<string>(ALL);
   const [fStage, setFStage] = useState<string>(ALL);
+  const [fMail, setFMail] = useState<string>(ALL);
+  const [showArchived, setShowArchived] = useState(false);
   const [q, setQ] = useState('');
 
-  const eventNames = useMemo(
-    () => [...new Set((leads ?? []).map(l => l.event_name).filter(Boolean) as string[])].sort(),
-    [leads]);
+  /**
+   * 행사 선택지 — **event_name 과 캠페인 이름을 합친다**(요구 R2).
+   *
+   * 원인: 가져오기에서 행사명을 비워 둘 수 있었고, 실제로 **270건 전부 비어 있다.**
+   * 그래서 event_name 만으로 목록을 만들면 선택지가 하나도 없어 '전체'만 보였다.
+   * 리드 185건은 campaign_id 가 있으므로 캠페인 이름으로는 고를 수 있다.
+   */
+  const eventOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of leads ?? []) {
+      if (l.event_name?.trim()) set.add(l.event_name.trim());
+      else if (l.campaign_id) {
+        const n = campaignName.get(l.campaign_id);
+        if (n) set.add(n);
+      }
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, 'ko'));
+  }, [leads, campaignName]);
+
+  /** 그 리드가 속한 행사 이름(행사명 우선, 없으면 캠페인 이름). */
+  const eventOf = useCallback((l: LeadRow): string => {
+    if (l.event_name?.trim()) return l.event_name.trim();
+    if (l.campaign_id) return campaignName.get(l.campaign_id) ?? '';
+    return '';
+  }, [campaignName]);
   const countries = useMemo(
     () => [...new Set((leads ?? []).map(l => l.country).filter(Boolean) as string[])].sort(),
     [leads]);
@@ -79,23 +114,32 @@ export default function Leads() {
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return (leads ?? []).filter(l => {
+      // 보관본은 기본으로 숨긴다(요구 R8)
+      if (!showArchived && l.archived_at) return false;
       if (fMarket !== ALL && toMarket(l.market) !== fMarket) return false;
       if (fRegion !== ALL && regionOf(l) !== fRegion) return false;
-      if (fEvent !== ALL && (l.event_name ?? '') !== fEvent) return false;
+      if (fEvent !== ALL && eventOf(l) !== fEvent) return false;
       if (fCountry !== ALL && (l.country ?? '') !== fCountry) return false;
       if (fOwner !== ALL && (l.owner ?? '') !== fOwner) return false;
       if (fStage !== ALL && (l.followup_stage || '신규') !== fStage) return false;
+      // 메일 발송 가능 / 발송 보류 (요구 R4)
+      if (fMail === 'mailable' && !isMailable(l)) return false;
+      if (fMail === 'hold' && l.email_status !== 'hold') return false;
       if (needle) {
-        const hay = [l.name, l.school_name, l.email, l.event_name, l.country, l.notes]
+        const hay = [l.name, l.school_name, l.email, eventOf(l), countryLabel(l.country, ''), l.notes]
           .filter(Boolean).join(' ').toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
     });
-  }, [leads, fMarket, fRegion, fEvent, fCountry, fOwner, fStage, q]);
+  }, [leads, fMarket, fRegion, fEvent, fCountry, fOwner, fStage, fMail, showArchived, q, eventOf]);
 
-  const due = useMemo(() => dueToday(filtered, today), [filtered, today]);
-  const stale = useMemo(() => staleLeads(filtered, 7, today), [filtered, today]);
+  // "오늘 할 팔로업"·"7일 넘게 접촉 없음"은 **보관본을 반드시 뺀다**(요구 R8).
+  // "보관된 리드 보기"를 켜도 이 두 목록에는 넣지 않는다 — 시험 리드가 거기 남으면
+  // 매일 아침 목록이 지저분해져 화면을 안 보게 된다.
+  const activeOnly = useMemo(() => excludeArchived(filtered), [filtered]);
+  const due = useMemo(() => dueToday(activeOnly, today), [activeOnly, today]);
+  const stale = useMemo(() => staleLeads(activeOnly, 7, today), [activeOnly, today]);
   const funnel = useMemo(() => stageCounts(filtered), [filtered]);
   const regions = useMemo(() => regionCounts(filtered), [filtered]);
 
@@ -106,13 +150,53 @@ export default function Leads() {
       String(b.created_at).localeCompare(String(a.created_at))),
     [filtered]);
 
-  const [activityFor, setActivityFor] = useState<LeadRow | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [tab, setTab] = useState('due');
+
+  // 선택한 리드를 URL 에 담는다 — 새로고침해도 같은 리드가 열린다(요구 R5)
+  const [params, setParams] = useSearchParams();
+  const selectedId = params.get('lead');
+  const selectLead = useCallback((id: string | null) => {
+    setParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (id) next.set('lead', id); else next.delete('lead');
+      return next;
+    }, { replace: true });
+  }, [setParams]);
+
+  const selected = useMemo(
+    () => (leads ?? []).find(l => l.id === selectedId) ?? null, [leads, selectedId]);
+
+  /** 지금 탭에 보이는 목록 — 키보드 이동과 상세 선택이 이것을 따른다. */
+  const visible = useMemo(() => {
+    if (tab === 'due') return due;
+    if (tab === 'stale') return stale;
+    return byProbability;
+  }, [tab, due, stale, byProbability]);
+
+  // ↑/↓ 로 이전·다음 리드 (입력 중에는 동작하지 않는다)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (visible.length === 0) return;
+      e.preventDefault();
+      const i = visible.findIndex(l => l.id === selectedId);
+      const next = e.key === 'ArrowDown'
+        ? Math.min(visible.length - 1, i < 0 ? 0 : i + 1)
+        : Math.max(0, i < 0 ? 0 : i - 1);
+      selectLead(visible[next].id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [visible, selectedId, selectLead]);
 
   const resetFilters = () => {
     setFMarket(ALL); setFRegion(ALL); setFEvent(ALL);
-    setFCountry(ALL); setFOwner(ALL); setFStage(ALL); setQ('');
+    setFCountry(ALL); setFOwner(ALL); setFStage(ALL); setFMail(ALL);
+    setShowArchived(false); setQ('');
   };
 
   if (isLoading) return <div className="p-6"><DataTableSkeleton /></div>;
@@ -158,84 +242,109 @@ export default function Leads() {
         <FilterSelect label="시장" value={fMarket} onChange={setFMarket}
           options={[['KR', MARKET_LABEL.KR], ['INTL', MARKET_LABEL.INTL]]} />
         <FilterSelect label="행사" value={fEvent} onChange={setFEvent}
-          options={eventNames.map(e => [e, e])} />
+          options={eventOptions.map(e => [e, e])} />
         <FilterSelect label="국가" value={fCountry} onChange={setFCountry}
-          options={countries.map(c => [c, c])} />
+          options={countries.map(c => [c, countryLabel(c)])} />
         <FilterSelect label="담당자" value={fOwner} onChange={setFOwner}
           options={owners.map(o => [o, o])} />
         <FilterSelect label="단계" value={fStage} onChange={setFStage}
           options={FOLLOWUP_STAGES.map(s => [s, s])} />
+        <FilterSelect label="메일" value={fMail} onChange={setFMail}
+          options={[['mailable', '발송 가능만'], ['hold', '발송 보류만']]} />
+        <label className="flex items-center gap-1.5 h-9 text-xs cursor-pointer">
+          <Checkbox checked={showArchived} onCheckedChange={v => setShowArchived(v === true)} />
+          보관된 리드 보기
+        </label>
         <Button variant="ghost" size="sm" onClick={resetFilters}>초기화</Button>
       </div>
 
-      <Tabs defaultValue="due">
-        <TabsList>
-          <TabsTrigger value="due">
-            <CalendarClock className="h-4 w-4 mr-1.5" />오늘 할 팔로업
-            {due.length > 0 && <Badge variant="secondary" className="ml-1.5">{due.length}</Badge>}
-          </TabsTrigger>
-          <TabsTrigger value="stale">
-            <Clock className="h-4 w-4 mr-1.5" />7일 넘게 접촉 없음
-            {stale.length > 0 && <Badge variant="secondary" className="ml-1.5">{stale.length}</Badge>}
-          </TabsTrigger>
-          <TabsTrigger value="all">
-            <Flag className="h-4 w-4 mr-1.5" />전체 (가능성순)
-          </TabsTrigger>
-          <TabsTrigger value="funnel">단계별</TabsTrigger>
-        </TabsList>
+      {/* 목록 ↔ 상세 (Gmail 방식, 요구 R5) */}
+      <div className="flex gap-4 items-start">
+        {/* 왼쪽: 탭 + 목록. 좁은 화면에서는 상세가 열리면 숨는다. */}
+        <div className={`${selected ? 'hidden lg:block' : 'block'} flex-1 min-w-0`}>
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList>
+              <TabsTrigger value="due">
+                <CalendarClock className="h-4 w-4 mr-1.5" />오늘 할 팔로업
+                {due.length > 0 && <Badge variant="secondary" className="ml-1.5">{due.length}</Badge>}
+              </TabsTrigger>
+              <TabsTrigger value="stale">
+                <Clock className="h-4 w-4 mr-1.5" />7일 넘게 접촉 없음
+                {stale.length > 0 && <Badge variant="secondary" className="ml-1.5">{stale.length}</Badge>}
+              </TabsTrigger>
+              <TabsTrigger value="all">
+                <Flag className="h-4 w-4 mr-1.5" />전체 (가능성순)
+              </TabsTrigger>
+              <TabsTrigger value="funnel">단계별</TabsTrigger>
+            </TabsList>
 
-        <TabsContent value="due" className="mt-4">
-          {due.length === 0
-            ? <Empty text="오늘 할 팔로업이 없습니다." />
-            : <LeadTable rows={due} today={today} campaignName={campaignName}
-                onLog={setActivityFor} showDue />}
-        </TabsContent>
+            <TabsContent value="due" className="mt-3">
+              {due.length === 0
+                ? <Empty text="오늘 할 팔로업이 없습니다." />
+                : <LeadList rows={due} today={today} eventOf={eventOf}
+                    selectedId={selectedId} onSelect={selectLead} showDue />}
+            </TabsContent>
 
-        <TabsContent value="stale" className="mt-4">
-          <p className="text-sm text-muted-foreground mb-3">
-            마지막 접촉(없으면 등록일)에서 7일이 지난 리드입니다. 한 번도 연락하지 않은 리드가 여기에 보입니다.
-          </p>
-          {stale.length === 0
-            ? <Empty text="7일 넘게 접촉 없는 리드가 없습니다." />
-            : <LeadTable rows={stale} today={today} campaignName={campaignName}
-                onLog={setActivityFor} showStale />}
-        </TabsContent>
+            <TabsContent value="stale" className="mt-3">
+              <p className="text-sm text-muted-foreground mb-2">
+                마지막 접촉(없으면 등록일)에서 7일이 지난 리드입니다. 한 번도 연락하지 않은 리드가 여기에 보입니다.
+              </p>
+              {stale.length === 0
+                ? <Empty text="7일 넘게 접촉 없는 리드가 없습니다." />
+                : <LeadList rows={stale} today={today} eventOf={eventOf}
+                    selectedId={selectedId} onSelect={selectLead} showStale />}
+            </TabsContent>
 
-        <TabsContent value="all" className="mt-4">
-          {byProbability.length === 0
-            ? <Empty text="리드가 없습니다." />
-            : <LeadTable rows={byProbability} today={today} campaignName={campaignName}
-                onLog={setActivityFor} showDue showStale />}
-        </TabsContent>
+            <TabsContent value="all" className="mt-3">
+              {byProbability.length === 0
+                ? <Empty text="리드가 없습니다." />
+                : <LeadList rows={byProbability} today={today} eventOf={eventOf}
+                    selectedId={selectedId} onSelect={selectLead} showDue showStale />}
+            </TabsContent>
 
-        <TabsContent value="funnel" className="mt-4">
-          <div className="space-y-1.5 max-w-xl">
-            {funnel.map(f => {
-              const max = Math.max(...funnel.map(x => x.count), 1);
-              const isResult = !FUNNEL_STAGES.includes(f.stage);
-              return (
-                <button key={f.stage} type="button"
-                  onClick={() => setFStage(fStage === f.stage ? ALL : f.stage)}
-                  className="w-full flex items-center gap-3 text-left group">
-                  <span className={`w-24 shrink-0 text-sm ${isResult ? 'text-muted-foreground' : ''}`}>
-                    {f.stage}
-                  </span>
-                  <span className="flex-1 h-6 bg-muted rounded overflow-hidden">
-                    <span className={`block h-full ${isResult ? 'bg-muted-foreground/30' : 'bg-primary/60'}
-                      group-hover:opacity-80`} style={{ width: `${(f.count / max) * 100}%` }} />
-                  </span>
-                  <span className="w-12 text-right text-sm tabular-nums">{f.count}</span>
-                </button>
-              );
-            })}
+            <TabsContent value="funnel" className="mt-3">
+              <div className="space-y-1.5 max-w-xl">
+                {funnel.map(f => {
+                  const max = Math.max(...funnel.map(x => x.count), 1);
+                  const isResult = !FUNNEL_STAGES.includes(f.stage);
+                  return (
+                    <button key={f.stage} type="button"
+                      onClick={() => setFStage(fStage === f.stage ? ALL : f.stage)}
+                      className="w-full flex items-center gap-3 text-left group">
+                      <span className={`w-24 shrink-0 text-sm ${isResult ? 'text-muted-foreground' : ''}`}>
+                        {f.stage}
+                      </span>
+                      <span className="flex-1 h-6 bg-muted rounded overflow-hidden">
+                        <span className={`block h-full ${isResult ? 'bg-muted-foreground/30' : 'bg-primary/60'}
+                          group-hover:opacity-80`} style={{ width: `${(f.count / max) * 100}%` }} />
+                      </span>
+                      <span className="w-12 text-right text-sm tabular-nums">{f.count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </TabsContent>
+          </Tabs>
+          {tab !== 'funnel' && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              ↑ / ↓ 로 이전·다음 리드를 볼 수 있습니다.
+            </p>
+          )}
+        </div>
+
+        {/* 오른쪽: 상세. 좁은 화면에서는 전체 폭으로 열린다. */}
+        {selected && (
+          <div className="w-full lg:w-[560px] xl:w-[620px] shrink-0 rounded-lg border p-4">
+            <Button variant="ghost" size="sm" className="lg:hidden mb-2 -ml-2"
+              onClick={() => selectLead(null)}>
+              <ArrowLeft className="h-4 w-4 mr-1.5" />목록으로
+            </Button>
+            <LeadDetail lead={selected} allLeads={leads ?? []} actor={actor}
+              onOpenLead={selectLead} />
           </div>
-        </TabsContent>
-      </Tabs>
+        )}
+      </div>
 
-      {activityFor && (
-        <ActivityDialog lead={activityFor} onClose={() => setActivityFor(null)}
-          onSaved={() => { qc.invalidateQueries({ queryKey: ['leads_all'] }); setActivityFor(null); }} />
-      )}
       {newOpen && (
         <NewLeadDialog onClose={() => setNewOpen(false)}
           onSaved={() => { qc.invalidateQueries({ queryKey: ['leads_all'] }); setNewOpen(false); }} />
@@ -272,231 +381,71 @@ function FilterSelect({ label, value, onChange, options }: {
 
 // ─────────────────────────── 목록 ───────────────────────────
 
-function LeadTable({ rows, today, campaignName, onLog, showDue, showStale }: {
-  rows: LeadRow[]; today: string; campaignName: Map<string, string>;
-  onLog: (l: LeadRow) => void; showDue?: boolean; showStale?: boolean;
+function LeadList({ rows, today, eventOf, selectedId, onSelect, showDue, showStale }: {
+  rows: LeadRow[]; today: string; eventOf: (l: LeadRow) => string;
+  selectedId: string | null; onSelect: (id: string) => void;
+  showDue?: boolean; showStale?: boolean;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <table className="w-full text-sm">
-        <thead className="bg-muted/50 text-xs text-muted-foreground">
-          <tr>
-            <th className="px-3 py-2 text-left font-medium">이름 · 소속</th>
-            <th className="px-3 py-2 text-left font-medium">지역 · 국가</th>
-            <th className="px-3 py-2 text-left font-medium">행사</th>
-            <th className="px-3 py-2 text-center font-medium">세그</th>
-            <th className="px-3 py-2 text-center font-medium">가능성</th>
-            <th className="px-3 py-2 text-left font-medium">단계</th>
-            <th className="px-3 py-2 text-left font-medium">다음 행동</th>
-            {showDue && <th className="px-3 py-2 text-left font-medium">기한</th>}
-            {showStale && <th className="px-3 py-2 text-right font-medium">무접촉</th>}
-            <th className="px-3 py-2 text-left font-medium">담당</th>
-            <th className="px-3 py-2"></th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {rows.map(l => {
-            const ds = dueState(l, today);
-            const od = overdueDays(l, today);
-            const sd = staleDays(l, today);
-            return (
-              <tr key={l.id} className={ds === 'overdue' ? 'bg-destructive/5' : ''}>
-                <td className="px-3 py-2">
-                  <div className="font-medium flex items-center gap-1.5">
-                    {l.name}
-                    {toMarket(l.market) === 'INTL' && (
-                      <Badge variant="outline" className="h-4 px-1 text-[10px]">해외</Badge>
-                    )}
-                    {l.email_status === 'hold' && (
-                      <Badge variant="destructive" className="h-4 px-1 text-[10px]">발송보류</Badge>
-                    )}
-                  </div>
-                  <div className="text-xs text-muted-foreground">{l.school_name ?? '—'}</div>
-                </td>
-                <td className="px-3 py-2">
-                  <div>{REGION_LABEL[regionOf(l) as Region]}</div>
-                  <div className="text-xs text-muted-foreground">{l.country ?? '—'}</div>
-                </td>
-                <td className="px-3 py-2 text-xs">
-                  {l.event_name ?? (l.campaign_id ? campaignName.get(l.campaign_id) ?? '—' : '—')}
-                </td>
-                <td className="px-3 py-2 text-center">{l.segment ?? '—'}</td>
-                <td className="px-3 py-2 text-center tabular-nums">{l.probability ?? '—'}</td>
-                <td className="px-3 py-2">{l.followup_stage || '신규'}</td>
-                <td className="px-3 py-2 text-xs max-w-[220px] truncate" title={l.next_action ?? ''}>
-                  {l.next_action ?? '—'}
-                </td>
-                {showDue && (
-                  <td className="px-3 py-2 text-xs whitespace-nowrap">
-                    {l.next_action_due
-                      ? <span className={ds === 'overdue' ? 'text-destructive font-semibold' : ''}>
-                          {l.next_action_due}
-                          {ds === 'overdue' && (
-                            <span className="ml-1 inline-flex items-center gap-0.5">
-                              <AlertCircle className="h-3 w-3" />{od}일 지남
-                            </span>
-                          )}
-                          {ds === 'today' && <span className="ml-1">오늘</span>}
+    <div className="rounded-lg border divide-y max-h-[70vh] overflow-y-auto">
+      {rows.map(l => {
+        const ds = dueState(l, today);
+        const od = overdueDays(l, today);
+        const sd = staleDays(l, today);
+        const on = l.id === selectedId;
+        return (
+          <button key={l.id} type="button" onClick={() => onSelect(l.id)}
+            className={`w-full text-left px-3 py-2.5 transition
+              ${on ? 'bg-primary/5 border-l-2 border-l-primary' : 'hover:bg-muted/50 border-l-2 border-l-transparent'}
+              ${ds === 'overdue' ? 'bg-destructive/5' : ''}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-medium text-sm">{l.name}</span>
+                  {toMarket(l.market) === 'INTL' && (
+                    <Badge variant="outline" className="h-4 px-1 text-[10px]">해외</Badge>
+                  )}
+                  {l.email_status === 'hold' && (
+                    <Badge variant="destructive" className="h-4 px-1 text-[10px]"
+                      title={emailStatusLabel(l.email_status)}>발송 보류</Badge>
+                  )}
+                  {l.archived_at && (
+                    <Badge variant="secondary" className="h-4 px-1 text-[10px]">보관됨</Badge>
+                  )}
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                  {l.school_name ?? '—'}
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5 flex flex-wrap gap-x-2">
+                  <span>{countryShort(l.country)}</span>
+                  <span>{l.followup_stage || '신규'}</span>
+                  <span>가능성 {l.probability ?? '—'}</span>
+                  {eventOf(l) && <span className="truncate max-w-[140px]">{eventOf(l)}</span>}
+                </div>
+              </div>
+              <div className="text-right shrink-0 text-xs">
+                {showDue && l.next_action_due && (
+                  <div className={ds === 'overdue' ? 'text-destructive font-semibold' : ''}>
+                    {ds === 'overdue'
+                      ? <span className="inline-flex items-center gap-0.5">
+                          <AlertCircle className="h-3 w-3" />{od}일 지남
                         </span>
-                      : '—'}
-                  </td>
+                      : ds === 'today' ? '오늘' : l.next_action_due}
+                  </div>
                 )}
-                {showStale && (
-                  <td className="px-3 py-2 text-right text-xs tabular-nums">
-                    {sd === null ? '—' : `${sd}일`}
-                  </td>
+                {showStale && sd !== null && (
+                  <div className="text-muted-foreground tabular-nums">무접촉 {sd}일</div>
                 )}
-                <td className="px-3 py-2 text-xs">{l.owner ?? '—'}</td>
-                <td className="px-3 py-2 text-right">
-                  <Button size="sm" variant="outline" className="h-7 text-xs"
-                    onClick={() => onLog(l)}>기록</Button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                {l.owner && <div className="text-muted-foreground">{l.owner}</div>}
+              </div>
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-// ─────────────────── 활동 기록 입력(빠르게) ───────────────────
-
-function ActivityDialog({ lead, onClose, onSaved }: {
-  lead: LeadRow; onClose: () => void; onSaved: () => void;
-}) {
-  const [channel, setChannel] = useState<Channel>('email');
-  const [direction, setDirection] = useState<'out' | 'in'>('out');
-  const [summary, setSummary] = useState('');
-  const [stageAfter, setStageAfter] = useState<string>(lead.followup_stage || '신규');
-  const [nextAction, setNextAction] = useState(lead.next_action ?? '');
-  const [nextDue, setNextDue] = useState(lead.next_action_due ?? suggestFirstContactDue(lead.probability));
-  const [closeReason, setCloseReason] = useState(lead.close_reason ?? '');
-
-  const { data: acts } = useQuery({
-    queryKey: ['lead_activities', lead.id],
-    queryFn: () => getActivities(lead.id),
-  });
-
-  const save = useMutation({
-    mutationFn: () => saveActivity({
-      leadId: lead.id, channel, direction, summary,
-      stageAfter: stageAfter as FollowupStage,
-      nextAction, nextActionDue: nextDue, closeReason,
-    }),
-    onSuccess: () => { toast.success('기록했습니다'); onSaved(); },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const needReason = needsCloseReason(stageAfter);
-  const blocked = !summary.trim() || (needReason && !closeReason.trim());
-
-  return (
-    <Dialog open onOpenChange={o => !o && onClose()}>
-      <DialogContent className="max-w-xl max-h-[88vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-base">
-            {lead.name}
-            <span className="ml-2 text-sm font-normal text-muted-foreground">{lead.school_name}</span>
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-3">
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <Label className="text-xs">채널</Label>
-              <Select value={channel} onValueChange={v => setChannel(v as Channel)}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {CHANNELS.map(c => <SelectItem key={c} value={c}>{CHANNEL_LABEL[c]}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex-1">
-              <Label className="text-xs">방향</Label>
-              <Select value={direction} onValueChange={v => setDirection(v as 'out' | 'in')}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="out">보냄</SelectItem>
-                  <SelectItem value="in">받음</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex-1">
-              <Label className="text-xs">단계</Label>
-              <Select value={stageAfter} onValueChange={setStageAfter}>
-                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {FOLLOWUP_STAGES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div>
-            <Label className="text-xs">무엇을 했나 (한 줄)</Label>
-            <Input value={summary} onChange={e => setSummary(e.target.value)} className="h-9"
-              placeholder="예: 소개 메일 보냄 / 데모 일정 회신 받음" autoFocus />
-          </div>
-
-          {needReason && (
-            <div>
-              <Label className="text-xs">종료 사유 (필수)</Label>
-              <Input value={closeReason} onChange={e => setCloseReason(e.target.value)} className="h-9"
-                placeholder="예: 예산 없음 / 타사 선택 / 응답 없음" />
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <div className="flex-[2]">
-              <Label className="text-xs">다음 행동</Label>
-              <Input value={nextAction} onChange={e => setNextAction(e.target.value)} className="h-9"
-                placeholder="예: 2차 메일 / 데모 일정 잡기" />
-            </div>
-            <div className="w-[150px]">
-              <Label className="text-xs">기한</Label>
-              <Input type="date" value={nextDue} onChange={e => setNextDue(e.target.value)} className="h-9" />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" onClick={onClose}>닫기</Button>
-            <Button disabled={blocked || save.isPending} onClick={() => save.mutate()}>
-              {save.isPending ? '저장 중…' : '기록'}
-            </Button>
-          </div>
-
-          <div className="pt-3 border-t">
-            <div className="text-xs font-medium mb-2">
-              활동 기록 {acts ? `(${acts.length})` : ''}
-              <span className="ml-1.5 font-normal text-muted-foreground">지워지지 않습니다</span>
-            </div>
-            {!acts || acts.length === 0
-              ? <p className="text-xs text-muted-foreground">아직 기록이 없습니다.</p>
-              : (
-                <ul className="space-y-1.5 max-h-56 overflow-y-auto">
-                  {acts.map(a => (
-                    <li key={a.id} className={`text-xs flex gap-2 ${a.voided_at ? 'opacity-50 line-through' : ''}`}>
-                      <span className="text-muted-foreground w-[88px] shrink-0 tabular-nums">
-                        {a.occurred_at.slice(0, 10)}
-                      </span>
-                      <span className="w-14 shrink-0">
-                        {CHANNEL_LABEL[a.channel as Channel] ?? a.channel}
-                        {a.direction === 'in' ? ' ←' : ' →'}
-                      </span>
-                      <span className="flex-1">{a.summary}</span>
-                      {a.stage_after && <span className="text-muted-foreground">{a.stage_after}</span>}
-                      {a.actor && <span className="text-muted-foreground">{a.actor}</span>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 // ─────────────────────── 리드 추가 ───────────────────────
 
@@ -698,7 +647,9 @@ function ImportDialog({ existing, onClose, onSaved }: {
 
           <div className="flex flex-wrap items-end gap-2">
             <div className="w-[180px]">
-              <Label className="text-xs">행사명</Label>
+              {/* LEAD-UI2 R2: 행사명을 비워 둘 수 있어서 가져온 270건 전부 빈값이 됐고,
+                  그 결과 행사 필터에 선택지가 하나도 없었다. 이제 **필수**다. */}
+              <Label className="text-xs">행사명 (필수)</Label>
               <Input value={eventName} onChange={e => setEventName(e.target.value)} className="h-9"
                 placeholder="2026 EDUtech Asia" />
             </div>
@@ -800,7 +751,8 @@ function ImportDialog({ existing, onClose, onSaved }: {
                   : (
                     <>
                       <Button variant="outline" onClick={onClose}>취소</Button>
-                      <Button disabled={busy || split.fresh.length === 0} onClick={doImport}>
+                              <Button disabled={busy || split.fresh.length === 0 || !eventName.trim()}
+                        onClick={doImport}>
                         {busy ? '가져오는 중…' : `${split.fresh.length}건 가져오기`}
                       </Button>
                     </>

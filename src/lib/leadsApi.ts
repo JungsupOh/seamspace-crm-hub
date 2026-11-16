@@ -7,6 +7,10 @@
 import { authedFetch } from '@/lib/authedFetch';
 import { leadKeyColumns, type Market } from '@/lib/leadMarket';
 import { buildActivity, leadPatchForActivity, type ActivityInput, type FollowupStage } from '@/lib/leadFollowup';
+import {
+  archiveSummary, buildEditPatch, changeSummary, diffTracked, unarchiveSummary,
+  type EditableLead,
+} from '@/lib/leadEdit';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -52,6 +56,9 @@ export interface LeadRow {
 
   // LEAD-6
   import_batch_id?: string | null;
+
+  // LEAD-UI2
+  archived_at?: string | null;
 }
 
 export interface LeadActivity {
@@ -74,7 +81,7 @@ const LEAD_COLS = [
   'country', 'segment', 'probability', 'event_name', 'source_type',
   'email_quality', 'email_status', 'notes',
   'followup_stage', 'last_contact_at', 'next_action', 'next_action_due', 'owner', 'close_reason',
-  'import_batch_id',
+  'import_batch_id', 'archived_at',
 ].join(',');
 
 export async function getLeads(): Promise<LeadRow[]> {
@@ -110,6 +117,12 @@ export interface SaveActivityInput extends ActivityInput {
   nextAction?: string;
   nextActionDue?: string;
   closeReason?: string;
+}
+
+/** 활동 기록을 남기는 사람. 화면이 로그인 사용자로 채운다(LEAD-UI2 R1·R8). */
+export interface Actor {
+  name?: string | null;
+  userId?: string | null;
 }
 
 /**
@@ -224,4 +237,125 @@ export async function deleteImportBatch(batchId: string): Promise<void> {
     { method: 'DELETE', headers: HEADERS },
   );
   if (!r.ok) throw new Error('가져오기 취소 실패');
+}
+
+// ─────────────────── LEAD-UI2 R1 · R7 · R8 ───────────────────
+
+/** 시스템이 남기는 기록(변경·보관·CC). 사람이 적은 기록과 같은 원장에 쌓인다. */
+async function logSystemActivity(leadId: string, summary: string, actor: Actor, stageAfter?: string | null) {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+    method: 'POST',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      lead_id: leadId,
+      occurred_at: new Date().toISOString(),
+      // 시스템 기록도 채널·방향이 필수(DB CHECK)라 값을 넣는다. summary 앞의
+      // `[변경]`·`[보관]` 으로 사람이 적은 기록과 구분한다.
+      channel: 'other',
+      direction: 'out',
+      summary,
+      stage_after: stageAfter ?? null,
+      actor: actor.name?.trim() || null,
+      actor_user_id: actor.userId ?? null,
+    }),
+  });
+  if (!r.ok) throw new Error('변경 기록 저장 실패');
+}
+
+/**
+ * 리드를 고치고 **변경 기록을 같이 남긴다**(R1).
+ *
+ * ⚠️ 순서는 **리드 저장 먼저, 기록 나중**이다. 기록이 먼저 들어가고 저장이 실패하면
+ *    "바꿨다고 적혀 있는데 값은 그대로"가 되어 원장이 거짓이 된다.
+ *    반대 순서면 "값은 바뀌었는데 기록이 빠짐" — 다시 저장하면 복구된다.
+ */
+export async function saveLeadEdit(
+  id: string, before: EditableLead, after: EditableLead, actor: Actor,
+): Promise<{ changed: boolean; logged: boolean }> {
+  const patch = buildEditPatch(before, after);
+  if (Object.keys(patch).length === 0) return { changed: false, logged: false };
+
+  await patchLead(id, patch);
+
+  const tracked = diffTracked(before, after);
+  if (tracked.length === 0) return { changed: true, logged: false };
+
+  const stageChange = tracked.find(c => c.field === 'followup_stage');
+  await logSystemActivity(
+    id, changeSummary(tracked), actor,
+    stageChange ? String(stageChange.after ?? '') || null : null,
+  );
+  return { changed: true, logged: true };
+}
+
+/** 보관·보관 해제. 사유는 활동 기록에 남는다(R8). */
+export async function setArchived(
+  id: string, archived: boolean, reason: string, actor: Actor,
+): Promise<void> {
+  await patchLead(id, { archived_at: archived ? new Date().toISOString() : null });
+  await logSystemActivity(id, archived ? archiveSummary(reason) : unarchiveSummary(), actor);
+}
+
+// ── R7 CC 결정 ──
+
+export interface CcLink {
+  id: string;
+  lead_id: string;
+  cc_lead_id: string;
+  decided_at: string;
+  note?: string | null;
+}
+
+export async function getCcLinks(leadId: string): Promise<CcLink[]> {
+  const r = await authedFetch(
+    `${SUPABASE_URL}/rest/v1/lead_cc_links?lead_id=eq.${encodeURIComponent(leadId)}` +
+      `&select=id,lead_id,cc_lead_id,decided_at,note&order=decided_at.asc`,
+    { headers: HEADERS },
+  );
+  if (!r.ok) throw new Error('CC 결정 조회 실패');
+  return r.json();
+}
+
+/**
+ * CC 한 명을 넣거나 뺀다. 바뀐 내용은 활동 기록에 `[변경] CC 대상: …` 으로 남는다.
+ *
+ * `names` 는 기록 문구에 쓸 **현재 CC 전체 목록**이다 — 한 명만 적으면
+ * 나중에 원장을 읽을 때 "그때 CC 가 누구였는지"를 알 수 없다.
+ */
+export async function setCcLink(
+  leadId: string, ccLeadId: string, on: boolean,
+  names: readonly string[], actor: Actor,
+): Promise<void> {
+  if (on) {
+    const r = await authedFetch(`${SUPABASE_URL}/rest/v1/lead_cc_links`, {
+      method: 'POST',
+      headers: { ...HEADERS, Prefer: 'return=minimal,resolution=merge-duplicates' },
+      body: JSON.stringify({ lead_id: leadId, cc_lead_id: ccLeadId, decided_by: actor.userId ?? null }),
+    });
+    if (!r.ok) throw new Error('CC 저장 실패');
+  } else {
+    const r = await authedFetch(
+      `${SUPABASE_URL}/rest/v1/lead_cc_links?lead_id=eq.${encodeURIComponent(leadId)}` +
+        `&cc_lead_id=eq.${encodeURIComponent(ccLeadId)}`,
+      { method: 'DELETE', headers: HEADERS },
+    );
+    if (!r.ok) throw new Error('CC 해제 실패');
+  }
+  const list = names.length > 0 ? names.join(', ') : '없음';
+  await logSystemActivity(leadId, `[변경] CC 대상: ${list}`, actor);
+}
+
+/** 기관 안에서 최근 보낸 기록을 찾기 위해 **여러 리드의** 활동을 한 번에 읽는다. */
+export async function getActivitiesForLeads(leadIds: readonly string[]): Promise<Array<{
+  lead_id: string; direction: string; occurred_at: string; voided_at?: string | null;
+}>> {
+  if (leadIds.length === 0) return [];
+  const inList = leadIds.map(encodeURIComponent).join(',');
+  const r = await authedFetch(
+    `${SUPABASE_URL}/rest/v1/lead_activities?lead_id=in.(${inList})` +
+      `&select=lead_id,direction,occurred_at,voided_at&order=occurred_at.desc&limit=500`,
+    { headers: HEADERS },
+  );
+  if (!r.ok) return [];
+  return r.json();
 }

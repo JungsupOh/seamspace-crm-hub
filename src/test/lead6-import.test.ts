@@ -164,6 +164,23 @@ describe("'발송 가능' → 이메일 상태 — 안전한 쪽으로 기운다
   it.each(['보류', '확인', '제외', '', '모르는값', null] as const)(
     '%s → hold (발송 보류로 표시)', (v) => expect(toEmailStatus(v)).toBe('hold'));
 
+  // LEAD-UI2 R4 — 엑셀의 '주의·메모' 가 보류 사유 칸이다(실제 파일에서 보류 12건 전부 채워짐)
+  it('보류 행은 메모에 "발송 보류 사유: " 를 붙인다', () => {
+    const r = parseIntlRows([krRow({ '발송 가능': '보류', '주의·메모': '메일 반송 이력' })], KR_HEADERS);
+    expect(r.rows[0].notes).toContain('발송 보류 사유: 메일 반송 이력');
+  });
+
+  it('보낼 수 있는 행의 메모에는 붙이지 않는다 (46건이 여기 해당)', () => {
+    const r = parseIntlRows([krRow({ '발송 가능': 'OK', '주의·메모': '직함 확인 필요' })], KR_HEADERS);
+    expect(r.rows[0].notes).toContain('직함 확인 필요');
+    expect(r.rows[0].notes).not.toContain('발송 보류 사유');
+  });
+
+  it('보류인데 사유 칸이 비면 억지로 만들지 않는다', () => {
+    const r = parseIntlRows([krRow({ '발송 가능': '보류', '주의·메모': '' })], KR_HEADERS);
+    expect(r.rows[0].notes ?? '').not.toContain('발송 보류 사유');
+  });
+
   it('보류 건수를 세어 미리보기에 보여 준다', () => {
     const r = parseIntlRows([
       krRow({ '이메일': 'a@x.sg', '발송 가능': 'OK' }),

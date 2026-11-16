@@ -57,14 +57,21 @@ describe('활동 기록은 원장 — 지우는 UI 가 없다', () => {
   it('API 에 활동 기록 삭제 함수가 없다', () => {
     const api = code(read('src/lib/leadsApi.ts'));
     expect(api).not.toMatch(/lead_activities[^\n]*method:\s*'DELETE'/);
-    // 가져오기 취소는 campaign_leads 묶음만 지운다
+    // DELETE 는 두 곳뿐이다: 가져오기 취소(묶음)와 CC 해제(LEAD-UI2 R7).
+    // 둘 다 원장이 아니다 — CC 변경 이력은 활동 기록에 따로 남는다.
     const dels = api.match(/method: 'DELETE'/g) ?? [];
-    expect(dels.length).toBe(1);
+    expect(dels.length).toBe(2);
     expect(api).toContain('import_batch_id=eq.');
+    expect(api).toContain('lead_cc_links?lead_id=eq.');
   });
 
+  // LEAD-UI2 R5 에서 빠른 기록·타임라인이 상세 컴포넌트로 옮겨졌다.
+  // 목적(화면 어딘가에 반드시 있어야 한다)은 그대로 두고 찾는 곳만 넓혔다.
+  const screenText = () =>
+    read('src/pages/Leads.tsx') + read('src/components/leads/LeadDetail.tsx');
+
   it('화면이 "지워지지 않습니다"를 알려 준다', () => {
-    expect(read('src/pages/Leads.tsx')).toContain('지워지지 않습니다');
+    expect(screenText()).toContain('지워지지 않습니다');
   });
 });
 
@@ -146,14 +153,16 @@ describe('화면이 요구사항을 담았다', () => {
   });
 
   it('기록 입력이 빠르다 — 한 줄 메모 + 단계 + 다음 행동·날짜', () => {
-    expect(page).toContain('무엇을 했나 (한 줄)');
-    expect(page).toContain('다음 행동');
-    expect(page).toContain("type=\"date\"");
+    const t = page + read('src/components/leads/LeadDetail.tsx');
+    expect(t).toContain('무엇을 했나 (한 줄)');
+    expect(t).toContain('다음 행동');
+    expect(t).toContain("type=\"date\"");
   });
 
   it("'종료'를 고르면 사유를 요구한다", () => {
-    expect(page).toContain('needsCloseReason');
-    expect(page).toContain('종료 사유 (필수)');
+    const t = page + read('src/components/leads/LeadDetail.tsx');
+    expect(t).toContain('needsCloseReason');
+    expect(t).toContain('종료 사유 (필수)');
   });
 
   it('가져오기 미리보기가 건수·중복·제외를 보여 준다', () => {

@@ -225,7 +225,16 @@ export function parseIntlRows(
     const countryRaw = get(r, 'country');
     const phoneRaw = get(r, 'phone');
     const phoneNorm = normalizeLeadPhone(phoneRaw);
-    const notes = [get(r, 'notes'), get(r, 'caution')].filter(Boolean).join(' / ') || null;
+    // 발송 보류 사유 — LEAD-UI2 R4.
+    // 엑셀의 '주의·메모' 칸이 보류 사유를 담고 있다(실제 파일에서 보류 12건 전부 채워져 있다).
+    // 보류일 때만 "발송 보류 사유: " 를 앞에 붙인다 — 보낼 수 있는 행에도 메모가 있어서
+    // (46건) 무조건 붙이면 "보류가 아닌데 보류 사유가 적힌" 리드가 생긴다.
+    const status = toEmailStatus(get(r, 'sendable'));
+    const caution = get(r, 'caution');
+    const notes = [
+      get(r, 'notes'),
+      caution ? (status === 'hold' ? `발송 보류 사유: ${caution}` : caution) : '',
+    ].filter(Boolean).join(' / ') || null;
 
     // 우리 칸에 자리가 없는 열과 **주석이 붙은 원본**은 그대로 남긴다.
     const custom: Record<string, string> = {};
@@ -249,7 +258,7 @@ export function parseIntlRows(
       event_name: options.eventName?.trim() || null,
       segment: toSegment(gradeRaw),
       source_type: options.sourceType ?? 'exhibition',
-      email_status: toEmailStatus(get(r, 'sendable')),
+      email_status: status,
       email_quality: emailQuality(email, [countryRaw, gradeRaw, notes, get(r, 'caution')]),
       notes,
       visited_at: excelDateToISO(map.visitedAt ? r[map.visitedAt] : '', tz),
