@@ -162,9 +162,23 @@ export function changeSummary(changes: readonly FieldChange[]): string {
 }
 
 export const CHANGE_PREFIX = '[변경]';
+export const ARCHIVE_PREFIX = '[보관]';
 
 export function isChangeRecord(summary: unknown): boolean {
   return typeof summary === 'string' && summary.startsWith(CHANGE_PREFIX);
+}
+
+/**
+ * 사람이 적은 기록이 아니라 **시스템이 남긴 기록**인가.
+ *
+ * ⚠️ `[변경]` 뿐 아니라 `[보관]` 도 시스템 기록이다. 둘 다 DB CHECK 때문에
+ *    `direction='out'` 으로 저장되므로, 하나만 걸러 내면 나머지가 **접촉 차수로
+ *    세어진다**(리드를 보관한 것이 "2차 접촉"이 된다 — LEAD-S1 에서 테스트가 잡았다).
+ *    접두사를 더할 때 이 함수만 고치면 되도록 한 곳에 모았다.
+ */
+export function isSystemRecord(summary: unknown): boolean {
+  if (typeof summary !== 'string') return false;
+  return summary.startsWith(CHANGE_PREFIX) || summary.startsWith(ARCHIVE_PREFIX);
 }
 
 /**
@@ -203,8 +217,6 @@ export function findEmailDuplicates<T extends { id: string; email_normalized?: u
 }
 
 // ─────────────────── 보관(archive) — 요구 R8 ───────────────────
-
-export const ARCHIVE_PREFIX = '[보관]';
 
 /** 보관 사유 한 줄. 사유를 안 적으면 "(사유 없음)". */
 export function archiveSummary(reason: unknown): string {
