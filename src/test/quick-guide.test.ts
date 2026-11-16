@@ -73,15 +73,37 @@ describe('① 헬퍼 두 벌이 같다', () => {
 describe('③ 첨부 목록·실제 파일·용량', () => {
   it('언어별 개수·순서 (en 7 / ja 7 / ko 6)', () => {
     expect(QUICK_GUIDE_FILES.en.map(f => f.file)).toEqual([
-      'Seamspace_QuickGuide_01_How_To_Start.pdf', 'Seamspace_QuickGuide_02_Sign_Up_and_Login.pdf',
-      'Seamspace_QuickGuide_03_Admin_Page.pdf', 'Seamspace_QuickGuide_04_Group_Journal.pdf',
-      'Seamspace_QuickGuide_05_Wall.pdf', 'Seamspace_QuickGuide_06_Worksheet.pdf',
-      'Seamspace_QuickGuide_07_Newsletter.pdf',
+      'Seamspace_QuickGuide_EN_01_How_To_Start.pdf', 'Seamspace_QuickGuide_EN_02_Sign_Up_and_Login.pdf',
+      'Seamspace_QuickGuide_EN_03_Admin_Page.pdf', 'Seamspace_QuickGuide_EN_04_Group_Journal.pdf',
+      'Seamspace_QuickGuide_EN_05_Wall.pdf', 'Seamspace_QuickGuide_EN_06_Worksheet.pdf',
+      'Seamspace_QuickGuide_EN_07_Newsletter.pdf',
     ]);
     expect(QUICK_GUIDE_FILES.ja).toHaveLength(7);
     expect(QUICK_GUIDE_FILES.ko).toHaveLength(6);
     expect(QUICK_GUIDE_FILES.ja[3].file).toBe('Seamspace_QuickGuide_JA_04_Shared_Story.pdf');
     expect(QUICK_GUIDE_FILES.ko[0].file).toBe('Seamspace_QuickGuide_KO_01_Basic_Usage.pdf');
+  });
+
+  // CRM-022c — 영어 파일명에도 언어 코드를 붙였다(옛 이름에는 EN_ 이 없었다).
+  // 세 언어가 같은 규칙을 쓰는지 한 곳에서 못 박는다.
+  it('파일명이 언어별 규칙을 따른다 (EN_ / JA_ / KO_ + 두 자리 번호)', () => {
+    const RULE: Record<string, RegExp> = {
+      en: /^Seamspace_QuickGuide_EN_\d{2}_[A-Za-z0-9_]+\.pdf$/,
+      ja: /^Seamspace_QuickGuide_JA_\d{2}_[A-Za-z0-9_]+\.pdf$/,
+      ko: /^Seamspace_QuickGuide_KO_\d{2}_[A-Za-z0-9_]+\.pdf$/,
+    };
+    for (const lang of LANGS) {
+      for (const f of QUICK_GUIDE_FILES[lang]) {
+        expect(f.file, `${lang}: ${f.file}`).toMatch(RULE[lang]);
+      }
+    }
+  });
+
+  it('번호가 1부터 빠짐없이 이어진다', () => {
+    for (const lang of LANGS) {
+      const nums = QUICK_GUIDE_FILES[lang].map(f => Number(f.file.match(/_(\d{2})_/)![1]));
+      expect(nums, lang).toEqual(nums.map((_, i) => i + 1));
+    }
   });
 
   it('모든 파일이 public/docs/quick-guide/<lang>/ 에 있고 PDF 이며, 요청 크기가 Resend 한도에 여유가 있다', () => {
@@ -128,13 +150,13 @@ describe('fetchGuideAttachments', () => {
   });
 
   it('한 개라도 404 면 첨부를 아예 붙이지 않는다 (본문 목록과 어긋나지 않게)', async () => {
-    installFetch({ missing: 'Seamspace_QuickGuide_05_Wall.pdf' });
+    installFetch({ missing: 'Seamspace_QuickGuide_EN_05_Wall.pdf' });
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(await fetchGuideAttachments('en', '', 'test')).toBeUndefined();
   });
 
   it('없는 경로가 index.html(200)로 돌아와도 PDF 가 아니면 거절한다', async () => {
-    installFetch({ missing: 'Seamspace_QuickGuide_05_Wall.pdf', spaFallback: true });
+    installFetch({ missing: 'Seamspace_QuickGuide_EN_05_Wall.pdf', spaFallback: true });
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(await fetchGuideAttachments('en', '', 'test')).toBeUndefined();
   });

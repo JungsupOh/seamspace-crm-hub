@@ -25,13 +25,13 @@ export const QUICK_GUIDE_DIR = '/docs/quick-guide';
 
 export const QUICK_GUIDE_FILES: Record<GuideLang, GuideFile[]> = {
   en: [
-    { file: 'Seamspace_QuickGuide_01_How_To_Start.pdf', label: '01 How To Start' },
-    { file: 'Seamspace_QuickGuide_02_Sign_Up_and_Login.pdf', label: '02 Sign Up and Login' },
-    { file: 'Seamspace_QuickGuide_03_Admin_Page.pdf', label: '03 Admin Page' },
-    { file: 'Seamspace_QuickGuide_04_Group_Journal.pdf', label: '04 Group Journal' },
-    { file: 'Seamspace_QuickGuide_05_Wall.pdf', label: '05 Wall' },
-    { file: 'Seamspace_QuickGuide_06_Worksheet.pdf', label: '06 Worksheet' },
-    { file: 'Seamspace_QuickGuide_07_Newsletter.pdf', label: '07 Newsletter' },
+    { file: 'Seamspace_QuickGuide_EN_01_How_To_Start.pdf', label: '01 How To Start' },
+    { file: 'Seamspace_QuickGuide_EN_02_Sign_Up_and_Login.pdf', label: '02 Sign Up and Login' },
+    { file: 'Seamspace_QuickGuide_EN_03_Admin_Page.pdf', label: '03 Admin Page' },
+    { file: 'Seamspace_QuickGuide_EN_04_Group_Journal.pdf', label: '04 Group Journal' },
+    { file: 'Seamspace_QuickGuide_EN_05_Wall.pdf', label: '05 Wall' },
+    { file: 'Seamspace_QuickGuide_EN_06_Worksheet.pdf', label: '06 Worksheet' },
+    { file: 'Seamspace_QuickGuide_EN_07_Newsletter.pdf', label: '07 Newsletter' },
   ],
   ja: [
     { file: 'Seamspace_QuickGuide_JA_01_How_To_Start.pdf', label: '01 How To Start' },
