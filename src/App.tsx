@@ -43,11 +43,9 @@ import PrintStudent from "./pages/PrintStudent";
 import PrintStudentComplete from "./pages/PrintStudentComplete";
 import PrintStudentFail from "./pages/PrintStudentFail";
 import PrintTeacher from "./pages/PrintTeacher";
-import LuckySevenForm from "./pages/LuckySevenForm";
-import LuckySevenPay from "./pages/LuckySevenPay";
-import LuckySevenPayComplete from "./pages/LuckySevenPayComplete";
-import LuckySevenPayFail from "./pages/LuckySevenPayFail";
-import LuckySevenStatus from "./pages/LuckySevenStatus";
+// 럭키세븐 이벤트 종료 (HARD-A H-1) — 공개 폼·결제·조회 화면을 안내 페이지로 교체했다.
+// 원래 페이지 파일은 지우지 않고 라우트에서만 분리했다(되돌리려면 아래 Route 를 원복).
+import LuckySevenClosed from "./pages/LuckySevenClosed";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -153,11 +151,12 @@ function AppRoutes() {
       {/* 공개 캠페인 신청 폼 — 로그인 불필요 */}
       <Route path="/c/:slug" element={<CampaignForm />} />
       {/* 럭키세븐 이벤트 — 로그인 불필요 */}
-      <Route path="/event/lucky-seven" element={<LuckySevenForm />} />
-      <Route path="/event/lucky-seven/pay/complete" element={<LuckySevenPayComplete />} />
-      <Route path="/event/lucky-seven/pay/fail" element={<LuckySevenPayFail />} />
-      <Route path="/event/lucky-seven/pay/:quoteNumber" element={<LuckySevenPay />} />
-      <Route path="/event/lucky-seven/status" element={<LuckySevenStatus />} />
+      {/* 럭키세븐 종료 — 주소는 유지하고 화면만 안내로 바꿨다 (HARD-A H-1) */}
+      <Route path="/event/lucky-seven" element={<LuckySevenClosed />} />
+      <Route path="/event/lucky-seven/pay/complete" element={<LuckySevenClosed />} />
+      <Route path="/event/lucky-seven/pay/fail" element={<LuckySevenClosed />} />
+      <Route path="/event/lucky-seven/pay/:quoteNumber" element={<LuckySevenClosed />} />
+      <Route path="/event/lucky-seven/status" element={<LuckySevenClosed />} />
       {/* APK 구독 — 공개 페이지 (로그인 불필요) */}
       <Route path="/apk/subscribe" element={<ApkSubscribe />} />
       <Route path="/apk/info" element={<ApkInfo />} />

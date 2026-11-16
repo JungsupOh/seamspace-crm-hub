@@ -140,19 +140,34 @@ function rowToRecord<T>(tableName: string, row: Record<string, unknown>): Airtab
 }
 
 // ── Auth header helper ───────────────────────────
+//
+// 세션이 없으면 **오류를 던진다**. 예전에는 공개 키(anon)로 조용히 폴백했는데,
+// 그건 "로그인했는데 권한이 모자란" 상황을 "익명으로 전부 보이는" 상황으로
+// 되돌리는 것이라 RLS 를 무력화한다 (HARD-A H-1, 규칙은 lib/authedFetch.ts 와 같다).
+//
+// 폴백을 지울 수 있게 된 근거: 이 모듈의 함수를 **부르는** 곳이 전부 로그인 화면이다.
+//   · Contacts·Deals·Index·Licenses·Partners·Upload·DealQuickView → RequireAuth 안
+//   · PartnerPortal → 로그인한 파트너
+//   · luckySeven.ts 의 airtable 호출은 createDealFromLuckySevenGroup 한 곳뿐이고,
+//     그 함수를 쓰는 곳은 관리자 다이얼로그(LuckySevenGroupDialog)와
+//     라우트에서 분리된 LuckySevenForm 뿐이다. 공개 /c·/order 는 luckySeven 에서
+//     upsertLeadContact 만 가져가고, 그 함수는 airtable 을 쓰지 않는다.
+//
+// ⚠️ 여기서 `new Headers()` 를 쓰면 안 된다 — Fetch 의 Headers 는 `Range` 를
+//    금지 헤더로 보고 조용히 버린다. fetchAll 이 Range 로 1000행씩 페이지를
+//    넘기므로, 버려지면 목록이 오류 없이 1000행에서 잘린다(021-8b-3 §B).
+//    그래서 이 함수는 평범한 객체를 돌려주고, 호출부도 객체 전개로만 합친다.
+export const AIRTABLE_NO_SESSION_ERROR = '로그인이 필요합니다.';
+
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession();
-  const headers: Record<string, string> = {
+  if (!session?.access_token) throw new Error(AIRTABLE_NO_SESSION_ERROR);
+  return {
     apikey: SUPABASE_KEY,
     'Content-Type': 'application/json',
     Prefer: 'return=representation',
+    Authorization: `Bearer ${session.access_token}`,
   };
-  if (session?.access_token) {
-    headers['Authorization'] = `Bearer ${session.access_token}`;
-  } else {
-    headers['Authorization'] = `Bearer ${SUPABASE_KEY}`;
-  }
-  return headers;
 }
 
 // ── Parse simple filterByFormula ──────────────────

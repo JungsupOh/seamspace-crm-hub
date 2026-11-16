@@ -17,11 +17,13 @@ import {
 } from '@/lib/luckySeven';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { issueQuoteForPaymentGroup } from '@/lib/luckySevenEmail';
+import { authedFetch } from '@/lib/authedFetch';
 import { notifyLuckySevenPayment } from '@/lib/telegram';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
+// Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (HARD-A H-1).
+const HEADERS = { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
 
 interface Props {
   open: boolean;
@@ -62,7 +64,7 @@ export function LuckySevenGroupsView({ campaignId, campaignName }: { campaignId:
   const reload = async () => {
     setLoading(true);
     try {
-      const groupsRes = await fetch(
+      const groupsRes = await authedFetch(
         `${SUPABASE_URL}/rest/v1/lucky_seven_groups?campaign_id=eq.${campaignId}&order=created_at.desc&select=*`,
         { headers: HEADERS },
       );
@@ -71,9 +73,9 @@ export function LuckySevenGroupsView({ campaignId, campaignName }: { campaignId:
       const enriched = await Promise.all(rawGroups.map(async (g) => {
         const [leaderRes, pgRes] = await Promise.all([
           g.leader_lead_id
-            ? fetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${g.leader_lead_id}&select=name,school_name`, { headers: HEADERS })
+            ? authedFetch(`${SUPABASE_URL}/rest/v1/campaign_leads?id=eq.${g.leader_lead_id}&select=name,school_name`, { headers: HEADERS })
             : Promise.resolve(null),
-          fetch(`${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?group_id=eq.${g.id}&select=status`, { headers: HEADERS }),
+          authedFetch(`${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?group_id=eq.${g.id}&select=status`, { headers: HEADERS }),
         ]);
         const leader = leaderRes && leaderRes.ok ? (await leaderRes.json())[0] : null;
         const pgs: { status: string }[] = pgRes.ok ? await pgRes.json() : [];
@@ -268,8 +270,8 @@ function GroupDetail({ group, campaignName, onClose, onChange, refreshKey }: { g
     setLoading(true);
     try {
       const [pgRes, leadsRes] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?group_id=eq.${group.id}&order=quote_number.asc&select=*`, { headers: HEADERS }),
-        fetch(`${SUPABASE_URL}/rest/v1/campaign_leads?ls_group_id=eq.${group.id}&order=ls_member_index.asc&select=*`, { headers: HEADERS }),
+        authedFetch(`${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?group_id=eq.${group.id}&order=quote_number.asc&select=*`, { headers: HEADERS }),
+        authedFetch(`${SUPABASE_URL}/rest/v1/campaign_leads?ls_group_id=eq.${group.id}&order=ls_member_index.asc&select=*`, { headers: HEADERS }),
       ]);
       setDetail({
         paymentGroups: pgRes.ok ? await pgRes.json() : [],
@@ -319,7 +321,7 @@ function GroupDetail({ group, campaignName, onClose, onChange, refreshKey }: { g
     if (!confirm(`${pg.payer_name}님의 ${pg.amount.toLocaleString()}원 결제를 완료 처리할까요?`)) return;
     setBusy(true);
     try {
-      const r = await fetch(`${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?id=eq.${pg.id}`, {
+      const r = await authedFetch(`${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?id=eq.${pg.id}`, {
         method: 'PATCH',
         headers: { ...HEADERS, Prefer: 'return=minimal' },
         body: JSON.stringify({ status: '결제완료', paid_at: new Date().toISOString() }),
@@ -328,7 +330,7 @@ function GroupDetail({ group, campaignName, onClose, onChange, refreshKey }: { g
       const newStatus = await refreshGroupStatus(group.id);
 
       // 텔레그램 알림 (수동 확인 표시)
-      const updatedPgRes = await fetch(`${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?group_id=eq.${group.id}&select=status`, { headers: HEADERS });
+      const updatedPgRes = await authedFetch(`${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?group_id=eq.${group.id}&select=status`, { headers: HEADERS });
       const allPgs: { status: string }[] = updatedPgRes.ok ? await updatedPgRes.json() : [];
       const paidCount = allPgs.filter((p) => p.status === '결제완료').length;
 

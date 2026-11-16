@@ -5,6 +5,7 @@
 
 import { CORS, confirmTossPayment, buildReceiptFields, jsonResponse } from "../_shared/toss.ts";
 import { notifyLuckySevenPaymentTG } from "../_shared/telegram.ts";
+import { validateInput, matchVerdict } from "./logic.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -14,33 +15,20 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
 
   try {
-    const { paymentKey, orderId, amount, quoteNumber } = await req.json() as {
-      paymentKey: string;
-      orderId: string;
-      amount: number;
-      quoteNumber: string;
-    };
+    const iv = validateInput(await req.json());
+    if (!iv.ok) return jsonResponse({ error: iv.error }, iv.status);
+    const { paymentKey, orderId, amount, quoteNumber } = iv.value;
 
-    if (!paymentKey || !orderId || !amount || !quoteNumber) {
-      return jsonResponse({ error: "필수 파라미터 누락" }, 400);
-    }
-
-    // 1) 결제 묶음 조회 + 금액 검증
+    // 1) 결제 묶음 조회 + 대조 (금액 + orderId↔견적번호 — logic.ts 참고)
     const pgRes = await fetch(
       `${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?quote_number=eq.${encodeURIComponent(quoteNumber)}&select=*`,
       { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
     );
     const pgs = pgRes.ok ? await pgRes.json() : [];
-    if (!Array.isArray(pgs) || pgs.length === 0) {
-      return jsonResponse({ error: "견적서를 찾을 수 없습니다" }, 404);
-    }
+    const mv = matchVerdict(pgs, iv.value);
+    if (!mv.ok) return jsonResponse({ error: mv.error }, mv.status);
+    if (mv.alreadyPaid) return jsonResponse({ ok: true, alreadyPaid: true });
     const pg = pgs[0];
-    if (pg.status === "결제완료") {
-      return jsonResponse({ ok: true, alreadyPaid: true });
-    }
-    if (Number(pg.amount) !== Number(amount)) {
-      return jsonResponse({ error: "결제 금액 불일치" }, 400);
-    }
 
     // 2) Toss 결제 승인
     const toss = await confirmTossPayment({ paymentKey, orderId, amount, secret: TOSS_SECRET });
