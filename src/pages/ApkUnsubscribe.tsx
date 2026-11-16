@@ -1,6 +1,7 @@
 // 1-click 구독 취소 — 메일의 footer 링크가 가리키는 페이지
 // 토큰 매칭으로 즉시 status='unsubscribed' 처리. 로그인 불필요.
 
+import { publicApkUnsubscribe } from '@/lib/public/apkPublic';
 import { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
@@ -24,34 +25,17 @@ export default function ApkUnsubscribe() {
     }
     (async () => {
       try {
-        // 토큰으로 조회 + 이메일 확보
-        const findRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/apk_subscribers?unsubscribe_token=eq.${encodeURIComponent(token)}&select=id,email,status&limit=1`,
-          { headers: HEADERS },
-        );
-        if (!findRes.ok) throw new Error('토큰 조회 실패');
-        const rows = await findRes.json() as Array<{ id: string; email: string; status: string }>;
-        if (rows.length === 0) {
+        // 서버 함수 apk-lookup 이 토큰 조회와 상태 변경을 한 번에 한다 (HARD-B2b).
+        // 브라우저는 더 이상 apk_subscribers 를 직접 읽고 쓰지 않는다.
+        const r = await publicApkUnsubscribe(token);
+        if (r.email) setEmail(r.email);
+        if (r.state === 'notfound' || r.state === 'error') {
           setStatus('error');
-          setMessage('해당 토큰에 매칭되는 구독자를 찾을 수 없습니다. 이미 처리된 링크이거나 잘못된 링크일 수 있습니다.');
+          setMessage(r.message);
           return;
         }
-        const sub = rows[0];
-        setEmail(sub.email);
-        if (sub.status === 'unsubscribed') {
-          setStatus('success');
-          setMessage('이미 구독이 취소되어 있습니다.');
-          return;
-        }
-        // status='unsubscribed' 처리
-        const upRes = await fetch(`${SUPABASE_URL}/rest/v1/apk_subscribers?id=eq.${sub.id}`, {
-          method: 'PATCH',
-          headers: { ...HEADERS, Prefer: 'return=minimal' },
-          body: JSON.stringify({ status: 'unsubscribed' }),
-        });
-        if (!upRes.ok) throw new Error('업데이트 실패');
         setStatus('success');
-        setMessage('구독이 취소되었습니다. 더 이상 메일을 받지 않습니다.');
+        setMessage(r.message);
       } catch (e) {
         setStatus('error');
         setMessage('처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');

@@ -1,6 +1,7 @@
 // 견적서 번호 기반 결제 페이지 — /order/pay/:quoteNumber
 // 1) 이메일 입력 폼 (deal_quotes.contact_email 매칭 = password 역할, privacy)
 // 2) 매칭 OK → 견적 요약 + Toss 카드 결제
+import { callPublicFn } from '@/lib/public/publicApi';
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Loader2, CheckCircle2, AlertTriangle, ArrowLeft, Mail, ShieldCheck } from 'lucide-react';
@@ -58,31 +59,17 @@ export default function OrderPay() {
     if (!quoteNumber) { setLoading(false); return; }
     (async () => {
       try {
-        const r = await fetch(
-          `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=eq.${encodeURIComponent(quoteNumber)}&select=quote_number,deal_id,contact_email,contact_phone,buyer_email,buyer_name,buyer_phone,org_name,plan,duration,qty,license_qty,items,unit_price,final_value,supply_price,tax_amount&limit=1`,
-          { headers: HEADERS },
-        );
-        const rows: (DealQuoteRow & { deal_id?: string })[] = r.ok ? await r.json() : [];
-        if (!Array.isArray(rows) || rows.length === 0) return;
-        const q = rows[0];
-        let email = q.contact_email || q.buyer_email || null;
-        let name = q.buyer_name || null;
-        let phone = q.contact_phone || q.buyer_phone || null;
-        // 견적행에 연락처가 비어있으면(주로 CRM 견적) 연결 딜에서 보강
-        if ((!email || !name || !phone) && q.deal_id) {
-          try {
-            const dr = await fetch(
-              `${SUPABASE_URL}/rest/v1/deals?id=eq.${encodeURIComponent(q.deal_id)}&select=contact_email,contact_name,contact_phone&limit=1`,
-              { headers: HEADERS },
-            );
-            const drows = dr.ok ? await dr.json() as { contact_email?: string; contact_name?: string; contact_phone?: string }[] : [];
-            if (drows[0]) {
-              email = email || drows[0].contact_email || null;
-              name = name || drows[0].contact_name || null;
-              phone = phone || drows[0].contact_phone || null;
-            }
-          } catch { /* ignore */ }
-        }
+        // 서버 함수 order-lookup-quote(pay) 경유 (HARD-B2b).
+        // 연락처 보강(딜 조회)도 서버가 한다 — 브라우저는 deals 를 직접 읽지 않는다.
+        const d = await callPublicFn<{ quote: (DealQuoteRow & { deal_id?: string; deal_contact?: {
+          contact_email?: string; contact_name?: string; contact_phone?: string } }) | null }>(
+          'order-lookup-quote', { mode: 'pay', quoteNumber });
+        const q = d.quote;
+        if (!q) return;
+        const dc = q.deal_contact ?? {};
+        const email = q.contact_email || q.buyer_email || dc.contact_email || null;
+        const name  = q.buyer_name    || dc.contact_name  || null;
+        const phone = q.contact_phone || q.buyer_phone    || dc.contact_phone || null;
         setQuote({ ...q, email, name, phone });
       } finally {
         setLoading(false);

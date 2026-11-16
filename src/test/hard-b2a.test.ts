@@ -98,19 +98,20 @@ describe('B2a (1) 관리자 전용 모듈이 로그인 토큰으로 나간다', 
 describe('B2a (2) 공개 경로는 그대로 공개 키를 쓴다', () => {
   it('src/lib/public 의 함수는 authedFetch 로 나가지 않는다', () => {
     const lead = code(read('src/lib/public/leadContact.ts'));
-    const apk = code(read('src/lib/public/apkPublic.ts'));
     // leadContact 는 코어를 공유하므로 authedFetch 를 import 하지만,
     // 공개 입구(publicUpsertLeadContact)는 transport 'public' 으로 고정돼야 한다
     expect(lead).toContain("upsertLeadContactCore(member, options, 'public')");
+    // HARD-B2b 에서 apkPublic 은 rest/v1 대신 서버 함수(apk-lookup)를 부른다.
+    const apk = code(read('src/lib/public/apkPublic.ts'));
     expect(apk).not.toContain('authedFetch');
-    expect(apk).toMatch(/Authorization:\s*`Bearer \$\{SUPABASE_KEY\}`/);
+    expect(apk).toContain('apk-lookup');
   });
 
   it('공개 화면이 공개 입구를 쓴다', () => {
     expect(code(read('src/pages/OrderTest.tsx')))
       .toContain("publicUpsertLeadContact as upsertLeadContact");
-    expect(code(read('src/pages/ApkInfo.tsx')))
-      .toContain("publicFindSubscriberByEmail as findSubscriberByEmail");
+    // HARD-B2b: /apk/info 는 서버 함수 입구(publicApkInfo)를 쓴다
+    expect(code(read('src/pages/ApkInfo.tsx'))).toContain('publicApkInfo');
   });
 
   it('공개 화면이 관리자용(토큰) 함수를 가져가지 않는다', () => {
@@ -120,12 +121,13 @@ describe('B2a (2) 공개 경로는 그대로 공개 키를 쓴다', () => {
     expect(info).not.toMatch(/import \{[^}]*\bfindSubscriberByEmail\b[^}]*\} from '@\/lib\/apk'/);
   });
 
-  it('공개 shop·apk 조회는 손대지 않았다 (공개 키 유지)', () => {
+  // HARD-B2b 에서 이 조회들이 서버 함수로 옮겨졌다 — B2a 시점의 "공개 키 유지"는 끝났다.
+  // 확인하는 사실을 바꾼다: 공개 조회가 **더 이상 rest/v1 을 직접 쓰지 않는다**.
+  it('공개 shop 조회가 서버 함수로 옮겨졌다 (B2b)', () => {
     const shop = read('src/lib/shop.ts');
     for (const s of ['getShopProducts', 'getShopProduct', 'validateShopCoupon', 'lookupMyOrders']) {
-      expect(hasAnonRest(symbolBody(shop, s)), s).toBe(true);
+      expect(hasAnonRest(symbolBody(shop, s)), s).toBe(false);
     }
-    expect(hasAnonRest(symbolBody(read('src/lib/apk.ts'), 'listDownloadsByEmail'))).toBe(true);
   });
 });
 

@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Loader2, Search, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { searchSchools, type SchoolInfo } from '@/lib/neis';
 import { submitCampaignLead } from '@/lib/campaignSubmit';
+import { callPublicFn } from '@/lib/public/publicApi';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -126,11 +127,13 @@ export default function CampaignForm() {
   // 1. 캠페인 로드
   useEffect(() => {
     if (!slug) { setNotFound(true); setLoading(false); return; }
-    fetch(`${SUPABASE_URL}/rest/v1/campaigns?slug=eq.${encodeURIComponent(slug)}&select=*`, { headers: HEADERS })
-      .then(r => r.ok ? r.json() : [])
-      .then((rows: Campaign[]) => {
-        if (rows.length === 0) setNotFound(true);
-        else setCampaign(rows[0]);
+    // 서버 함수 campaign-public-detail 경유 (HARD-B2b).
+    // 원본은 select=* 라 budget·actual_cost(내부 집행 비용)와 쿠폰·체험권 설정까지 내려왔다.
+    // 이제 서버가 폼을 그리는 데 필요한 8개 열만 돌려준다.
+    callPublicFn<{ campaign: Campaign | null }>('campaign-public-detail', { slug })
+      .then(d => {
+        if (!d.campaign) setNotFound(true);
+        else setCampaign(d.campaign);
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));

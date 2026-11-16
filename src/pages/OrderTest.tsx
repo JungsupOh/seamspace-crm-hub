@@ -1,3 +1,4 @@
+import { callPublicFn } from '@/lib/public/publicApi';
 import { useState, useRef, useEffect } from 'react';
 import { formatPhone } from '@/lib/utils';
 import { searchSchools, SchoolInfo } from '@/lib/neis';
@@ -641,175 +642,46 @@ export default function OrderTest() {
     const prefix = `${year}-${pCode}-`;
     setSavingQuote(true);
     try {
-      const seqRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=like.${encodeURIComponent(prefix + '%')}&select=quote_number&order=quote_number.desc&limit=1`,
-        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
-      );
-      const seqData: { quote_number: string }[] = await seqRes.json();
-      let seq = 1;
-      if (Array.isArray(seqData) && seqData.length > 0) {
-        const lastSeq = parseInt(seqData[0].quote_number.split('-')[2] ?? '0', 10);
-        if (!isNaN(lastSeq)) seq = lastSeq + 1;
-      }
-      const qNum = `${prefix}${String(seq).padStart(4, '0')}`;
-
+      // ①~⑤ 를 서버 함수 order-submit-quote 가 한다 (HARD-B2b).
+      //   견적번호 채번 · 같은 전화의 딜 조회(재구매/머지 판정) · 딜 PATCH/INSERT ·
+      //   기존 견적 is_selected=false · deal_quotes INSERT
+      // 브라우저는 deals·deal_quotes 를 더 이상 직접 쓰지 않는다.
       const planLabel = selectedProduct.code === '01' ? activePlan.label : selectedProduct.name;
-      const phoneNorm = info.phone.replace(/\D/g, '');
-      const restHeaders = {
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        apikey: SUPABASE_KEY,
-        'Content-Type': 'application/json',
-      };
-
-      // 1) 동일 phone의 기존 deal 전체 검색 (재구매 분류 + 머지 판정 동시)
-      // 클로즈 상태: 입금완료/이용권발송완료/딜취소/계약파기/Closed_Won/Contract
-      const CLOSED_STAGES = ['입금완료', '이용권 발송완료', '딜취소', '계약파기', 'Closed_Won', 'Contract'];
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-      let dealId: string = 'web';
-      let mergedIntoExisting = false;
-      // 총인원(학생수) — 미입력 시 null. quote_qty/qty 필드는 이 값으로 저장 (info.qty는 이용권 수 의미)
       const studentCount = info.students ? parseInt(info.students, 10) || null : null;
-      let dealType: 'New' | 'Renewal' = 'New';
-      try {
-        // 전체 기간의 동일 phone deal — 재구매(Renewal) 판정용
-        const allRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/deals?contact_phone=eq.${encodeURIComponent(info.phone)}&select=id,deal_stage,created_date,quote_number&order=created_date.desc&limit=20`,
-          { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
-        );
-        if (allRes.ok) {
-          const all = await allRes.json() as { id: string; deal_stage: string; created_date: string; quote_number: string }[];
-          // Renewal: 과거 클로즈된 deal이 1건 이상이면 재구매로 분류
-          if (all.some(d => CLOSED_STAGES.includes(d.deal_stage))) {
-            dealType = 'Renewal';
-          }
-          // Merge: 최근 30일 + 미클로즈 deal이 있으면 거기에 머지
-          const open = all.find(d => !CLOSED_STAGES.includes(d.deal_stage) && d.created_date >= thirtyDaysAgo);
-          if (open) {
-            dealId = open.id;
-            mergedIntoExisting = true;
-            setSavedDealId(dealId);
-            console.log(`[saveWebQuote] 기존 오픈 딜 머지: deal_id=${dealId} (created ${open.created_date}, quote ${open.quote_number})`);
-            // 기존 딜의 surface 정보를 가장 최근 견적으로 갱신
-            await fetch(`${SUPABASE_URL}/rest/v1/deals?id=eq.${dealId}`, {
-              method: 'PATCH',
-              headers: { ...restHeaders, Prefer: 'return=minimal' },
-              body: JSON.stringify({
-                quote_date:          today,
-                quote_qty:           studentCount,
-                license_code_count:  info.qty,
-                quote_plan:          planLabel,
-                quote_number:        qNum,     // 가장 최근 견적번호
-                license_duration:    selectedProduct.code === '01' ? info.months : null,
-                unit_price:          selectedProduct.code === '01' ? unitPrice : null,
-                supply_price:        selectedProduct.code === '01' ? supply : null,
-                tax_amount:          selectedProduct.code === '01' ? tax : null,
-                final_contract_value: selectedProduct.code === '01' ? total : null,
-              }),
-            }).catch(() => {});
-          }
-        }
-      } catch (e) {
-        console.warn('[saveWebQuote] 기존 딜 검색 예외', e);
-      }
-
-      // 2) 신규 딜이면 INSERT — deal_type은 위에서 판정 (New / Renewal)
-      if (!mergedIntoExisting) try {
-        const dealRes = await fetch(`${SUPABASE_URL}/rest/v1/deals`, {
-          method: 'POST',
-          headers: { ...restHeaders, Prefer: 'return=representation' },
-          body: JSON.stringify({
-            deal_name:           `심스페이스-${selectedProduct.name} - ${info.orgName}`,
-            deal_stage:          '견적',
-            deal_type:           dealType,
-            contact_name:        info.contactName,
-            contact_phone:       info.phone,
-            contact_email:       info.email.trim() || null,
-            org_name:            info.orgName,
-            quote_date:          today,
-            quote_qty:           studentCount,                 // 총인원(학생수) — 미입력 시 null
-            license_code_count:  info.qty,                     // 이용권 수
-            quote_plan:          planLabel,
-            quote_number:        qNum,
-            license_duration:    selectedProduct.code === '01' ? info.months : null,
-            unit_price:          selectedProduct.code === '01' ? unitPrice : null,
-            supply_price:        selectedProduct.code === '01' ? supply : null,
-            tax_amount:          selectedProduct.code === '01' ? tax : null,
-            final_contract_value: selectedProduct.code === '01' ? total : null,
-            lead_source:         'Web',
-            order_date:          today,
-            created_date:        today,
-            notes:               `[웹주문] ${info.contactName} (${info.phone})${info.students ? ` 학생 ${info.students}명` : ''}`,
-          }),
-        });
-        if (dealRes.ok) {
-          const inserted = await dealRes.json();
-          if (Array.isArray(inserted) && inserted[0]?.id) {
-            dealId = inserted[0].id;
-            setSavedDealId(dealId);
-          }
-        } else {
-          console.warn('[saveWebQuote] deals INSERT 실패 — deal_quotes만 저장됨', dealRes.status);
-        }
-      } catch (e) {
-        console.warn('[saveWebQuote] deals INSERT 예외', e);
-      }
-
-      // 머지된 딜이면 기존 quote들의 is_selected=false 처리 (가장 최근 quote를 active로)
-      if (mergedIntoExisting && dealId !== 'web') {
-        await fetch(`${SUPABASE_URL}/rest/v1/deal_quotes?deal_id=eq.${dealId}&is_selected=is.true`, {
-          method: 'PATCH',
-          headers: { ...restHeaders, Prefer: 'return=minimal' },
-          body: JSON.stringify({ is_selected: false }),
-        }).catch(() => {});
-      }
-
-      // 3) deal_quotes INSERT — deals.id 연결 (머지든 신규든 항상 새 행 INSERT)
-      // 중요: items JSONB와 license_qty를 명시적으로 저장 — 딜편집 다이얼로그가 재구성 로직에
-      // 의존하지 않도록 (재구성은 qty/40 나누기로 학생수 오해석 위험)
-      // s2b_number: 견적서 PDF에 학교장터 물품번호를 노출하기 위해 명시적으로 채움 (이전 빈 문자열로 저장돼 PDF 누락 회귀)
-      // 표준기간으로 분해된 물품별 라인(각 S2B 물품번호 포함) — 딜추가와 동일하게 견적서에 분리 표시
       const webItems = selectedProduct.code === '01'
         ? buildQuoteItems(info.planId, planLabel, info.months, info.qty)
         : [];
-      const saveRes = await fetch(`${SUPABASE_URL}/rest/v1/deal_quotes`, {
-        method: 'POST',
-        headers: { ...restHeaders, Prefer: 'return=representation' },  // 생성된 id 회수 (PDF 첨부 slot_key용)
-        body: JSON.stringify({
-          deal_id: dealId,
-          quote_number: qNum,
-          plan: planLabel,
-          qty: studentCount,                                 // 총인원(학생수) — 다이얼로그 "총인원" 필드
-          license_qty: info.qty,                             // 명시적 라이선스 수 (재구성 폴백 차단)
-          items: webItems,                                   // 명시적 라인 아이템 (dialog 표시 정확)
-          duration: selectedProduct.code === '01' ? info.months : undefined,
-          unit_price: selectedProduct.code === '01' ? unitPrice : undefined,
-          supply_price: selectedProduct.code === '01' ? supply : undefined,
-          tax_amount: selectedProduct.code === '01' ? tax : undefined,
-          final_value: selectedProduct.code === '01' ? total : undefined,
-          contact_phone: phoneNorm,
-          quote_date: today,
-          is_selected: true,
-          notes: `[웹주문] 상품: 심스페이스-${selectedProduct.name} / 기관: ${info.orgName} / 담당자: ${info.contactName} / 연락처: ${info.phone} / 이메일: ${info.email}${info.students ? ` / 학생수: ${info.students}명` : ''}`,
-          // 웹 주문 필드
-          source: 'web',
-          buyer_phone: info.phone,
-          buyer_phone_normalized: phoneNorm,
-          buyer_name: info.contactName,
-          buyer_email: info.email.trim() || null,
-          org_name: info.orgName,
-          order_status: '견적',
-          student_count: info.students ? parseInt(info.students) || null : null,
-        }),
-      });
-      if (saveRes.ok || saveRes.status === 201) {
-        setSavedQuoteNum(qNum);
-        // 생성된 deal_quote.id 회수 (PDF 첨부의 slot_key='quote_file_{id}'에 사용 — 딜편집 다이얼로그 호환)
-        let createdQuoteId: string | null = null;
-        try {
-          const rows = await saveRes.clone().json().catch(() => []);
-          if (Array.isArray(rows) && rows[0]?.id) createdQuoteId = rows[0].id as string;
-        } catch { /* ignore */ }
 
+      const submitted = await callPublicFn<{
+        ok?: boolean; quoteNumber?: string; dealId?: string; quoteId?: string | null;
+        merged?: boolean; dealType?: string; error?: string;
+      }>('order-submit-quote', {
+        productCode:   selectedProduct.code,
+        productName:   selectedProduct.name,
+        planLabel,
+        orgName:       info.orgName,
+        contactName:   info.contactName,
+        phone:         info.phone,
+        email:         info.email.trim(),
+        students:      studentCount,
+        qty:           info.qty,
+        months:        info.months,
+        unitPrice,
+        supply,
+        tax,
+        total,
+        items:         webItems,
+        notesStudents: info.students ?? '',
+      });
+
+      const qNum = submitted.quoteNumber ?? '';
+      const dealId = submitted.dealId ?? 'web';
+      const createdQuoteId = submitted.quoteId ?? null;
+      const mergedIntoExisting = !!submitted.merged;
+      if (dealId !== 'web') setSavedDealId(dealId);
+
+      if (submitted.ok && qNum) {
+        setSavedQuoteNum(qNum);
         // 3-b) PDF 견적서 자동 생성 + deal_files 첨부 (이메일 발송과 무관하게 항상 첨부)
         // 이렇게 해두면 사용자가 '이메일로 견적서 받기'를 안 눌러도 딜관리에서 PDF 확인 가능.
         if (dealId && dealId !== 'web' && selectedProduct.code === '01') {
@@ -836,26 +708,20 @@ export default function OrderTest() {
                 // slot_key는 딜편집 다이얼로그가 인식하는 'quote_file_{deal_quote_id}' 형식
                 // (deal_quote_id가 없으면 폴백으로 quote_{qNum} 사용 — initStoredFiles의 legacy 매핑 처리)
                 const slotKey = createdQuoteId ? `quote_file_${createdQuoteId}` : `quote_${qNum}`;
-                // 멱등성: 동일 (deal_id, slot_key)로 이미 첨부된 row 있으면 skip
-                // (saveWebQuote 더블 호출 또는 sendQuoteEmail과의 중복 방지)
-                const existCheck = await fetch(
-                  `${SUPABASE_URL}/rest/v1/deal_files?deal_id=eq.${dealId}&slot_key=eq.${encodeURIComponent(slotKey)}&select=id&limit=1`,
-                  { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } },
-                );
-                const exists = existCheck.ok ? ((await existCheck.json() as { id: string }[]).length > 0) : false;
-                if (exists) {
-                  console.log(`[saveWebQuote] PDF 이미 첨부됨 (skip): deal=${dealId}, slot=${slotKey}`);
-                  return;
-                }
-                const { uploadDealFile, saveDealFileRecord } = await import('@/lib/storage');
+                // 첨부 등록은 서버 함수가 한다 (HARD-B2b).
+                // 멱등(같은 deal_id + slot_key 는 건너뜀)도 서버가 판정한다.
+                // PDF 생성과 Storage 업로드는 브라우저에 남는다 — html2canvas·jsPDF 가
+                // DOM 을 쓰므로 Deno 로 옮길 수 없다(021-4 §B-1). 버킷 전환은 021-8e.
+                const { uploadDealFile } = await import('@/lib/storage');
                 const file = new File([blob], fileName, { type: 'application/pdf' });
                 const uploaded = await uploadDealFile(dealId, file);
-                await saveDealFileRecord({
-                  deal_id:   dealId,
-                  slot_key:  slotKey,
-                  label:     `견적서 ${qNum}`,
-                  file_name: uploaded.name,
-                  file_url:  uploaded.url,
+                await callPublicFn('order-submit-quote', {
+                  action:   'attach',
+                  dealId,
+                  slotKey,
+                  label:    `견적서 ${qNum}`,
+                  fileName: uploaded.name,
+                  fileUrl:  uploaded.url,
                 });
                 console.log(`[saveWebQuote] PDF 자동 첨부 완료: deal=${dealId}, quote=${qNum}`);
               }
@@ -1070,28 +936,14 @@ export default function OrderTest() {
         return;
       }
 
-      // 1차: Supabase deal_quotes 조회
-      const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/deal_quotes?quote_number=eq.${encodeURIComponent(num)}&select=*`,
-        { headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY } }
-      );
-      const data: QuoteRecord[] = await res.json();
-
-      if (Array.isArray(data) && data.length > 0) {
-        const record = data[0];
-        // 이메일/전화번호 중 하나가 맞으면 통과
-        const storedEmail = normalizeEmail(record.contact_email ?? (record as any).buyer_email ?? '');
-        const storedPhone = normalizePhone(record.contact_phone ?? (record as any).buyer_phone_normalized ?? '');
-        const emailOk = entEmail && storedEmail && storedEmail === entEmail;
-        const phoneOk = entPhone && storedPhone && storedPhone === entPhone;
-        const hasStoredContact = !!(storedEmail || storedPhone);
-        if (hasStoredContact && !emailOk && !phoneOk) {
-          setError('이메일 또는 휴대폰 번호가 일치하지 않습니다.');
-          return;
-        }
-        onSuccess(record);
-        return;
-      }
+      // 서버 함수 order-lookup-quote(verify) 경유 (HARD-B2b).
+      // 원본은 행을 먼저 받아 온 뒤 브라우저에서 이메일·전화를 비교했다 —
+      // 번호만 알면 30개 열이 그대로 내려갔다. 이제 서버가 먼저 대조하고 통과한 것만 준다.
+      // 화면이 요구하는 입력(번호 + 이메일/전화)은 그대로다.
+      const looked = await callPublicFn<{ quote?: QuoteRecord; error?: string }>(
+        'order-lookup-quote', { mode: 'verify', quoteNumber: num, email: entEmail, phone: entPhone });
+      if (looked.quote) { onSuccess(looked.quote); return; }
+      if (looked.error) { setError(looked.error); return; }
 
       setError('견적서를 찾을 수 없습니다. 번호를 다시 확인해 주세요.');
     } catch {

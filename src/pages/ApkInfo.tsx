@@ -7,9 +7,9 @@ import { Loader2, Search, AlertCircle, Smartphone, CheckCircle2 } from 'lucide-r
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-// 공개 /apk/info — 로그인하지 않은 방문자. 공개 키 경로를 명시적으로 쓴다 (HARD-B2a).
-import { listDownloadsByEmail, type ApkSubscriber, type ApkDownload } from '@/lib/apk';
-import { publicFindSubscriberByEmail as findSubscriberByEmail } from '@/lib/public/apkPublic';
+// 공개 /apk/info — 서버 함수 apk-lookup 경유 (HARD-B2b). rest/v1 직접 호출 0건.
+import type { ApkSubscriber, ApkDownload } from '@/lib/apk';
+import { publicApkInfo } from '@/lib/public/apkPublic';
 
 export default function ApkInfo() {
   const [email, setEmail] = useState('');
@@ -27,14 +27,10 @@ export default function ApkInfo() {
     setSearching(true);
     setSearched(false);
     try {
-      const sub = await findSubscriberByEmail(email.trim());
+      // 서버 함수가 구독 정보와 내려받기 이력을 한 번에 돌려준다 (HARD-B2b).
+      const { subscriber: sub, downloads: dls } = await publicApkInfo(email.trim());
       setSubscriber(sub);
-      if (sub) {
-        const dls = await listDownloadsByEmail(email.trim());
-        setDownloads(dls);
-      } else {
-        setDownloads([]);
-      }
+      setDownloads(sub ? dls : []);
       setSearched(true);
     } catch {
       setError('조회 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');

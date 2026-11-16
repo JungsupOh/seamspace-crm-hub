@@ -1,5 +1,7 @@
 // ── 실물 상품 주문 시스템 ────────────────────────────
 
+import { callPublicFn } from '@/lib/public/publicApi';
+
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const HEADERS = { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
@@ -89,17 +91,19 @@ export interface ShopOrderItem {
 }
 
 // ── 상품 API ──────────────────────────────────────
+// 서버 함수 shop-catalog 경유 (HARD-B2b) — 브라우저가 shop_products 를 직접 읽지 않는다.
 export async function getShopProducts(): Promise<ShopProduct[]> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/shop_products?active=eq.true&order=sort_order.asc`, { headers: HEADERS });
-  if (!r.ok) return [];
-  return r.json();
+  try {
+    const d = await callPublicFn<{ products?: ShopProduct[] }>('shop-catalog', {});
+    return Array.isArray(d.products) ? d.products : [];
+  } catch { return []; }
 }
 
 export async function getShopProduct(id: string): Promise<ShopProduct | null> {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/shop_products?id=eq.${id}&limit=1`, { headers: HEADERS });
-  if (!r.ok) return null;
-  const rows: ShopProduct[] = await r.json();
-  return rows[0] ?? null;
+  try {
+    const d = await callPublicFn<{ products?: ShopProduct[] }>('shop-catalog', { id });
+    return d.products?.[0] ?? null;
+  } catch { return null; }
 }
 
 // ── 장바구니 (localStorage) ───────────────────────
@@ -230,62 +234,25 @@ export interface CouponValidation {
 // - 카트의 product_id가 모두 applicable에 포함: 정상 할인
 // - 일부만 일치: applicable 상품 합계에만 할인 적용
 // - 하나도 일치 X: 거부
+// 서버 함수 shop-validate-coupon 경유 (HARD-B2b).
+// 원본은 쿠폰 행을 통째로 받아 브라우저에서 계산했다 — 할인율·최소주문·적용상품이 다 내려갔고
+// 코드를 바꿔 가며 쿠폰을 쓸어볼 수도 있었다. 이제 서버가 계산해 결과만 준다.
+// 반환 모양(CouponValidation)과 문구는 그대로다.
 export async function validateShopCoupon(
   code: string,
   subtotal: number,
   cartItems?: Array<{ productId: string; unitPrice: number; qty: number }>,
 ): Promise<CouponValidation> {
   if (!code.trim()) return { valid: false, discount: 0, error: '쿠폰 코드를 입력해주세요.' };
-
-  const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/shop_coupons?code=eq.${encodeURIComponent(code.trim().toUpperCase())}&active=eq.true&limit=1`,
-    { headers: HEADERS }
-  );
-  if (!r.ok) return { valid: false, discount: 0, error: '쿠폰 조회 실패' };
-  const rows: ShopCoupon[] = await r.json();
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return { valid: false, discount: 0, error: '유효하지 않은 쿠폰 코드입니다.' };
+  try {
+    return await callPublicFn<CouponValidation>('shop-validate-coupon', {
+      code: code.trim(),
+      subtotal,
+      ...(cartItems ? { cartItems } : {}),
+    });
+  } catch {
+    return { valid: false, discount: 0, error: '쿠폰 조회 실패' };
   }
-
-  const coupon = rows[0];
-
-  if (coupon.is_used) {
-    return { valid: false, discount: 0, error: '이미 사용된 쿠폰입니다.' };
-  }
-  if (new Date(coupon.expires_at) < new Date()) {
-    return { valid: false, discount: 0, error: '만료된 쿠폰입니다.' };
-  }
-
-  // 적용 가능 상품 — 일치하는 상품의 합계만 할인 대상
-  const applicable = coupon.applicable_products && coupon.applicable_products.length > 0
-    ? coupon.applicable_products
-    : null;
-  let applicableSubtotal = subtotal;
-  let applicableLabel: string | undefined;
-  if (applicable && cartItems && cartItems.length > 0) {
-    const matched = cartItems.filter(it => applicable.includes(it.productId));
-    if (matched.length === 0) {
-      const labels: Record<string, string> = { boardgame: '보드게임', keyring: '키링', minddiary: 'AI마음일기' };
-      const names = applicable.map(p => labels[p] ?? p).join(', ');
-      return { valid: false, discount: 0, error: `이 쿠폰은 ${names}에만 사용 가능합니다.` };
-    }
-    applicableSubtotal = matched.reduce((s, it) => s + it.unitPrice * it.qty, 0);
-    applicableLabel = matched.length === cartItems.length ? undefined : '일부 상품에만 적용';
-  }
-
-  if (applicableSubtotal < coupon.min_order) {
-    return { valid: false, discount: 0, error: `${coupon.min_order.toLocaleString()}원 이상 주문 시 사용 가능합니다.` };
-  }
-
-  let discount = 0;
-  if (coupon.discount_type === 'amount') {
-    discount = coupon.discount_value;
-  } else {
-    discount = Math.round(applicableSubtotal * coupon.discount_value / 100);
-  }
-  discount = Math.min(discount, applicableSubtotal);
-
-  return { valid: true, discount, couponName: coupon.batch_name, applicableLabel };
 }
 
 // 쿠폰 사용 처리 (Supabase RPC — 주문ID + 전화번호 기록)
@@ -338,28 +305,14 @@ export async function createCouponBatch(params: {
 }
 
 // 고객용: 이름+전화번호로 최근 1개월 주문 목록 조회
+// 서버 함수 shop-lookup-orders 경유 (HARD-B2b).
+// 조건(이름 + 휴대폰 일치, 최근 30일)은 그대로. 결제 내부값(payment_key 등)은 서버가 뺀다.
 export async function lookupMyOrders(name: string, phone: string): Promise<{ order: ShopOrder; items: ShopOrderItem[] }[]> {
-  const phoneNorm = phone.replace(/\D/g, '');
-  const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const orderRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/shop_orders?customer_name=eq.${encodeURIComponent(name)}&customer_phone=eq.${phoneNorm}&created_at=gte.${encodeURIComponent(oneMonthAgo)}&order=created_at.desc`,
-    { headers: HEADERS }
-  );
-  if (!orderRes.ok) return [];
-  const orders: ShopOrder[] = await orderRes.json();
-  if (!Array.isArray(orders) || orders.length === 0) return [];
-
-  const orderIds = orders.map(o => o.order_id);
-  const itemsRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/shop_order_items?order_id=in.(${orderIds.map(id => `"${id}"`).join(',')})`,
-    { headers: HEADERS }
-  );
-  const allItems: ShopOrderItem[] = itemsRes.ok ? await itemsRes.json() : [];
-
-  return orders.map(o => ({
-    order: o,
-    items: Array.isArray(allItems) ? allItems.filter(i => i.order_id === o.order_id) : [],
-  }));
+  try {
+    const d = await callPublicFn<{ orders?: { order: ShopOrder; items: ShopOrderItem[] }[] }>(
+      'shop-lookup-orders', { name, phone });
+    return Array.isArray(d.orders) ? d.orders : [];
+  } catch { return []; }
 }
 
 // 관리자용: 전체 주문 조회

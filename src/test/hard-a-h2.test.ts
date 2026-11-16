@@ -161,9 +161,12 @@ describe('H-2 (1) CampaignForm 이 직접 쓰기를 하지 않는다', () => {
     }
   });
 
-  it('남은 rest/v1 접근은 캠페인 조회 1건뿐이다 (폼을 그리려면 필요)', () => {
+  // HARD-B2b 에서 캠페인 조회마저 서버 함수(campaign-public-detail)로 옮겼다.
+  // 이제 CampaignForm 에 rest/v1 직접 호출이 **하나도 없다** — 더 엄격해진 것이다.
+  it('rest/v1 직접 접근이 0건이다 (캠페인 조회도 서버 함수 경유)', () => {
     const tables = [...C.matchAll(/rest\/v1\/([a-zA-Z_]+)/g)].map(m => m[1]);
-    expect(tables).toEqual(['campaigns']);
+    expect(tables).toEqual([]);
+    expect(C).toContain('campaign-public-detail');
   });
 
   it('화면 검증 문구는 그대로다 (서버가 다시 검증하지만 UX 는 불변)', () => {
