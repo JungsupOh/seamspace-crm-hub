@@ -3,12 +3,14 @@
 
 import { generateQuotePdfBlob } from '@/lib/generateQuotePdf';
 import { LS_UNIT_PRICE, LS_DURATION_MONTHS } from '@/lib/luckySeven';
+import { authedFetch } from '@/lib/authedFetch';
 import type { LSPaymentGroupRow, LSLeadRow, LSGroupRow } from '@/lib/luckySeven';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const APP_URL = window.location.origin;
 
+// Storage 업로드용 — Storage 직접 접근 전환은 021-8e(HARD-B) 담당이라 여기만 공개 키를 둔다.
 const HEADERS_FILE = {
   Authorization: `Bearer ${SUPABASE_KEY}`,
   apikey: SUPABASE_KEY,
@@ -177,12 +179,13 @@ export async function issueQuoteForPaymentGroup(params: {
 
     const subject = `(테바소프트) 심스페이스 럭키세븐 견적서_${group.group_code}_${paymentGroup.payer_name}`;
 
-    const emailRes = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+    // 관리자 다이얼로그(LuckySevenGroupDialog)에서만 호출된다 — 공개 럭키세븐 폼은
+    // 라우트에서 분리됐다(HARD-A H-1). 그래서 로그인 토큰 경로로 보낸다 (H-3).
+    const emailRes = await authedFetch(`${SUPABASE_URL}/functions/v1/send-email-authed`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
       },
       body: JSON.stringify({
         to: paymentGroup.payer_email,
@@ -202,12 +205,11 @@ export async function issueQuoteForPaymentGroup(params: {
   // 4) payment_groups 업데이트
   // skipEmail=true 면 PDF URL만 갱신, 이메일/status는 그대로 (단순 재생성)
   // skipEmail=false 면 email_sent_at + status='견적발송'까지 갱신
-  await fetch(`${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?id=eq.${paymentGroup.id}`, {
+  await authedFetch(`${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?id=eq.${paymentGroup.id}`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
       apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
       Prefer: 'return=minimal',
     },
     body: JSON.stringify(

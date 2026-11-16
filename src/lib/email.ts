@@ -3,6 +3,7 @@
 // supabase/functions/send-email/index.ts 를 배포해야 함
 
 import { guideBlockHtml, guideBlockText, guideLang, fetchGuideAttachments } from '@/lib/quickGuide';
+import { authedFetch } from '@/lib/authedFetch';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -24,6 +25,22 @@ function trialCc(ccSales: boolean | undefined, extra: string | undefined): strin
   return more ? [more] : null;
 }
 
+/**
+ * 메일 발송 경로 (HARD-A H-3).
+ *
+ *  'authed' — 로그인 세션 토큰으로 `send-email-authed` 를 부른다. **기본값.**
+ *             그 함수가 호출자 역할(admin·sub_admin·partner_admin)을 확인한 뒤
+ *             내부에서 send-email 로 넘긴다.
+ *  'public' — 공개 키로 `send-email` 을 직접 부른다. 로그인하지 않은 방문자가
+ *             쓰는 경로만 이 값을 **명시적으로** 지정한다. 지금 남은 곳은
+ *             공개 /order(OrderTest.tsx) 가 쓰는 sendQuoteEmail 하나뿐이고,
+ *             그건 021-8d(HARD-B) 에서 서버 함수로 옮긴 뒤 이 옵션을 지운다.
+ *
+ * 세션 유무로 자동 판단하지 **않는다**. 그건 조용한 폴백이라, 토큰이 없을 때
+ * 아무 말 없이 공개 경로로 새는 길을 만든다(lib/authedFetch.ts 와 같은 규칙).
+ */
+export type MailTransport = 'authed' | 'public';
+
 async function sendEmail(
   to: string,
   subject: string,
@@ -33,6 +50,7 @@ async function sendEmail(
     reply_to?: string;
     cc?: string | string[] | null;
     attachments?: Array<{ filename: string; content: string }>;
+    transport?: MailTransport;
   }
 ): Promise<void> {
   const cc = options?.cc === undefined ? DEFAULT_CC : options.cc;
@@ -40,17 +58,26 @@ async function sendEmail(
   if (options?.text) body.text = options.text;
   if (options?.reply_to) body.reply_to = options.reply_to;
   if (options?.attachments) body.attachments = options.attachments;
+  // cc 처리는 그대로 — 여기서 빈 값을 넣지 않는 것이 send-email 의
+  // RESEND_DEFAULT_CC 폴백을 살리는 조건이다(CRM-002 cc_sales 토글).
   if (cc) body.cc = cc;
 
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const transport = options?.transport ?? 'authed';
+  const res = transport === 'authed'
+    ? await authedFetch(`${SUPABASE_URL}/functions/v1/send-email-authed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY },
+        body: JSON.stringify(body),
+      })
+    : await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify(body),
+      });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -261,6 +288,13 @@ export async function sendQuoteEmail(params: {
   attachmentBase64?: string;
   attachmentFileName?: string;
   attachments?: Array<{ base64: string; fileName: string }>;
+  /**
+   * ⚠️ 이 함수만 기본값이 'public' 이다 — 공개 /order(OrderTest.tsx:941,953)가
+   * 로그인 없이 부르기 때문이다. 관리자 호출부(Deals.tsx, luckySevenEmail.ts)는
+   * 'authed' 를 명시한다. 021-8d(HARD-B)에서 /order 를 서버 함수로 옮기면
+   * 이 옵션을 지우고 기본값을 'authed' 로 되돌린다.
+   */
+  transport?: MailTransport;
 }): Promise<void> {
   const payHref = params.paymentUrl || `${APP_URL}/order`;
   const html = layout(`
@@ -306,6 +340,7 @@ export async function sendQuoteEmail(params: {
     `(테바소프트) 심스페이스(seamspace)_견적서 송부드립니다._ ${params.orgName}`,
     html,
     {
+      transport: params.transport ?? 'public',
       reply_to: 'sales@tebahsoft.com',
       attachments: params.attachments
         ? params.attachments.map(a => ({ filename: a.fileName, content: a.base64 }))

@@ -14,6 +14,19 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+// HARD-A H-3 으로 email.ts 가 send-email-authed 를 **로그인 세션 토큰**으로 부른다.
+// 그래서 세션을 가진 상태를 만들어 준다 — 운영과 같은 경로를 그대로 검증하려는 것이다.
+// (세션이 없으면 authedFetch 가 오류를 던진다. 그 동작은 authed-fetch.test.ts 가 증명한다.)
+const FAKE_ACCESS_TOKEN = 'fake.session.token';
+vi.mock('@/lib/supabase', () => ({
+  supabase: {
+    auth: {
+      getSession: async () => ({ data: { session: { access_token: FAKE_ACCESS_TOKEN } } }),
+      refreshSession: async () => ({ data: { session: { access_token: FAKE_ACCESS_TOKEN } }, error: null }),
+    },
+  },
+}));
+
 import {
   QUICK_GUIDE_FILES, TUTORIAL_URL, guideLang, guideFileUrl,
   guideBlockHtml, guideBlockText, fetchGuideAttachments,
@@ -33,13 +46,13 @@ const LANGS: GuideLang[] = ['ko', 'ja', 'en'];
 const RESEND_LIMIT = 40 * 1024 * 1024;
 
 // ── fetch 가짜: /docs/... 는 public 에서, send-email 은 본문을 붙잡아 둔다 ──
-type Sent = { url: string; body: Record<string, unknown> };
+type Sent = { url: string; body: Record<string, unknown>; headers?: Record<string, string> };
 function installFetch(opts: { spaFallback?: boolean; missing?: string } = {}) {
   const sent: Sent[] = [];
-  vi.stubGlobal('fetch', vi.fn(async (input: string, init?: { body?: string }) => {
+  vi.stubGlobal('fetch', vi.fn(async (input: string, init?: { body?: string; headers?: Record<string, string> }) => {
     const url = String(input);
     if (url.includes('/functions/v1/send-email')) {
-      sent.push({ url, body: JSON.parse(init!.body!) });
+      sent.push({ url, body: JSON.parse(init!.body!), headers: init?.headers });
       return { ok: true, status: 200, json: async () => ({ id: 'test' }) };
     }
     const path = decodeURIComponent(url.replace(SERVER_BASE, ''));
@@ -67,6 +80,24 @@ const TRIAL = {
 describe('① 헬퍼 두 벌이 같다', () => {
   it('src/lib/quickGuide.ts 와 campaign-submit-lead/quick-guide.ts 가 바이트 단위로 같다', () => {
     expect(read('supabase/functions/campaign-submit-lead/quick-guide.ts')).toBe(read('src/lib/quickGuide.ts'));
+  });
+});
+
+describe('②-b 메일이 로그인 토큰으로 나간다 (HARD-A H-3)', () => {
+  it('send-email-authed 로 가고 Authorization 이 세션 토큰이다', async () => {
+    const sent = installFetch();
+    await sendTrialLicenseEmailEN({ ...TRIAL });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toContain('/functions/v1/send-email-authed');
+    expect(sent[0].headers?.Authorization).toBe(`Bearer ${FAKE_ACCESS_TOKEN}`);
+    // apikey 에는 공개 키가 그대로 (정상 — 프로젝트 식별용)
+    expect(sent[0].headers?.apikey).toBeDefined();
+  });
+
+  it('공개 키를 Authorization 에 넣지 않는다', async () => {
+    const sent = installFetch();
+    await sendTrialLicenseEmailJP({ ...TRIAL });
+    expect(sent[0].headers?.Authorization).not.toBe(`Bearer ${sent[0].headers?.apikey}`);
   });
 });
 

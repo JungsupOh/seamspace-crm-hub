@@ -1496,6 +1496,8 @@ function DealForm({
       await upsertActiveTabQuote();
 
       await sendQuoteEmail({
+        // 관리자 화면이므로 로그인 토큰으로 보낸다 (HARD-A H-3).
+        transport: 'authed',
         to: contactEmail,
         orgName: n('Org_Name'),
         contactName: n('Contact_Name'),
@@ -1557,6 +1559,8 @@ function DealForm({
       await upsertActiveTabQuote();
 
       await sendQuoteEmail({
+        // 관리자 화면이므로 로그인 토큰으로 보낸다 (HARD-A H-3).
+        transport: 'authed',
         to: contactEmail,
         orgName: n('Org_Name'),
         contactName: n('Contact_Name'),
@@ -2658,6 +2662,8 @@ function QuoteDialog({
       const quoteNumber = n('quote_number');
       const paymentUrl = quoteNumber ? `${window.location.origin}/order/pay/${encodeURIComponent(quoteNumber)}` : undefined;
       await sendQuoteEmail({
+        // 관리자 화면이므로 로그인 토큰으로 보낸다 (HARD-A H-3).
+        transport: 'authed',
         to: contactEmail,
         orgName,
         contactName,
