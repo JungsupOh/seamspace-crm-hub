@@ -1,12 +1,21 @@
 // Supabase Storage — deal-files 버킷
 // Supabase Dashboard > Storage > New bucket: "deal-files" (Public) 생성 필요
 
+import { authedFetch } from '@/lib/authedFetch';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 const BUCKET = 'deal-files';
 
+// 공개 경로(/order 의 첨부 저장)와 아직 호출자가 없는 함수가 쓰는 헤더.
+// HARD-B2b 에서 /order 를 서버 함수로 옮기면 이 상수도 사라진다.
 const DB_HEADERS = {
   Authorization: `Bearer ${SUPABASE_KEY}`,
+  apikey: SUPABASE_KEY,
+  'Content-Type': 'application/json',
+};
+
+// 관리자 화면 전용 — Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (HARD-B2a).
+const ADMIN_DB_HEADERS = {
   apikey: SUPABASE_KEY,
   'Content-Type': 'application/json',
 };
@@ -64,9 +73,9 @@ const DB_URL = `${SUPABASE_URL}/rest/v1/deal_files`;
 export async function saveDealFileRecord(
   record: Omit<DealFileRecord, 'id' | 'uploaded_at'>
 ): Promise<DealFileRecord> {
-  const res = await fetch(DB_URL, {
+  const res = await authedFetch(DB_URL, {
     method: 'POST',
-    headers: { ...DB_HEADERS, Prefer: 'return=representation' },
+    headers: { ...ADMIN_DB_HEADERS, Prefer: 'return=representation' },
     body: JSON.stringify(record),
   });
   if (!res.ok) {
@@ -78,18 +87,18 @@ export async function saveDealFileRecord(
 }
 
 export async function getDealFiles(dealId: string): Promise<DealFileRecord[]> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${DB_URL}?deal_id=eq.${encodeURIComponent(dealId)}&order=uploaded_at.asc`,
-    { headers: DB_HEADERS }
+    { headers: ADMIN_DB_HEADERS }
   );
   if (!res.ok) throw new Error(`파일 목록 조회 실패: ${res.status}`);
   return res.json();
 }
 
 export async function deleteDealFileRecord(id: string): Promise<void> {
-  const res = await fetch(`${DB_URL}?id=eq.${id}`, {
+  const res = await authedFetch(`${DB_URL}?id=eq.${id}`, {
     method: 'DELETE',
-    headers: DB_HEADERS,
+    headers: ADMIN_DB_HEADERS,
   });
   if (!res.ok) throw new Error(`파일 삭제 실패: ${res.status}`);
 }
@@ -126,9 +135,9 @@ export async function saveDealLicenses(
   records: Omit<DealLicenseRecord, 'id' | 'created_at'>[]
 ): Promise<DealLicenseRecord[]> {
   if (records.length === 0) return [];
-  const res = await fetch(LICENSE_URL, {
+  const res = await authedFetch(LICENSE_URL, {
     method: 'POST',
-    headers: { ...DB_HEADERS, Prefer: 'return=representation' },
+    headers: { ...ADMIN_DB_HEADERS, Prefer: 'return=representation' },
     body: JSON.stringify(records),
   });
   if (!res.ok) {
@@ -139,9 +148,9 @@ export async function saveDealLicenses(
 }
 
 export async function getDealLicenses(dealId: string): Promise<DealLicenseRecord[]> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${LICENSE_URL}?deal_id=eq.${encodeURIComponent(dealId)}&order=created_at.asc`,
-    { headers: DB_HEADERS }
+    { headers: ADMIN_DB_HEADERS }
   );
   if (!res.ok) throw new Error(`이용권 목록 조회 실패: ${res.status}`);
   return res.json();
@@ -149,8 +158,8 @@ export async function getDealLicenses(dealId: string): Promise<DealLicenseRecord
 
 export async function getAllLicenses(): Promise<DealLicenseRecord[]> {
   const [dealRes, mdiaryRes] = await Promise.all([
-    fetch(`${LICENSE_URL}?order=created_at.desc&limit=2000`, { headers: DB_HEADERS }),
-    fetch(`${SUPABASE_URL}/rest/v1/mdiary_coupons?order=created_at.desc&limit=3000`, { headers: DB_HEADERS }),
+    authedFetch(`${LICENSE_URL}?order=created_at.desc&limit=2000`, { headers: ADMIN_DB_HEADERS }),
+    authedFetch(`${SUPABASE_URL}/rest/v1/mdiary_coupons?order=created_at.desc&limit=3000`, { headers: ADMIN_DB_HEADERS }),
   ]);
 
   const dealLicenses: DealLicenseRecord[] = dealRes.ok ? await dealRes.json() : [];
@@ -218,7 +227,7 @@ export async function getAllCampaignLicenses(): Promise<CampaignLicensePipelineR
   const url = `${SUPABASE_URL}/rest/v1/campaign_licenses`
     + `?select=id,campaign_id,status,service_expire_at,created_at,contact_phone,contact_name,org_name,duration,user_count,coupon_code`
     + `&order=created_at.desc&limit=5000`;
-  const res = await fetch(url, { headers: DB_HEADERS });
+  const res = await authedFetch(url, { headers: ADMIN_DB_HEADERS });
   if (!res.ok) return [];
   return res.json();
 }
@@ -226,7 +235,7 @@ export async function getAllCampaignLicenses(): Promise<CampaignLicensePipelineR
 // 딜로 전환된 phone 집합 (캠페인 라이선스 → deal_licenses 매칭)
 export async function getConvertedPhonesSet(): Promise<Set<string>> {
   const url = `${SUPABASE_URL}/rest/v1/deal_licenses?select=contact_phone&contact_phone=not.is.null&limit=5000`;
-  const res = await fetch(url, { headers: DB_HEADERS });
+  const res = await authedFetch(url, { headers: ADMIN_DB_HEADERS });
   if (!res.ok) return new Set();
   const data: { contact_phone: string }[] = await res.json();
   const phones = new Set<string>();
@@ -258,7 +267,7 @@ export async function getSleepingCampaignLicenses(): Promise<SleepingCampaignLic
     + `&contact_phone=not.is.null`
     + `&coupon_code=not.is.null`
     + `&order=created_at.desc&limit=1000`;
-  const lcRes = await fetch(lcUrl, { headers: DB_HEADERS });
+  const lcRes = await authedFetch(lcUrl, { headers: ADMIN_DB_HEADERS });
   if (!lcRes.ok) return [];
   const licenses: Omit<SleepingCampaignLicense, 'campaign_name'>[] = await lcRes.json();
   if (licenses.length === 0) return [];
@@ -267,7 +276,7 @@ export async function getSleepingCampaignLicenses(): Promise<SleepingCampaignLic
   const campaignIds = Array.from(new Set(licenses.map(l => l.campaign_id)));
   const inList = campaignIds.map(id => `"${id}"`).join(',');
   const camUrl = `${SUPABASE_URL}/rest/v1/campaigns?select=id,name&id=in.(${encodeURIComponent(inList)})`;
-  const camRes = await fetch(camUrl, { headers: DB_HEADERS });
+  const camRes = await authedFetch(camUrl, { headers: ADMIN_DB_HEADERS });
   const campaigns: Array<{ id: string; name: string }> = camRes.ok ? await camRes.json() : [];
   const nameMap = new Map(campaigns.map(c => [c.id, c.name]));
 
@@ -312,9 +321,9 @@ export interface DealQuote {
 const QUOTES_URL = `${SUPABASE_URL}/rest/v1/deal_quotes`;
 
 export async function getDealQuotes(dealId: string): Promise<DealQuote[]> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${QUOTES_URL}?deal_id=eq.${encodeURIComponent(dealId)}&order=created_at.asc`,
-    { headers: DB_HEADERS }
+    { headers: ADMIN_DB_HEADERS }
   );
   if (!res.ok) throw new Error(`견적 목록 조회 실패: ${res.status}`);
   return res.json();
@@ -323,9 +332,9 @@ export async function getDealQuotes(dealId: string): Promise<DealQuote[]> {
 export async function saveDealQuote(
   record: Omit<DealQuote, 'id' | 'created_at'>
 ): Promise<DealQuote> {
-  const res = await fetch(QUOTES_URL, {
+  const res = await authedFetch(QUOTES_URL, {
     method: 'POST',
-    headers: { ...DB_HEADERS, Prefer: 'return=representation' },
+    headers: { ...ADMIN_DB_HEADERS, Prefer: 'return=representation' },
     body: JSON.stringify(record),
   });
   if (!res.ok) {
@@ -340,41 +349,41 @@ export async function updateDealQuote(
   id: string,
   updates: Partial<Omit<DealQuote, 'id' | 'created_at'>>
 ): Promise<void> {
-  const res = await fetch(`${QUOTES_URL}?id=eq.${id}`, {
+  const res = await authedFetch(`${QUOTES_URL}?id=eq.${id}`, {
     method: 'PATCH',
-    headers: DB_HEADERS,
+    headers: ADMIN_DB_HEADERS,
     body: JSON.stringify(updates),
   });
   if (!res.ok) throw new Error(`견적 업데이트 실패: ${res.status}`);
 }
 
 export async function deleteDealQuote(id: string): Promise<void> {
-  const res = await fetch(`${QUOTES_URL}?id=eq.${id}`, {
+  const res = await authedFetch(`${QUOTES_URL}?id=eq.${id}`, {
     method: 'DELETE',
-    headers: DB_HEADERS,
+    headers: ADMIN_DB_HEADERS,
   });
   if (!res.ok) throw new Error(`견적 삭제 실패: ${res.status}`);
 }
 
 export async function selectDealQuote(dealId: string, quoteId: string): Promise<void> {
   // 기존 선택 해제
-  await fetch(`${QUOTES_URL}?deal_id=eq.${encodeURIComponent(dealId)}`, {
+  await authedFetch(`${QUOTES_URL}?deal_id=eq.${encodeURIComponent(dealId)}`, {
     method: 'PATCH',
-    headers: DB_HEADERS,
+    headers: ADMIN_DB_HEADERS,
     body: JSON.stringify({ is_selected: false }),
   });
   // 선택
-  await fetch(`${QUOTES_URL}?id=eq.${quoteId}`, {
+  await authedFetch(`${QUOTES_URL}?id=eq.${quoteId}`, {
     method: 'PATCH',
-    headers: DB_HEADERS,
+    headers: ADMIN_DB_HEADERS,
     body: JSON.stringify({ is_selected: true }),
   });
 }
 
 export async function fetchAllDealQuoteNumbers(): Promise<string[]> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${QUOTES_URL}?select=quote_number&quote_number=not.is.null`,
-    { headers: DB_HEADERS }
+    { headers: ADMIN_DB_HEADERS }
   );
   if (!res.ok) return [];
   const rows: { quote_number: string }[] = await res.json();
@@ -408,36 +417,36 @@ export async function updateWebQuoteStatus(
 }
 
 export async function deleteDealLicense(id: string): Promise<void> {
-  const res = await fetch(`${LICENSE_URL}?id=eq.${id}`, {
+  const res = await authedFetch(`${LICENSE_URL}?id=eq.${id}`, {
     method: 'DELETE',
-    headers: DB_HEADERS,
+    headers: ADMIN_DB_HEADERS,
   });
   if (!res.ok) throw new Error(`이용권 삭제 실패: ${res.status}`);
 }
 
 export async function hideMdiaryCoupon(couponCode: string): Promise<void> {
   const MDIARY_URL = `${SUPABASE_URL}/rest/v1/mdiary_coupons`;
-  const res = await fetch(`${MDIARY_URL}?coupon_code=eq.${encodeURIComponent(couponCode)}`, {
+  const res = await authedFetch(`${MDIARY_URL}?coupon_code=eq.${encodeURIComponent(couponCode)}`, {
     method: 'PATCH',
-    headers: DB_HEADERS,
+    headers: ADMIN_DB_HEADERS,
     body: JSON.stringify({ link_confirmed: false }),
   });
   if (!res.ok) throw new Error(`이용권 숨김 처리 실패: ${res.status}`);
 }
 
 export async function updateLicenseStatus(id: string, status: LicenseStatus): Promise<void> {
-  const res = await fetch(`${LICENSE_URL}?id=eq.${id}`, {
+  const res = await authedFetch(`${LICENSE_URL}?id=eq.${id}`, {
     method: 'PATCH',
-    headers: DB_HEADERS,
+    headers: ADMIN_DB_HEADERS,
     body: JSON.stringify({ status }),
   });
   if (!res.ok) throw new Error(`이용권 상태 업데이트 실패: ${res.status}`);
 }
 
 export async function updateLicenseDeal(id: string, dealId: string): Promise<void> {
-  const res = await fetch(`${LICENSE_URL}?id=eq.${id}`, {
+  const res = await authedFetch(`${LICENSE_URL}?id=eq.${id}`, {
     method: 'PATCH',
-    headers: DB_HEADERS,
+    headers: ADMIN_DB_HEADERS,
     body: JSON.stringify({ deal_id: dealId }),
   });
   if (!res.ok) throw new Error(`딜 연결 실패: ${res.status}`);
@@ -451,16 +460,16 @@ export async function attachCouponToDeal(
   const MDIARY_URL = `${SUPABASE_URL}/rest/v1/mdiary_coupons`;
 
   // Check if already in deal_licenses
-  const existRes = await fetch(
+  const existRes = await authedFetch(
     `${LICENSE_URL}?coupon_code=eq.${encodeURIComponent(couponCode)}&limit=1`,
-    { headers: DB_HEADERS }
+    { headers: ADMIN_DB_HEADERS }
   );
   const existing: DealLicenseRecord[] = existRes.ok ? await existRes.json() : [];
 
   if (existing.length > 0) {
-    const patchRes = await fetch(`${LICENSE_URL}?id=eq.${existing[0].id}`, {
+    const patchRes = await authedFetch(`${LICENSE_URL}?id=eq.${existing[0].id}`, {
       method: 'PATCH',
-      headers: { ...DB_HEADERS, Prefer: 'return=representation' },
+      headers: { ...ADMIN_DB_HEADERS, Prefer: 'return=representation' },
       body: JSON.stringify({ deal_id: dealId }),
     });
     if (!patchRes.ok) throw new Error(`이용권 연결 실패: ${patchRes.status}`);
@@ -469,9 +478,9 @@ export async function attachCouponToDeal(
   }
 
   // Look up coupon details from mdiary_coupons
-  const couponRes = await fetch(
+  const couponRes = await authedFetch(
     `${MDIARY_URL}?coupon_code=eq.${encodeURIComponent(couponCode)}&limit=1`,
-    { headers: DB_HEADERS }
+    { headers: ADMIN_DB_HEADERS }
   );
   const coupons: Array<{
     duration: number; user_limit: number; is_used: boolean;

@@ -261,10 +261,12 @@ export async function listApkSubscribers(): Promise<ApkSubscriber[]> {
   return r.json();
 }
 
+/** 관리자 /apk 전용 — 로그인 토큰으로 나간다 (HARD-B2a).
+ *  공개 /apk/info 는 lib/public/apkPublic.ts 의 publicFindSubscriberByEmail 을 쓴다. */
 export async function findSubscriberByEmail(email: string): Promise<ApkSubscriber | null> {
-  const r = await fetch(
+  const r = await authedFetch(
     `${SUPABASE_URL}/rest/v1/apk_subscribers?email=eq.${encodeURIComponent(email)}&select=*&limit=1`,
-    { headers: PUBLIC_HEADERS },
+    { headers: ADMIN_HEADERS },
   );
   if (!r.ok) return null;
   const rows = await r.json() as ApkSubscriber[];

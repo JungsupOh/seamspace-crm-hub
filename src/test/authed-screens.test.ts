@@ -116,10 +116,11 @@ const SCREENS: ScreenCase[] = [
     file: 'lib/apk.ts',
     // 공개 /apk/info 가 쓰는 조회 3개는 로그인하지 않은 방문자용이라 공개 키를 유지한다.
     allowedAnonAuth: [{ why: ':14 PUBLIC_HEADERS — 공개 /apk/info 전용 (021-8d 담당)' }],
+    // HARD-B2a 에서 findSubscriberByEmail 이 관리자용(토큰)으로 바뀌었다.
+    // 공개 /apk/info 는 lib/public/apkPublic.ts 의 사본을 쓴다 → 허용 예외 3 → 2.
     allowedPlainRest: [
-      { why: ':265 findSubscriberByEmail — ApkInfo.tsx 가 씀' },
-      { why: ':275 findSubscriberByToken — 공개 토큰 조회용' },
-      { why: ':345 listDownloadsByEmail — ApkInfo.tsx 가 씀' },
+      { why: 'findSubscriberByToken — 호출자 0(죽은 코드), 공개 토큰 조회용' },
+      { why: 'listDownloadsByEmail — 공개 ApkInfo.tsx 가 씀 (021-8d)' },
     ],
   },
   {

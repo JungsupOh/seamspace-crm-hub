@@ -2,7 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import { formatPhone } from '@/lib/utils';
 import { searchSchools, SchoolInfo } from '@/lib/neis';
 import { notifyWebQuoteInquiry, notifyWebQuoteSent, notifyWebPayment, notifyWebLicenseIssued } from '@/lib/telegram';
-import { upsertLeadContact } from '@/lib/luckySeven';
+// 공개 /order 는 로그인하지 않은 방문자가 쓴다 — 공개 키 경로를 명시적으로 쓴다 (HARD-B2a).
+// HARD-B2b 에서 이 접수 흐름을 서버 함수로 옮긴다.
+import { publicUpsertLeadContact as upsertLeadContact } from '@/lib/public/leadContact';
 import { getS2BNumber, type QuoteLineItem } from '@/lib/pricing';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

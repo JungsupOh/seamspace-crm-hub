@@ -62,6 +62,10 @@ const LOGIC_TS = readFileSync(
 );
 const TELEGRAM_TS = readFileSync(resolve(ROOT, 'src/lib/telegram.ts'), 'utf8');
 const LUCKYSEVEN_TS = readFileSync(resolve(ROOT, 'src/lib/luckySeven.ts'), 'utf8');
+// HARD-B2a 에서 contacts 코어가 src/lib/public/leadContact.ts 로 옮겨졌다
+// (공개 /order 와 관리자 화면이 같은 함수를 쓰던 것을 떼어내면서).
+// 드리프트 가드의 대상도 그 파일로 옮긴다 — 비교하는 대상만 바뀌고 목적은 같다.
+const LEADCONTACT_TS = readFileSync(resolve(ROOT, 'src/lib/public/leadContact.ts'), 'utf8');
 const COUPONS_TS = readFileSync(resolve(ROOT, 'src/lib/campaign-coupons.ts'), 'utf8');
 const INDEX_TS = readFileSync(
   resolve(ROOT, 'supabase/functions/campaign-submit-lead/index.ts'), 'utf8',
@@ -542,15 +546,18 @@ describe('⑩ contacts 로직 원문이 luckySeven.ts 와 같다 (드리프트 �
       expect(LOGIC_TS).toContain(line);
     }
     // 원본은 options.activityNote 를 쓴다 — 이름만 다르고 식은 같다
-    expect(LUCKYSEVEN_TS).toContain('if (!existing.name && member.name) patch.name = member.name;');
-    expect(LUCKYSEVEN_TS).toContain('if (!existing.email && member.email) patch.email = member.email;');
-    expect(LUCKYSEVEN_TS).toContain('if (!existing.org_name && member.orgName) patch.org_name = member.orgName;');
-    expect(LUCKYSEVEN_TS).toContain("patch.notes = [options.activityNote.trim(), prevNotes].filter(Boolean).join('\\n');");
+    expect(LEADCONTACT_TS).toContain('if (!existing.name && member.name) patch.name = member.name;');
+    expect(LEADCONTACT_TS).toContain('if (!existing.email && member.email) patch.email = member.email;');
+    expect(LEADCONTACT_TS).toContain('if (!existing.org_name && member.orgName) patch.org_name = member.orgName;');
+    expect(LEADCONTACT_TS).toContain("patch.notes = [options.activityNote.trim(), prevNotes].filter(Boolean).join('\\n');");
+
+    // 코어가 한 벌인지도 함께 고정한다 — luckySeven.ts 에 옛 본문이 남아 두 벌이 되면 안 된다
+    expect(LUCKYSEVEN_TS).not.toContain('rest/v1/contacts?phone_normalized=eq.');
   });
 
   it('INSERT 기본값이 원본과 같다', () => {
-    expect(LUCKYSEVEN_TS).toContain("contact_type: options.contactType ?? '리드',");
-    expect(LUCKYSEVEN_TS).toContain("lead_source: options.leadSource ?? '럭키세븐 5월',");
+    expect(LEADCONTACT_TS).toContain("contact_type: options.contactType ?? '리드',");
+    expect(LEADCONTACT_TS).toContain("lead_source: options.leadSource ?? '럭키세븐 5월',");
     expect(LOGIC_TS).toContain("contact_type: options.contactType ?? '리드',");
     expect(LOGIC_TS).toContain("lead_source: options.leadSource ?? '럭키세븐 5월',");
   });

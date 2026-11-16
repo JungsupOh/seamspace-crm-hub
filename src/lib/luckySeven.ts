@@ -1,6 +1,7 @@
 // 럭키세븐 이벤트 — 그룹 신청 / 결제 묶음 / 라이선스 발급 공용 헬퍼
 // /event/lucky-seven 폼 + 결제 페이지 + 어드민 다이얼로그에서 공통 사용
 
+import { authedFetch } from '@/lib/authedFetch';
 import { apiCreateCoupon, apiSendCoupon } from '@/lib/coupons';
 import { airtable } from '@/lib/airtable';
 import { saveDealQuote, type DealQuote } from '@/lib/storage';
@@ -9,8 +10,16 @@ import type { DealFields } from '@/types/airtable';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+// 공개 경로(/order 의 upsertLeadContact, 라우트에서 분리된 럭키세븐 폼)가 쓰는 헤더.
+// 로그인하지 않은 방문자라 공개 키를 그대로 쓴다 — HARD-B2b 에서 서버 함수로 옮긴다.
 const HEADERS = {
   Authorization: `Bearer ${SUPABASE_KEY}`,
+  apikey: SUPABASE_KEY,
+  'Content-Type': 'application/json',
+};
+
+// 관리자 다이얼로그 전용 — Authorization 은 authedFetch 가 로그인 세션 토큰으로 붙인다 (HARD-B2a).
+const ADMIN_HEADERS = {
   apikey: SUPABASE_KEY,
   'Content-Type': 'application/json',
 };
@@ -200,84 +209,22 @@ export async function fetchLuckySevenCampaign(slug: string) {
 // ─────────────────────────────────────────────────
 
 import { normalizePhone as normalizePhoneI18n, type PhoneCountry } from './phone';
+import { upsertLeadContactCore, publicUpsertLeadContact, type UpsertLeadContactOptions, type UpsertLeadContactResult } from './public/leadContact';
 
-export interface UpsertLeadContactOptions {
-  country?: PhoneCountry;     // 'kr' (기본) | 'jp' — 전화 정규화 국가
-  leadSource?: string;        // 신규 contact insert 시 기록 (예: 'EDIX Japan 2026')
-  activityNote?: string;      // 기존 고객 매칭 시 contacts.notes 앞에 1줄 추가 (예: '[2026-05-09] 캠페인 신청 — EDIX Japan 2026')
-  contactType?: string;       // 신규 insert 시 유형. 미지정이면 '리드'(기존 동작 유지)
-  leadStage?: string;         // 신규 insert 시 스테이지. 미지정이면 설정하지 않음(기존 동작 유지)
-}
+export type { UpsertLeadContactOptions, UpsertLeadContactResult } from './public/leadContact';
 
-export interface UpsertLeadContactResult {
-  contactId: string;
-  isExisting: boolean;          // true면 phone으로 매칭된 기존 contact
-  activityAppended: boolean;    // 기존 contact의 notes에 activityNote가 prepend 됐는지
-}
-
-export async function upsertLeadContact(
+/**
+ * 관리자 화면용 contacts 등록 — **로그인 세션 토큰**으로 나간다 (HARD-B2a).
+ *
+ * 구현은 src/lib/public/leadContact.ts 의 코어 한 벌을 쓴다. 공개 `/order` 는
+ * 같은 코어를 `transport: 'public'` 으로 부른다(publicUpsertLeadContact).
+ * 두 벌로 베껴 두면 어긋나므로 코어를 공유하고 전송 방식만 가른다.
+ */
+export function upsertLeadContact(
   member: { name: string; phone: string; email: string; orgName: string },
   options: UpsertLeadContactOptions = {},
 ): Promise<UpsertLeadContactResult> {
-  const country = options.country ?? 'kr';
-  const phoneNorm = normalizePhoneI18n(member.phone, country);
-
-  const findRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${encodeURIComponent(phoneNorm)}&select=id,name,email,org_name,contact_type,notes`,
-    { headers: HEADERS },
-  );
-  const found = findRes.ok ? await findRes.json() : [];
-
-  if (Array.isArray(found) && found.length > 0) {
-    const existing = found[0];
-    const patch: Record<string, unknown> = {};
-    if (!existing.name && member.name) patch.name = member.name;
-    if (!existing.email && member.email) patch.email = member.email;
-    if (!existing.org_name && member.orgName) patch.org_name = member.orgName;
-    let activityAppended = false;
-    if (options.activityNote && options.activityNote.trim()) {
-      const prevNotes = (existing.notes ?? '').toString();
-      // 같은 라인 중복 방지 (오늘 같은 캠페인 재신청 등)
-      if (!prevNotes.includes(options.activityNote.trim())) {
-        patch.notes = [options.activityNote.trim(), prevNotes].filter(Boolean).join('\n');
-        activityAppended = true;
-      }
-    }
-    if (Object.keys(patch).length > 0) {
-      await fetch(`${SUPABASE_URL}/rest/v1/contacts?id=eq.${encodeURIComponent(existing.id)}`, {
-        method: 'PATCH',
-        headers: { ...HEADERS, Prefer: 'return=minimal' },
-        body: JSON.stringify(patch),
-      });
-    }
-    return { contactId: existing.id as string, isExisting: true, activityAppended };
-  }
-
-  // 신규 insert
-  const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/contacts`, {
-    method: 'POST',
-    headers: { ...HEADERS, Prefer: 'return=representation' },
-    body: JSON.stringify({
-      name: member.name,
-      phone: member.phone,
-      phone_normalized: phoneNorm,
-      email: member.email,
-      org_name: member.orgName,
-      contact_type: options.contactType ?? '리드',
-      lead_source: options.leadSource ?? '럭키세븐 5월',
-      // 스테이지는 넘어온 경우에만 기록한다. 비워두면 normalizeStage가 빈 문자열을
-      // 돌려줘서 고객 화면의 리드 퍼널 집계에서 아예 빠진다.
-      ...(options.leadStage ? { lead_stage: options.leadStage } : {}),
-      // 신규 contact도 첫 활동이력으로 기록 (있을 때만)
-      ...(options.activityNote && options.activityNote.trim()
-        ? { notes: options.activityNote.trim() }
-        : {}),
-    }),
-  });
-  if (!insertRes.ok) throw new Error('contacts insert 실패');
-  const created = await insertRes.json();
-  const newId = (Array.isArray(created) ? created[0]?.id : created.id) as string;
-  return { contactId: newId, isExisting: false, activityAppended: !!options.activityNote };
+  return upsertLeadContactCore(member, options, 'authed');
 }
 
 // ─────────────────────────────────────────────────
@@ -339,7 +286,9 @@ export async function submitLuckySevenGroup(input: {
     const isLeader = i === 0;
 
     // contacts upsert
-    const contactRes = await upsertLeadContact({
+    // 이 함수는 공개 럭키세븐 폼 전용이다(라우트에서 분리됨, H-1).
+    // 되살린다면 로그인 없는 경로이므로 공개 키 코어를 쓴다.
+    const contactRes = await publicUpsertLeadContact({
       name: m.name,
       phone: m.phone,
       email: m.email,
@@ -443,9 +392,9 @@ export async function submitLuckySevenGroup(input: {
 // ─────────────────────────────────────────────────
 
 export async function refreshGroupStatus(groupId: string): Promise<string> {
-  const res = await fetch(
+  const res = await authedFetch(
     `${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?group_id=eq.${groupId}&select=status`,
-    { headers: HEADERS },
+    { headers: ADMIN_HEADERS },
   );
   if (!res.ok) return '신청';
   const rows: { status: string }[] = await res.json();
@@ -456,9 +405,9 @@ export async function refreshGroupStatus(groupId: string): Promise<string> {
   else if (paid < total) nextStatus = '일부결제';
   else nextStatus = '결제완료';
 
-  await fetch(`${SUPABASE_URL}/rest/v1/lucky_seven_groups?id=eq.${groupId}`, {
+  await authedFetch(`${SUPABASE_URL}/rest/v1/lucky_seven_groups?id=eq.${groupId}`, {
     method: 'PATCH',
-    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    headers: { ...ADMIN_HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify({ status: nextStatus }),
   });
   return nextStatus;
@@ -535,7 +484,7 @@ export async function fetchGroupByLeaderAuth(groupCode: string, leaderPhone: str
 // 같은 group_code로 이미 만들어진 딜이 있는지 확인 (Quote_Number 매칭)
 export async function findDealIdForGroupCode(groupCode: string): Promise<string | null> {
   const url = `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(groupCode)}&select=id&limit=1`;
-  const r = await fetch(url, { headers: HEADERS }).catch(() => null);
+  const r = await authedFetch(url, { headers: ADMIN_HEADERS }).catch(() => null);
   if (!r?.ok) return null;
   const rows: { id: string }[] = await r.json();
   return rows[0]?.id ?? null;
@@ -643,9 +592,9 @@ export async function issueLuckySevenLicenses(group: LSGroupRow, members: LSLead
   // 각 멤버 쿠폰을 deal_licenses에도 INSERT해서 딜관리/이용권관리에서 확인 가능하도록 한다.
   let dealId: string | null = null;
   try {
-    const dr = await fetch(
+    const dr = await authedFetch(
       `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(group.group_code)}&select=id&limit=1`,
-      { headers: HEADERS },
+      { headers: ADMIN_HEADERS },
     );
     if (dr.ok) {
       const rows = await dr.json() as { id: string }[];
@@ -663,9 +612,9 @@ export async function issueLuckySevenLicenses(group: LSGroupRow, members: LSLead
     );
 
     // 2) campaign_licenses 행 생성
-    await fetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
+    await authedFetch(`${SUPABASE_URL}/rest/v1/campaign_licenses`, {
       method: 'POST',
-      headers: { ...HEADERS, Prefer: 'return=minimal' },
+      headers: { ...ADMIN_HEADERS, Prefer: 'return=minimal' },
       body: JSON.stringify({
         campaign_id: group.campaign_id,
         lead_id: m.id,
@@ -684,15 +633,15 @@ export async function issueLuckySevenLicenses(group: LSGroupRow, members: LSLead
     if (dealId) {
       // 중복 코드 skip (재발급 시 안전망)
       try {
-        const dupCheck = await fetch(
+        const dupCheck = await authedFetch(
           `${SUPABASE_URL}/rest/v1/deal_licenses?coupon_code=eq.${encodeURIComponent(couponCode)}&select=id&limit=1`,
-          { headers: HEADERS },
+          { headers: ADMIN_HEADERS },
         );
         const dups = dupCheck.ok ? (await dupCheck.json() as { id: string }[]) : [];
         if (dups.length === 0) {
-          await fetch(`${SUPABASE_URL}/rest/v1/deal_licenses`, {
+          await authedFetch(`${SUPABASE_URL}/rest/v1/deal_licenses`, {
             method: 'POST',
-            headers: { ...HEADERS, Prefer: 'return=minimal' },
+            headers: { ...ADMIN_HEADERS, Prefer: 'return=minimal' },
             body: JSON.stringify({
               deal_id:           dealId,
               coupon_code:       couponCode,
@@ -721,19 +670,19 @@ export async function issueLuckySevenLicenses(group: LSGroupRow, members: LSLead
   }
 
   // 그룹 status='발급완료'
-  await fetch(`${SUPABASE_URL}/rest/v1/lucky_seven_groups?id=eq.${group.id}`, {
+  await authedFetch(`${SUPABASE_URL}/rest/v1/lucky_seven_groups?id=eq.${group.id}`, {
     method: 'PATCH',
-    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    headers: { ...ADMIN_HEADERS, Prefer: 'return=minimal' },
     body: JSON.stringify({ status: '발급완료' }),
   });
 
   // 자동 생성된 deal에도 license_send_date 기록 (group_code = quote_number)
   const today = new Date().toISOString().slice(0, 10);
-  await fetch(
+  await authedFetch(
     `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(group.group_code)}`,
     {
       method: 'PATCH',
-      headers: { ...HEADERS, Prefer: 'return=minimal' },
+      headers: { ...ADMIN_HEADERS, Prefer: 'return=minimal' },
       body: JSON.stringify({
         license_send_date: today,
         deal_stage:        '이용권 발송완료',
@@ -759,18 +708,18 @@ export async function deleteLuckySevenGroup(group: LSGroupRow): Promise<{
   const counts = { leads: 0, licenses: 0, paymentGroups: 0, deals: 0, deal_quotes: 0, deal_users: 0 };
 
   // 1) 멤버 lead_id 조회
-  const leadsRes = await fetch(
+  const leadsRes = await authedFetch(
     `${SUPABASE_URL}/rest/v1/campaign_leads?ls_group_id=eq.${group.id}&select=id`,
-    { headers: HEADERS },
+    { headers: ADMIN_HEADERS },
   );
   const leadIds: string[] = leadsRes.ok ? (await leadsRes.json() as { id: string }[]).map(l => l.id) : [];
 
   // 2) campaign_licenses 삭제 (lead_id 기준)
   if (leadIds.length > 0) {
     const inFilter = `(${leadIds.map(id => `"${id}"`).join(',')})`;
-    const licDel = await fetch(
+    const licDel = await authedFetch(
       `${SUPABASE_URL}/rest/v1/campaign_licenses?lead_id=in.${inFilter}`,
-      { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+      { method: 'DELETE', headers: { ...ADMIN_HEADERS, Prefer: 'return=representation' } },
     );
     if (licDel.ok) {
       const rows = await licDel.json() as unknown[];
@@ -779,50 +728,50 @@ export async function deleteLuckySevenGroup(group: LSGroupRow): Promise<{
   }
 
   // 3) deals + 자식 삭제 (quote_number = group_code)
-  const dealRes = await fetch(
+  const dealRes = await authedFetch(
     `${SUPABASE_URL}/rest/v1/deals?quote_number=eq.${encodeURIComponent(group.group_code)}&select=id`,
-    { headers: HEADERS },
+    { headers: ADMIN_HEADERS },
   );
   const dealIds: string[] = dealRes.ok ? (await dealRes.json() as { id: string }[]).map(d => d.id) : [];
   for (const dealId of dealIds) {
-    const dq = await fetch(
+    const dq = await authedFetch(
       `${SUPABASE_URL}/rest/v1/deal_quotes?deal_id=eq.${dealId}`,
-      { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+      { method: 'DELETE', headers: { ...ADMIN_HEADERS, Prefer: 'return=representation' } },
     );
     if (dq.ok) counts.deal_quotes += ((await dq.json()) as unknown[]).length;
-    const du = await fetch(
+    const du = await authedFetch(
       `${SUPABASE_URL}/rest/v1/deal_users?deal_id=eq.${dealId}`,
-      { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+      { method: 'DELETE', headers: { ...ADMIN_HEADERS, Prefer: 'return=representation' } },
     );
     if (du.ok) counts.deal_users += ((await du.json()) as unknown[]).length;
   }
   if (dealIds.length > 0) {
     const inFilter = `(${dealIds.map(id => `"${id}"`).join(',')})`;
-    const dDel = await fetch(
+    const dDel = await authedFetch(
       `${SUPABASE_URL}/rest/v1/deals?id=in.${inFilter}`,
-      { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+      { method: 'DELETE', headers: { ...ADMIN_HEADERS, Prefer: 'return=representation' } },
     );
     if (dDel.ok) counts.deals = ((await dDel.json()) as unknown[]).length;
   }
 
   // 4) lucky_seven_payment_groups 삭제
-  const pgDel = await fetch(
+  const pgDel = await authedFetch(
     `${SUPABASE_URL}/rest/v1/lucky_seven_payment_groups?group_id=eq.${group.id}`,
-    { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+    { method: 'DELETE', headers: { ...ADMIN_HEADERS, Prefer: 'return=representation' } },
   );
   if (pgDel.ok) counts.paymentGroups = ((await pgDel.json()) as unknown[]).length;
 
   // 5) campaign_leads 삭제 (ls_group_id 기준)
-  const leadDel = await fetch(
+  const leadDel = await authedFetch(
     `${SUPABASE_URL}/rest/v1/campaign_leads?ls_group_id=eq.${group.id}`,
-    { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=representation' } },
+    { method: 'DELETE', headers: { ...ADMIN_HEADERS, Prefer: 'return=representation' } },
   );
   if (leadDel.ok) counts.leads = ((await leadDel.json()) as unknown[]).length;
 
   // 6) 그룹 자체 삭제
-  const gDel = await fetch(
+  const gDel = await authedFetch(
     `${SUPABASE_URL}/rest/v1/lucky_seven_groups?id=eq.${group.id}`,
-    { method: 'DELETE', headers: { ...HEADERS, Prefer: 'return=minimal' } },
+    { method: 'DELETE', headers: { ...ADMIN_HEADERS, Prefer: 'return=minimal' } },
   );
   if (!gDel.ok) {
     throw new Error(`그룹 삭제 실패 (${gDel.status})`);

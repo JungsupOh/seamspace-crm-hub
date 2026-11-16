@@ -7,7 +7,9 @@ import { Loader2, Search, AlertCircle, Smartphone, CheckCircle2 } from 'lucide-r
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { findSubscriberByEmail, listDownloadsByEmail, type ApkSubscriber, type ApkDownload } from '@/lib/apk';
+// 공개 /apk/info — 로그인하지 않은 방문자. 공개 키 경로를 명시적으로 쓴다 (HARD-B2a).
+import { listDownloadsByEmail, type ApkSubscriber, type ApkDownload } from '@/lib/apk';
+import { publicFindSubscriberByEmail as findSubscriberByEmail } from '@/lib/public/apkPublic';
 
 export default function ApkInfo() {
   const [email, setEmail] = useState('');

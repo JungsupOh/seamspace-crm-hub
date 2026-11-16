@@ -233,12 +233,19 @@ describe('H-1 (4) airtable.ts 의 공개 키 폴백이 사라졌다', () => {
     }
   });
 
-  it('upsertLeadContact 는 airtable 을 쓰지 않는다 (공개 경로가 쓰는 함수)', () => {
+  // HARD-B2a 에서 contacts 코어가 src/lib/public/leadContact.ts 로 옮겨졌다.
+  // 검사 대상만 그 파일로 옮기고, 확인하는 사실("공개 경로가 쓰는 함수는 airtable 을
+  // 거치지 않는다")은 그대로 둔다.
+  it('공개 contacts 코어는 airtable 을 쓰지 않는다 (공개 경로가 쓰는 함수)', () => {
+    const CORE = read('src/lib/public/leadContact.ts');
+    expect(CORE).toContain('export async function upsertLeadContactCore');
+    expect(CORE).not.toContain('airtable');
+
+    // luckySeven 쪽 래퍼도 airtable 을 거치지 않는다
     const LS = read('src/lib/luckySeven.ts');
-    const start = LS.indexOf('export async function upsertLeadContact');
+    const start = LS.indexOf('export function upsertLeadContact');
     expect(start).toBeGreaterThan(-1);
     const next = LS.indexOf('\nexport ', start + 10);
-    const body = LS.slice(start, next === -1 ? undefined : next);
-    expect(body).not.toContain('airtable.');
+    expect(LS.slice(start, next === -1 ? undefined : next)).not.toContain('airtable.');
   });
 });
