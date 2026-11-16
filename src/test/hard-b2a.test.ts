@@ -108,8 +108,13 @@ describe('B2a (2) 공개 경로는 그대로 공개 키를 쓴다', () => {
   });
 
   it('공개 화면이 공개 입구를 쓴다', () => {
-    expect(code(read('src/pages/OrderTest.tsx')))
-      .toContain("publicUpsertLeadContact as upsertLeadContact");
+    // HARD-B2c: /order 의 contacts 등록이 서버 함수(order-submit-quote)로 옮겨졌다.
+    //   B2a 때는 "공개 키 코어를 쓴다"가 맞는 확인이었지만, 이제는 **아예 쓰지 않는 것**이
+    //   맞다. 목적(공개 화면이 contacts 를 직접 건드리지 않는다)은 그대로 두고 더 엄격하게 본다.
+    const order = code(read('src/pages/OrderTest.tsx'));
+    expect(order).not.toContain('publicUpsertLeadContact');
+    expect(order).not.toContain('leadContact');
+    expect(order).toContain('order-submit-quote');
     // HARD-B2b: /apk/info 는 서버 함수 입구(publicApkInfo)를 쓴다
     expect(code(read('src/pages/ApkInfo.tsx'))).toContain('publicApkInfo');
   });

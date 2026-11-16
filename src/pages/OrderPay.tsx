@@ -63,7 +63,12 @@ export default function OrderPay() {
         // 연락처 보강(딜 조회)도 서버가 한다 — 브라우저는 deals 를 직접 읽지 않는다.
         const d = await callPublicFn<{ quote: (DealQuoteRow & { deal_id?: string; deal_contact?: {
           contact_email?: string; contact_name?: string; contact_phone?: string } }) | null }>(
-          'order-lookup-quote', { mode: 'pay', quoteNumber });
+          'order-lookup-quote', {
+            mode: 'pay',
+            quoteNumber,
+            // HARD-B2c: 메일 링크의 서명 토큰(?t=). 없으면 서버가 경고 모드로 지금처럼 연다.
+            token: new URLSearchParams(window.location.search).get('t') ?? '',
+          });
         const q = d.quote;
         if (!q) return;
         const dc = q.deal_contact ?? {};

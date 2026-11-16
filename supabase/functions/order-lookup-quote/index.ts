@@ -14,6 +14,11 @@ import { CORS, DB, SUPABASE_URL, json, pick, q } from '../_shared/public-fn.ts';
 import {
   DEAL_CONTACT_COLS, QUOTE_COLS_PAY, QUOTE_COLS_VERIFY, matchVerdict, validateInput,
 } from './logic.ts';
+import { shouldEnforce, verifyPayToken } from '../_shared/quote-token.ts';
+
+// HARD-B2c — 결제 링크 서명 토큰. 키가 없으면 경고 모드로만 돈다(shouldEnforce 참고).
+const LINK_SECRET  = Deno.env.get('QUOTE_LINK_SECRET') ?? '';
+const LINK_ENFORCE = Deno.env.get('QUOTE_LINK_ENFORCE') ?? undefined;
 
 /** 대조에 필요한 열까지 포함해 읽는다(밖으로 나가는 것은 pick 이 다시 좁힌다). */
 const READ_COLS = [...new Set([...QUOTE_COLS_VERIFY, ...QUOTE_COLS_PAY,
@@ -42,7 +47,22 @@ Deno.serve(async (req: Request) => {
       return json({ quote: pick(row!, QUOTE_COLS_VERIFY) });
     }
 
-    // pay 모드 — 견적번호만으로 연다(원본 동작 유지). 연락처가 비면 딜에서 보강한다.
+    // ── pay 모드 — HARD-B2c 서명 토큰 ──
+    //
+    // 경고 모드(기본): 토큰이 없거나 틀려도 **지금처럼 열어 준다**. 이미 나간 메일의
+    //   옛 링크를 끊지 않기 위해서다. 대신 무슨 일이 있었는지 로그로 센다.
+    // 강제 모드(QUOTE_LINK_ENFORCE=1 + 키 설정): 거절한다.
+    //
+    // ⚠️ 거절 문구는 "없음"과 같게 둔다 — 번호가 맞는지 틀렸는지 알려 주지 않는다.
+    const check = await verifyPayToken(v.quoteNumber, v.token, LINK_SECRET, Math.floor(Date.now() / 1000));
+    if (!check.valid) {
+      // 견적번호는 개인정보가 아니지만 로그에도 남기지 않는다 — 사유만 센다.
+      console.warn(`[order-lookup-quote] pay 토큰 ${check.reason}`);
+      if (shouldEnforce(LINK_SECRET, LINK_ENFORCE)) {
+        return json({ quote: null });
+      }
+    }
+
     if (!row) return json({ quote: null });
     const quote = pick(row, QUOTE_COLS_PAY) as Record<string, unknown>;
 

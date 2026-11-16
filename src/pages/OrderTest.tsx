@@ -1,11 +1,11 @@
 import { callPublicFn } from '@/lib/public/publicApi';
+import { buildPayUrl } from '@/lib/public/payLink';
 import { useState, useRef, useEffect } from 'react';
 import { formatPhone } from '@/lib/utils';
 import { searchSchools, SchoolInfo } from '@/lib/neis';
 import { notifyWebQuoteInquiry, notifyWebQuoteSent, notifyWebPayment, notifyWebLicenseIssued } from '@/lib/telegram';
 // 공개 /order 는 로그인하지 않은 방문자가 쓴다 — 공개 키 경로를 명시적으로 쓴다 (HARD-B2a).
 // HARD-B2b 에서 이 접수 흐름을 서버 함수로 옮긴다.
-import { publicUpsertLeadContact as upsertLeadContact } from '@/lib/public/leadContact';
 import { getS2BNumber, type QuoteLineItem } from '@/lib/pricing';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -468,6 +468,10 @@ export default function OrderTest() {
   const [showCustom, setShowCustom] = useState(false);
   const [customMonths, setCustomMonths] = useState('');
   const [savedQuoteNum, setSavedQuoteNum] = useState<string | null>(null);
+  // HARD-B2c: 결제 링크 서명 토큰. 접수 응답으로 받아 메일 링크에 붙인다.
+  // 메일 재발송(이미 저장된 견적)에서도 같은 토큰을 다시 쓰도록 상태로 들고 있는다.
+  // 키가 설정되기 전에는 빈 문자열 — 그러면 링크가 옛 모양 그대로 나간다.
+  const [savedPayToken, setSavedPayToken] = useState('');
   const [savedDealId, setSavedDealId] = useState<string | null>(null);
   const [savingQuote, setSavingQuote] = useState(false);
   const savingQuoteRef = useRef(false);   // 동기적 중복 호출 차단 (state 전파 지연 윈도우 보호)
@@ -602,13 +606,20 @@ export default function OrderTest() {
     if (lastInquiryHashRef.current === inquiryHash) return;
     lastInquiryHashRef.current = inquiryHash;
 
-    // contact upsert — '견적 조회' 활동이력 누적
+    // contact upsert — '견적 조회' 활동이력 누적.
+    // HARD-B2c: 브라우저가 contacts 를 공개 키로 직접 쓰던 것을 서버 함수로 옮겼다.
+    // 활동이력 문구는 그대로다(이 단계는 견적번호가 없어 브라우저가 만들 수 있다).
     try {
       const activityNote = `[${today}] 웹 견적 조회 — ${planLabel} ${info.months}개월 × ${info.qty} / 예상 ${total.toLocaleString()}원`;
-      await upsertLeadContact(
-        { name: info.contactName, phone: info.phone, email: info.email.trim(), orgName: info.orgName },
-        { country: 'kr', leadSource: 'Web 견적조회', activityNote },
-      );
+      await callPublicFn('order-submit-quote', {
+        action: 'lead',
+        name: info.contactName,
+        phone: info.phone,
+        email: info.email.trim(),
+        orgName: info.orgName,
+        leadSource: 'Web 견적조회',
+        activityNote,
+      });
     } catch (e) {
       console.warn('[previewQuote] contacts upsert 실패 (무시)', e);
     }
@@ -655,6 +666,8 @@ export default function OrderTest() {
       const submitted = await callPublicFn<{
         ok?: boolean; quoteNumber?: string; dealId?: string; quoteId?: string | null;
         merged?: boolean; dealType?: string; error?: string;
+        // HARD-B2c: 결제 링크 서명 토큰. 키가 설정되기 전에는 빈 문자열로 온다.
+        payToken?: string;
       }>('order-submit-quote', {
         productCode:   selectedProduct.code,
         productName:   selectedProduct.name,
@@ -672,6 +685,8 @@ export default function OrderTest() {
         total,
         items:         webItems,
         notesStudents: info.students ?? '',
+        // HARD-B2c: contacts 등록을 같은 요청 안에서 한다. 활동이력 본문은 서버가 만든다.
+        leadSource:    'Web 견적',
       });
 
       const qNum = submitted.quoteNumber ?? '';
@@ -682,6 +697,7 @@ export default function OrderTest() {
 
       if (submitted.ok && qNum) {
         setSavedQuoteNum(qNum);
+        setSavedPayToken(submitted.payToken ?? '');
         // 3-b) PDF 견적서 자동 생성 + deal_files 첨부 (이메일 발송과 무관하게 항상 첨부)
         // 이렇게 해두면 사용자가 '이메일로 견적서 받기'를 안 눌러도 딜관리에서 PDF 확인 가능.
         if (dealId && dealId !== 'web' && selectedProduct.code === '01') {
@@ -702,7 +718,7 @@ export default function OrderTest() {
                 finalValue:  total,
                 supplyPrice: supply,
                 taxAmount:   tax,
-                paymentUrl:  `${window.location.origin}/order/pay/${encodeURIComponent(qNum)}`,
+                paymentUrl:  buildPayUrl(window.location.origin, qNum, submitted.payToken),
               });
               if (blob) {
                 // slot_key는 딜편집 다이얼로그가 인식하는 'quote_file_{deal_quote_id}' 형식
@@ -731,26 +747,10 @@ export default function OrderTest() {
           })();
         }
 
-        // 4) contacts upsert + 활동이력 누적 (동일 phone의 모든 deal/quote가 한 고객 히스토리에 쌓이도록)
-        // 머지든 신규든 항상 호출 — 동일 contact 정보 보강 + 활동이력 추가
-        try {
-          const activityNote = `[${today}] 웹 견적서 발급 — ${qNum} / ${planLabel} ${info.months}개월 × ${info.qty} / ${total.toLocaleString()}원${mergedIntoExisting ? ' (기존 딜에 추가)' : (dealType === 'Renewal' ? ' (재구매)' : '')}`;
-          await upsertLeadContact(
-            {
-              name: info.contactName,
-              phone: info.phone,
-              email: info.email.trim(),
-              orgName: info.orgName,
-            },
-            {
-              country: 'kr',
-              leadSource: 'Web 견적',
-              activityNote,
-            },
-          );
-        } catch (e) {
-          console.warn('[saveWebQuote] contacts upsert 실패 (무시)', e);
-        }
+        // 4) contacts 등록은 **order-submit-quote 안에서** 끝났다 (HARD-B2c).
+        //    원본은 여기서 브라우저가 공개 키로 한 번 더 불렀다. 같은 요청 안으로
+        //    옮기면서 왕복이 줄고, 접수는 됐는데 contacts 만 빠지는 창이 없어졌다.
+        //    활동이력 문구는 서버가 같은 규칙으로 만든다(buildQuoteActivityNote).
 
         // 5) 텔레그램 알림 — 정식 발송 (이메일 발송 완료 시점)
         notifyWebQuoteSent({
@@ -802,7 +802,7 @@ export default function OrderTest() {
         finalValue:  total,
         supplyPrice: supply,
         taxAmount:   tax,
-        paymentUrl:  `${window.location.origin}/order/pay/${encodeURIComponent(qNum)}`,
+        paymentUrl:  buildPayUrl(window.location.origin, qNum, savedPayToken),
       }).catch(() => ({ blob: null as Blob | null, fileName: `${qNum}.pdf` }));
 
       // 2) sendQuoteEmail 호출 (lib/email.ts) — /deals와 동일 양식 + PDF 첨부
@@ -823,7 +823,7 @@ export default function OrderTest() {
         orgName:      info.orgName,
         contactName:  info.contactName,
         quoteNumber:  qNum,
-        paymentUrl:   `${window.location.origin}/order/pay/${encodeURIComponent(qNum)}`,
+        paymentUrl:   buildPayUrl(window.location.origin, qNum, savedPayToken),
         attachments:  pdfBase64 ? [{ base64: pdfBase64, fileName }] : undefined,
         attachmentBase64:   pdfBase64,
         attachmentFileName: fileName,

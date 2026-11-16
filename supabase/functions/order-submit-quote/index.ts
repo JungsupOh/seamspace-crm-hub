@@ -22,11 +22,74 @@
 
 import { CORS, DB, SUPABASE_URL, json, q } from '../_shared/public-fn.ts';
 import {
-  buildDealInsert, buildDealPatch, buildQuoteInsert, decideDeal,
-  nextQuoteNumber, normalizePhoneDigits, validateInput, type DealRow,
+  buildContactInsert, buildContactPatch, buildDealInsert, buildDealPatch, buildQuoteActivityNote,
+  buildQuoteInsert, decideDeal, nextQuoteNumber, normalizeKrPhone, normalizePhoneDigits,
+  validateInput, validateLead, type ContactRow, type DealRow, type LeadMember, type LeadOptions,
 } from './logic.ts';
+import { DEFAULT_TTL_SEC, signPayToken } from '../_shared/quote-token.ts';
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+// HARD-B2c — 결제 링크 서명 토큰. 키가 없으면 빈 문자열을 돌려주고, 브라우저는
+// 토큰 없이 옛 모양 그대로 링크를 만든다(경고 모드에서 그대로 열린다).
+const LINK_SECRET = Deno.env.get('QUOTE_LINK_SECRET') ?? '';
+
+async function issuePayToken(quoteNumber: string): Promise<string> {
+  if (!LINK_SECRET) return '';
+  try {
+    return await signPayToken(quoteNumber, LINK_SECRET, Math.floor(Date.now() / 1000) + DEFAULT_TTL_SEC);
+  } catch (e) {
+    console.warn('[order-submit-quote] 결제 토큰 발급 실패 (링크는 토큰 없이 나간다)', e);
+    return '';
+  }
+}
+
+/**
+ * contacts 를 전화번호로 찾아 보완하거나 새로 만든다 — HARD-B2c.
+ *
+ * 원본은 브라우저가 공개 키로 했다(lib/public/leadContact.ts). 동작은 그대로 옮겼고,
+ * 읽는 열도 원본과 같다(id,name,email,org_name,contact_type,notes).
+ *
+ * **던지지 않는다.** 원본 호출부가 try/catch 로 감싸 "실패해도 주문은 계속"이었다.
+ * 견적 접수가 contacts 때문에 실패하면 안 된다.
+ */
+async function upsertLeadContact(member: LeadMember, options: LeadOptions) {
+  try {
+    const phoneNorm = normalizeKrPhone(member.phone);
+    if (phoneNorm.length < 9) return { ok: false as const, reason: 'phone' };
+
+    const findRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${q(phoneNorm)}` +
+        `&select=id,name,email,org_name,contact_type,notes&limit=1`,
+      { headers: DB },
+    );
+    const found = findRes.ok ? await findRes.json() : [];
+
+    if (Array.isArray(found) && found.length > 0) {
+      const existing = found[0] as ContactRow;
+      const { patch, activityAppended } = buildContactPatch(existing, member, options);
+      if (Object.keys(patch).length > 0) {
+        await fetch(`${SUPABASE_URL}/rest/v1/contacts?id=eq.${q(String(existing.id))}`, {
+          method: 'PATCH',
+          headers: { ...DB, Prefer: 'return=minimal' },
+          body: JSON.stringify(patch),
+        });
+      }
+      return { ok: true as const, isExisting: true, activityAppended };
+    }
+
+    const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/contacts`, {
+      method: 'POST',
+      headers: { ...DB, Prefer: 'return=representation' },
+      body: JSON.stringify(buildContactInsert(member, options, phoneNorm)),
+    });
+    if (!insertRes.ok) return { ok: false as const, reason: 'insert' };
+    return { ok: true as const, isExisting: false, activityAppended: !!options.activityNote };
+  } catch (e) {
+    console.warn('[order-submit-quote] contacts upsert 실패 (무시)', e);
+    return { ok: false as const, reason: 'error' };
+  }
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
@@ -34,6 +97,18 @@ Deno.serve(async (req: Request) => {
 
   try {
     const raw = await req.json().catch(() => null) as Record<string, unknown> | null;
+
+    // ── ⑦ 리드 등록만 (견적 **미리보기** 단계 — 아직 접수가 아니다) ──
+    //    원본 OrderTest.tsx previewQuote(:608)가 공개 키로 contacts 를 직접 썼다.
+    //    접수(①~⑤)와는 다른 흐름이라 액션을 따로 둔다 — 접수 안에서 부르면
+    //    미리보기만 하고 떠난 사람의 활동이력이 남지 않는다(원본은 남겼다).
+    if (raw && raw.action === 'lead') {
+      const lv = validateLead(raw);
+      if (!lv.ok) return json({ error: lv.error }, lv.status);
+      const r = await upsertLeadContact(lv.member, lv.options);
+      // 원본은 실패를 삼켰다(화면에 영향 없음). 같은 동작을 유지한다.
+      return json({ ok: true, saved: r.ok });
+    }
 
     // ── ⑥ 첨부 등록 (PDF 를 브라우저가 올린 뒤 부른다) ──
     if (raw && raw.action === 'attach') {
@@ -148,7 +223,28 @@ Deno.serve(async (req: Request) => {
     const created = await saveRes.json();
     const quoteId = Array.isArray(created) && created[0]?.id ? String(created[0].id) : null;
 
-    return json({ ok: true, quoteNumber: qNum, dealId, quoteId, merged, dealType });
+    // ⑥ contacts 등록 — **같은 요청 안에서** 한다(HARD-B2c).
+    //    원본은 접수가 끝난 뒤 브라우저가 따로 한 번 더 불렀다(OrderTest.tsx:738).
+    //    같은 요청 안으로 넣으면 왕복이 한 번 줄고, 접수는 성공했는데 contacts 만
+    //    빠지는 창(브라우저가 중간에 닫히는 경우)도 없어진다.
+    const contact = await upsertLeadContact(
+      { name: input.contactName, phone: input.phone, email: input.email, orgName: input.orgName },
+      {
+        leadSource: input.leadSource || 'Web 견적',
+        // 활동이력은 **서버가 만든다** — 견적번호·머지·재구매가 응답으로만 정해지기 때문이다.
+        activityNote: buildQuoteActivityNote({
+          today: d, quoteNumber: qNum, planLabel: input.planLabel,
+          months: input.months, qty: input.qty, total: input.total, merged, dealType,
+        }),
+      },
+    );
+
+    return json({
+      ok: true, quoteNumber: qNum, dealId, quoteId, merged, dealType,
+      contactSaved: contact.ok,
+      // 메일 본문의 결제 링크에 붙인다. 키가 없으면 빈 문자열 — 링크는 옛 모양 그대로.
+      payToken: await issuePayToken(qNum),
+    });
   } catch (e) {
     console.error('[order-submit-quote]', e);
     return json({ error: '처리 중 오류가 발생했습니다.' }, 500);

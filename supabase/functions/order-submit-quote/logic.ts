@@ -34,6 +34,7 @@ export interface SubmitInput {
   total: number;
   items: unknown[];           // 견적 라인(브라우저가 buildQuoteItems 로 만든 것)
   notesStudents: string;      // 메모에 쓰는 "학생수" 원문(빈 문자열 가능)
+  leadSource: string;         // contacts 활동이력의 유입경로(빈 문자열이면 기본값)
 }
 
 export type Verdict =
@@ -49,7 +50,10 @@ export function validateInput(raw: unknown): Verdict {
   }
   const b = raw as Record<string, unknown>;
   const ALLOWED = ['productCode','productName','planLabel','orgName','contactName','phone','email',
-                   'students','qty','months','unitPrice','supply','tax','total','items','notesStudents'];
+                   'students','qty','months','unitPrice','supply','tax','total','items','notesStudents',
+                   // HARD-B2c: contacts 등록을 같은 요청 안에서 하므로 유입경로가 함께 온다.
+                   // 활동이력 본문은 서버가 만든다(buildQuoteActivityNote) — 받지 않는다.
+                   'leadSource'];
   const unknown = Object.keys(b).filter(k => !ALLOWED.includes(k));
   if (unknown.length > 0) return { ok: false, status: 400, error: '허용되지 않은 필드가 있습니다.' };
 
@@ -95,6 +99,7 @@ export function validateInput(raw: unknown): Verdict {
       orgName, contactName, phone, email,
       students, qty, months, unitPrice, supply, tax, total, items,
       notesStudents: str(b.notesStudents, 20),
+      leadSource: str(b.leadSource, 50),
     },
   };
 }
@@ -205,3 +210,143 @@ export function buildQuoteInsert(
 }
 
 export const normalizePhoneDigits = (p: string) => p.replace(/\D/g, '');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// contacts 등록 — HARD-B2c 에서 브라우저(lib/public/leadContact.ts)에서 옮겨 왔다.
+//
+// 왜 옮기나: 공개 /order 가 contacts 를 **공개 키로 직접 읽고 썼다**. contacts 는
+// 1,500명 넘는 사람의 이름·전화·이메일·소속·내부 메모가 들어 있는 표다. 그 정책을
+// 닫으려면 이 호출이 사라져야 한다(hard_b2b_result.md §D-2).
+//
+// 동작은 원본과 **글자 단위로 같다** — 전화번호로 찾고, 빈 칸만 채우고, 활동이력은
+// 같은 줄이 이미 있으면 덧붙이지 않는다. 바뀐 것은 "누가 DB를 읽느냐"뿐이다.
+//
+// ⚠️ 전화번호 정규화는 원본이 lib/phone.ts 의 normalizePhone(국가 코드 인식)을 썼다.
+//    여기서는 국내('kr')만 쓰므로 그 규칙만 옮긴다 — 원본 호출부(OrderTest.tsx)가
+//    country:'kr' 로 고정이었다. 다른 국가가 필요해지면 그때 옮긴다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface LeadMember {
+  name: string;
+  phone: string;
+  email: string;
+  orgName: string;
+}
+
+export interface LeadOptions {
+  leadSource?: string;
+  activityNote?: string;
+}
+
+export type LeadVerdict =
+  | { ok: true; member: LeadMember; options: LeadOptions }
+  | { ok: false; status: 400; error: string };
+
+/** lib/phone.ts 의 'kr' 규칙 — 숫자만 남긴다. */
+export function normalizeKrPhone(p: unknown): string {
+  return typeof p === 'string' ? p.replace(/\D/g, '') : '';
+}
+
+export function validateLead(raw: unknown): LeadVerdict {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, status: 400, error: '요청이 올바르지 않습니다.' };
+  }
+  const b = raw as Record<string, unknown>;
+  const ALLOWED = ['action', 'name', 'phone', 'email', 'orgName', 'leadSource', 'activityNote'];
+  const unknown = Object.keys(b).filter(k => !ALLOWED.includes(k));
+  if (unknown.length > 0) return { ok: false, status: 400, error: '허용되지 않은 필드가 있습니다.' };
+
+  const name = str(b.name, 50);
+  const phone = str(b.phone, 30);
+  const orgName = str(b.orgName);
+  if (!phone || normalizeKrPhone(phone).length < 9) {
+    return { ok: false, status: 400, error: '연락처를 정확히 입력해 주세요.' };
+  }
+  const email = str(b.email, 254);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { ok: false, status: 400, error: '이메일을 정확히 입력해 주세요.' };
+  }
+  return {
+    ok: true,
+    member: { name, phone, email, orgName },
+    options: {
+      leadSource: str(b.leadSource, 50) || undefined,
+      // 활동이력은 화면이 만든 한 줄이다. 길이만 자른다.
+      activityNote: str(b.activityNote, 500) || undefined,
+    },
+  };
+}
+
+export interface ContactRow {
+  id: string;
+  name?: unknown;
+  email?: unknown;
+  org_name?: unknown;
+  notes?: unknown;
+}
+
+/**
+ * 기존 contact 에 덧쓸 내용 — 원본(leadContact.ts:75-87)과 같은 규칙.
+ *
+ * ⚠️ **비어 있는 칸만** 채운다. 이미 값이 있으면 덮어쓰지 않는다 — 영업팀이 손으로
+ *    고친 이름·소속을 웹 주문이 되돌리면 안 된다.
+ * ⚠️ 활동이력은 **같은 줄이 이미 있으면 덧붙이지 않는다**(오늘 같은 폼을 두 번 내도
+ *    한 줄만 남는다). 원본의 중복 방지 규칙 그대로다.
+ */
+export function buildContactPatch(
+  existing: ContactRow, member: LeadMember, options: LeadOptions,
+): { patch: Record<string, unknown>; activityAppended: boolean } {
+  const patch: Record<string, unknown> = {};
+  if (!existing.name && member.name) patch.name = member.name;
+  if (!existing.email && member.email) patch.email = member.email;
+  if (!existing.org_name && member.orgName) patch.org_name = member.orgName;
+
+  let activityAppended = false;
+  const note = (options.activityNote ?? '').trim();
+  if (note) {
+    const prevNotes = (existing.notes ?? '').toString();
+    if (!prevNotes.includes(note)) {
+      patch.notes = [note, prevNotes].filter(Boolean).join('\n');
+      activityAppended = true;
+    }
+  }
+  return { patch, activityAppended };
+}
+
+/** 신규 contact 본문 — 원본(leadContact.ts:99-118)과 같은 필드. */
+export function buildContactInsert(
+  member: LeadMember, options: LeadOptions, phoneNorm: string,
+): Record<string, unknown> {
+  const note = (options.activityNote ?? '').trim();
+  return {
+    name: member.name,
+    phone: member.phone,
+    phone_normalized: phoneNorm,
+    email: member.email,
+    org_name: member.orgName,
+    contact_type: '리드',
+    // 원본의 기본값이 '럭키세븐 5월' 이었다. /order 는 항상 leadSource 를 넘기므로
+    // 그 기본값이 쓰인 적은 없지만, 값을 바꾸면 집계가 달라지므로 그대로 둔다.
+    lead_source: options.leadSource ?? '럭키세븐 5월',
+    ...(note ? { notes: note } : {}),
+  };
+}
+
+/**
+ * 접수 활동이력 한 줄 — 원본 OrderTest.tsx:739 와 **글자 단위로 같다**.
+ *
+ * 이 줄은 브라우저가 만들 수 없다. 견적번호·머지 여부·재구매 여부가 서버 응답으로만
+ * 정해지기 때문이다(원본은 응답을 받은 뒤 두 번째 요청에서 만들었다).
+ *
+ * ⚠️ 금액은 `ko-KR` 로 고정한다. 브라우저의 toLocaleString() 은 접속 환경의 로캘을
+ *    따르지만 한국 사용자 전용 화면이라 실제로는 늘 ko-KR 이었다. 서버에서 기본
+ *    로캘에 맡기면 "1234000" 처럼 쉼표가 빠질 수 있어 명시한다.
+ */
+export function buildQuoteActivityNote(a: {
+  today: string; quoteNumber: string; planLabel: string;
+  months: number; qty: number; total: number;
+  merged: boolean; dealType: string;
+}): string {
+  const suffix = a.merged ? ' (기존 딜에 추가)' : (a.dealType === 'Renewal' ? ' (재구매)' : '');
+  return `[${a.today}] 웹 견적서 발급 — ${a.quoteNumber} / ${a.planLabel} ${a.months}개월 × ${a.qty} / ${a.total.toLocaleString('ko-KR')}원${suffix}`;
+}

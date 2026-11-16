@@ -30,8 +30,8 @@ export const QUOTE_COLS_PAY = [
 export const DEAL_CONTACT_COLS = ['contact_email', 'contact_name', 'contact_phone'] as const;
 
 export type Verdict =
-  | { ok: true; mode: 'verify'; quoteNumber: string; email: string; phone: string }
-  | { ok: true; mode: 'pay'; quoteNumber: string }
+  | { ok: true; mode: 'verify'; quoteNumber: string; email: string; phone: string; token?: undefined }
+  | { ok: true; mode: 'pay'; quoteNumber: string; token: string }
   | { ok: false; status: 400; error: string };
 
 export function normalizeEmail(v: unknown): string {
@@ -46,7 +46,7 @@ export function validateInput(raw: unknown): Verdict {
     return { ok: false, status: 400, error: '요청이 올바르지 않습니다.' };
   }
   const b = raw as Record<string, unknown>;
-  const unknown = Object.keys(b).filter(k => !['mode', 'quoteNumber', 'email', 'phone'].includes(k));
+  const unknown = Object.keys(b).filter(k => !['mode', 'quoteNumber', 'email', 'phone', 'token'].includes(k));
   if (unknown.length > 0) return { ok: false, status: 400, error: '허용되지 않은 필드가 있습니다.' };
 
   const quoteNumber = typeof b.quoteNumber === 'string' ? b.quoteNumber.trim() : '';
@@ -54,7 +54,11 @@ export function validateInput(raw: unknown): Verdict {
     return { ok: false, status: 400, error: '견적서를 찾을 수 없습니다. 번호를 다시 확인해 주세요.' };
   }
 
-  if (b.mode === 'pay') return { ok: true, mode: 'pay', quoteNumber };
+  if (b.mode === 'pay') {
+    // 토큰은 **있으면** 검사한다(경고 모드). 길이 상한만 두고 형식은 검사부에서 본다.
+    const token = typeof b.token === 'string' ? b.token.trim().slice(0, 200) : '';
+    return { ok: true, mode: 'pay', quoteNumber, token };
+  }
 
   const email = normalizeEmail(b.email);
   const phone = normalizePhone(b.phone);

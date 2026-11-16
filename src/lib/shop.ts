@@ -255,12 +255,18 @@ export async function validateShopCoupon(
   }
 }
 
-// 쿠폰 사용 처리 (Supabase RPC — 주문ID + 전화번호 기록)
+// 쿠폰 사용 처리 — HARD-B2c 에서 서버 함수로 옮겼다.
+//
+// 원본은 RPC `use_shop_coupon` 을 공개 키로 불렀다. 그 함수는 SECURITY DEFINER 가
+// **아니라서** 호출자(anon) 권한으로 돌았고, 그래서 shop_coupons 의 공개 정책을
+// 닫을 수 없었다. 게다가 코드만 알면 남의 쿠폰을 태울 수 있었다 — orderId·phone 은
+// 기록만 될 뿐 검증되지 않았다. 이제 서버가 주문 존재·전화번호·쿠폰코드를 대조한다.
+//
+// 실패를 삼키는 것은 원본과 같다(.catch(() => {})). 결제는 이미 끝난 뒤이고,
+// 쿠폰 기록이 늦어도 사용자 화면을 막지 않아야 한다.
 export async function markCouponUsed(code: string, orderId: string, phone: string): Promise<void> {
-  await fetch(`${SUPABASE_URL}/rest/v1/rpc/use_shop_coupon`, {
-    method: 'POST',
-    headers: HEADERS,
-    body: JSON.stringify({ p_code: code, p_order_id: orderId, p_phone: phone }),
+  await callPublicFn<{ ok?: boolean; error?: string }>('shop-use-coupon', {
+    code, orderId, phone,
   }).catch(() => {});
 }
 
