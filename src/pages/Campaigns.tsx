@@ -132,9 +132,13 @@ interface CampaignLead {
   school_kind?: string;
   position?: string;
   name: string;
-  phone: string;
+  // LEAD-2: NOT NULL 해제. 해외 리드는 휴대폰이 없다 — 타입으로 고정해 두면
+  // 가드를 빼먹은 새 코드를 컴파일 때 잡는다.
+  phone?: string | null;
   phone_normalized?: string;
   email?: string;
+  market?: string;
+  email_normalized?: string | null;
   source?: string;
   source_etc?: string;
   marketing_consent?: boolean;
@@ -1256,7 +1260,7 @@ function CampaignDetail({ campaign, convertedPhones }: CampaignDetailProps) {
   // 생긴 딜만 인정한다. 원래 알던 고객의 과거 구매를 전시회 성과로 오인하지 않기 위함.
   const leadTotal = leads?.length ?? 0;
   const leadConverted = leads?.filter(l => {
-    const dealAt = convertedPhones.get(normalize(l.phone_normalized || l.phone));
+    const dealAt = convertedPhones.get(normalize(l.phone_normalized || l.phone || ''));
     return !!dealAt && dealAt > l.created_at;
   }).length ?? 0;
   const leadConvRate = leadTotal > 0 ? Math.round((leadConverted / leadTotal) * 100) : 0;
@@ -1492,7 +1496,9 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
     };
     (leads ?? []).forEach(l => {
       const lic = licensesByLeadId.get(l.id);
-      const phoneNorm = l.phone_normalized || l.phone.replace(/\D/g, '');
+      // LEAD-2: campaign_leads.phone 의 NOT NULL 이 해제됐다(해외 리드는 휴대폰이 없다).
+      // `?? ''` 가 없으면 해외 리드 1건으로 리드 탭 전체가 흰 화면이 된다.
+      const phoneNorm = l.phone_normalized || (l.phone ?? '').replace(/\D/g, '');
       rows.push({
         id: `lead:${l.id}`,
         origin: 'form',
@@ -1622,7 +1628,8 @@ function CampaignLeadsTab({ campaign }: { campaign: Campaign }) {
 
       // 4. contacts upsert — phone_normalized 기준 (재시도)
       try {
-        const phoneNorm = (lead.phone_normalized || lead.phone.replace(/\D/g, ''));
+        // LEAD-2: 해외 리드는 phone 이 null 일 수 있다.
+        const phoneNorm = (lead.phone_normalized || (lead.phone ?? '').replace(/\D/g, ''));
         contactId = await withRetry(async (): Promise<string | null> => {
           const existingRes = await authedFetch(
             `${SUPABASE_URL}/rest/v1/contacts?phone_normalized=eq.${encodeURIComponent(phoneNorm)}&select=id`,
