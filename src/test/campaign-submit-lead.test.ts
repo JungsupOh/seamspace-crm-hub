@@ -307,7 +307,10 @@ describe('④ 중복·기존 고객 판별', () => {
   });
 
   it("'만료'면 차단", () => {
-    expect(decideFromPrior(prior('만료')).outcome).toBe('blocked_expired');
+    const d = decideFromPrior(prior('만료'));
+    // `action` 으로 좁힌 뒤에 읽는다 — `{ action: 'new' }` 에는 outcome 이 없다
+    expect(d.action).toBe('block');
+    if (d.action === 'block') expect(d.outcome).toBe('blocked_expired');
   });
 
   it('구매고객이거나 체험 이력이 있으면 기존 고객', () => {

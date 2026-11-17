@@ -232,7 +232,7 @@ export function validateProfileUpdates(updates: unknown): UpdatesVerdict {
 
   if ('role' in body) {
     const rv = validateAssignRole(body.role);
-    if (!rv.ok) return { ok: false, status: 400, error: rv.error };
+    if (rv.ok === false) return { ok: false, status: 400, error: rv.error };
     if (body.role === undefined || body.role === null || body.role === '') {
       return { ok: false, status: 400, error: 'role 값이 비어 있습니다' };
     }
@@ -285,12 +285,12 @@ export function profileUpdateVerdict(params: {
   const { callerRole, callerId, targetId, target, updates } = params;
 
   const onTarget = canActOnTarget(callerRole, target);
-  if (!onTarget.ok) return onTarget;
+  if (onTarget.ok === false) return onTarget;
 
   if ('role' in updates) {
     if (callerRole !== 'admin' && callerId === targetId) return DENY_SELF;
     const assign = canAssignRole(callerRole, String(updates.role));
-    if (!assign.ok) return assign;
+    if (assign.ok === false) return assign;
   }
   return { ok: true };
 }

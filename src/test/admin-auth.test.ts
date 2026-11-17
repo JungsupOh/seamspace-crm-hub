@@ -42,7 +42,7 @@ describe('① 호출자 역할 — user_metadata 폴백 제거', () => {
     expect(role).toBe('');
     const v = callerVerdict(role);
     expect(v.ok).toBe(false);
-    if (!v.ok) {
+    if (v.ok === false) {
       expect(v.status).toBe(403);
       expect(v.error).toBe('Admin access required');
     }
@@ -119,7 +119,7 @@ describe('② 부여 가능 role 허용 목록', () => {
       const v = validateAssignRole(r.trim() === 'admin' ? r : r);
       if (r === 'admin ') { expect(v.ok).toBe(true); continue; }  // 공백은 trim
       expect(v.ok, r).toBe(false);
-      if (!v.ok) expect(v.status).toBe(400);
+      if (v.ok === false) expect(v.status).toBe(400);
     }
   });
 
@@ -263,7 +263,7 @@ describe('⑦ createUser — 역할 부여 권한 (A-1)', () => {
   it('🔴 sub_admin 이 admin 계정 생성 → 거절', () => {
     const v = canAssignRole('sub_admin', 'admin');
     expect(v.ok).toBe(false);
-    if (!v.ok) expect(v.status).toBe(403);
+    if (v.ok === false) expect(v.status).toBe(403);
   });
 
   it('🔴 sub_admin 이 sub_admin 계정 생성 → 거절', () => {
@@ -287,7 +287,7 @@ describe('⑧ updateUser · deleteUser — 대상 보호 (A-3)', () => {
   it('🔴 sub_admin 이 admin 계정을 건드림 → 거절 (계정 탈취 경로 차단)', () => {
     const v = canActOnTarget('sub_admin', T.admin);
     expect(v.ok).toBe(false);
-    if (!v.ok) expect(v.status).toBe(403);
+    if (v.ok === false) expect(v.status).toBe(403);
   });
 
   it('🔴 sub_admin 이 다른 sub_admin 계정을 건드림 → 거절', () => {
@@ -349,7 +349,7 @@ describe('⑨ updateProfile — 허용 필드 (A-2)', () => {
     for (const f of [{ email: 'x@y.z' }, { created_by: 'u' }, { id: 'u' }, { password: 'x' }]) {
       const v = validateProfileUpdates({ role: 'guest', ...f });
       expect(v.ok, JSON.stringify(f)).toBe(false);
-      if (!v.ok) expect(v.status).toBe(400);
+      if (v.ok === false) expect(v.status).toBe(400);
     }
   });
 
@@ -384,7 +384,7 @@ describe('⑩ updateProfile — 권한 판정 (A-2)', () => {
       ...base, callerRole: 'sub_admin', target: T.partner, updates: { role: 'admin' },
     });
     expect(v.ok).toBe(false);
-    if (!v.ok) expect(v.status).toBe(403);
+    if (v.ok === false) expect(v.status).toBe(403);
   });
 
   it('🔴 sub_admin 이 자기 자신의 role 을 바꿈 → 거절 (실제 상황)', () => {
@@ -408,7 +408,7 @@ describe('⑩ updateProfile — 권한 판정 (A-2)', () => {
       target: T.guest, updates: { role: 'guest' },
     });
     expect(v.ok).toBe(false);
-    if (!v.ok) expect(v.error).toContain('자기 자신');
+    if (v.ok === false) expect(v.error).toContain('자기 자신');
   });
 
   it('✅ 같은 상황에서 남의 계정이면 허용 (자기일 때만 막힌다)', () => {
@@ -592,7 +592,7 @@ describe('⑭ created_by 는 서버가 정한다 (021-8b-1)', () => {
     expect([...PROFILE_UPDATE_FIELDS]).not.toContain('created_by');
     const v = validateProfileUpdates({ created_by: CALLER });
     expect(v.ok).toBe(false);
-    if (!v.ok) expect(v.error).toContain('created_by');
+    if (v.ok === false) expect(v.error).toContain('created_by');
   });
 
   it('핸들러가 caller.id 를 넘긴다 (요청 본문 값이 아니다)', () => {

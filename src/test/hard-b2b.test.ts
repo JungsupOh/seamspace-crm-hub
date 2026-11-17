@@ -170,7 +170,7 @@ describe('order-lookup-quote', () => {
   it('둘 다 틀리면 거절한다', () => {
     const v = matchVerdict(row, 'evil@x.com', '01099998888');
     expect(v.ok).toBe(false);
-    if (!v.ok) expect(v.error).toContain('일치하지 않습니다');
+    if (v.ok === false) expect(v.error).toContain('일치하지 않습니다');
   });
   it('저장된 연락처가 하나도 없으면 통과 — 원본 동작 보존', () => {
     expect(matchVerdict({}, 'any@x.com', '').ok).toBe(true);
@@ -223,7 +223,7 @@ describe('order-submit-quote', () => {
   it('견적 행에 원본과 같은 필드가 들어간다', () => {
     const v = vSubmit(base);
     expect(v.ok).toBe(true);
-    if (!v.ok) return;
+    if (v.ok === false) return;
     const row = buildQuoteInsert(v.value, '2026-11-16', '2026-01-0001', 'deal-1', '01012345678');
     expect(row.source).toBe('web');
     expect(row.order_status).toBe('견적');
@@ -237,7 +237,7 @@ describe('order-submit-quote', () => {
   it('이용권 상품이 아니면 기간·단가를 넣지 않는다 (원본과 같다)', () => {
     const v = vSubmit({ ...base, productCode: '02', supply: 0, tax: 0, total: 0 });
     expect(v.ok).toBe(true);
-    if (!v.ok) return;
+    if (v.ok === false) return;
     const row = buildQuoteInsert(v.value, '2026-11-16', 'Q', 'd', '0');
     expect(row.duration).toBeUndefined();
     expect(row.unit_price).toBeUndefined();

@@ -73,7 +73,8 @@ describe('(a) shop-use-coupon — 증거 없이 쿠폰을 태울 수 없다', ()
       orderVerdict(null, USE),
       orderVerdict({ order_id: 'ORD-1', customer_phone: '01099998888', coupon_code: 'ABC123' }, USE),
       orderVerdict({ order_id: 'ORD-1', customer_phone: '01012345678', coupon_code: 'OTHER' }, USE),
-    ].map(r => (r.allow ? '' : r.error));
+    // 참·거짓 판별은 `=== true` 로 적어야 좁혀진다(strictNullChecks 가 꺼져 있다)
+    ].map(r => (r.allow === true ? '' : r.error));
     expect(new Set(msgs).size).toBe(1);
   });
 

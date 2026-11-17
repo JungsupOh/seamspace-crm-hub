@@ -90,7 +90,7 @@ describe('조사 메모', () => {
   it('나쁜 링크를 적으면 조용히 버리지 않고 알려 준다', () => {
     const v = buildResearch({ leadId: 'L1', title: 't', sourceUrl: 'javascript:alert(1)' });
     expect(v.ok).toBe(false);
-    if (!v.ok) expect(v.error).toContain('http');
+    if (v.ok === false) expect(v.error).toContain('http');
   });
 
   it('링크를 안 적으면 통과한다', () => {
@@ -263,7 +263,7 @@ describe('전략 저장', () => {
   it('미정 사실을 고르면 막는다', () => {
     const v = buildStrategy('L1', { ...base, factIds: ['f2'] }, facts);
     expect(v.ok).toBe(false);
-    if (!v.ok) expect(v.error).toContain('구독 가격');
+    if (v.ok === false) expect(v.error).toContain('구독 가격');
   });
 
   it('확정 사실만 저장된다', () => {

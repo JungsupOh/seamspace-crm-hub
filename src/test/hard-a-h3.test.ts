@@ -24,7 +24,7 @@ describe('H-3 인증 판정 (admin-issue-coupon 과 같은 규칙)', () => {
     for (const h of [null, undefined, '', 'Basic xxx', 'bearer x']) {
       const v = authVerdict(h);
       expect(v.ok, String(h)).toBe(false);
-      if (!v.ok) expect(v.status).toBe(401);
+      if (v.ok === false) expect(v.status).toBe(401);
     }
   });
   it('빈 토큰도 401', () => {
@@ -49,7 +49,7 @@ describe('H-3 역할 판정', () => {
     it(`${String(r)} 는 403`, () => {
       const v = roleVerdict(r as string);
       expect(v.ok).toBe(false);
-      if (!v.ok) { expect(v.status).toBe(403); expect(v.error).toBe('Not allowed'); }
+      if (v.ok === false) { expect(v.status).toBe(403); expect(v.error).toBe('Not allowed'); }
     });
   }
   it('user_metadata 를 보지 않는다 (프로필 role 만 받는다)', () => {
@@ -66,7 +66,7 @@ describe('H-3 본문 검증', () => {
                         { subject: 's', html: 'h' }, { to: '', subject: 's', html: 'h' }]) {
       const v = validateBody(body);
       expect(v.ok, JSON.stringify(body)).toBe(false);
-      if (!v.ok) { expect(v.status).toBe(400); expect(v.error).toBe('필수 파라미터 누락'); }
+      if (v.ok === false) { expect(v.status).toBe(400); expect(v.error).toBe('필수 파라미터 누락'); }
     }
   });
 
@@ -83,7 +83,7 @@ describe('H-3 본문 검증', () => {
   it('모르는 필드는 거절한다 (send-email 로 흘려보내지 않는다)', () => {
     const v = validateBody({ ...MAIL, from: 'evil@x.com' });
     expect(v.ok).toBe(false);
-    if (!v.ok) { expect(v.status).toBe(400); expect(v.error).toContain('from'); }
+    if (v.ok === false) { expect(v.status).toBe(400); expect(v.error).toContain('from'); }
   });
 
   it('수신자 배열도 받고 상한을 지킨다', () => {
@@ -164,7 +164,7 @@ describe('H-3 본문 검증', () => {
     it('전체 상한을 넘기면 413', () => {
       const v = validateBody({ ...MAIL, attachments: att(2, Math.floor(MAX_TOTAL_BYTES * 0.6)) });
       expect(v.ok).toBe(false);
-      if (!v.ok) expect(v.status).toBe(413);
+      if (v.ok === false) expect(v.status).toBe(413);
     });
 
     it(`첨부 개수 상한 ${MAX_ATTACHMENTS}`, () => {

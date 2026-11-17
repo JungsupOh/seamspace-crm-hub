@@ -43,7 +43,7 @@ describe('① JWT 없음 → 401', () => {
     for (const h of ['Basic abc', 'bearer abc', 'Token abc', 'abc']) {
       const v = authVerdict(h);
       expect(v.ok, h).toBe(false);
-      if (!v.ok) expect(v.status).toBe(401);
+      if (v.ok === false) expect(v.status).toBe(401);
     }
   });
 
@@ -68,7 +68,7 @@ describe('② 파트너 역할 → 403', () => {
     for (const role of ['partner_admin', 'partner_member', 'partner_viewer']) {
       const v = roleVerdict(role);
       expect(v.ok, role).toBe(false);
-      if (!v.ok) {
+      if (v.ok === false) {
         expect(v.status).toBe(403);
         expect(v.error).toBe('관리자만 쿠폰을 발급할 수 있습니다');
       }
@@ -85,7 +85,7 @@ describe('② 파트너 역할 → 403', () => {
     for (const role of ['guest', '', '   ', 'superuser', 'ADMIN', undefined, null]) {
       const v = roleVerdict(role as string);
       expect(v.ok, String(role)).toBe(false);
-      if (!v.ok) expect(v.status).toBe(403);
+      if (v.ok === false) expect(v.status).toBe(403);
     }
   });
 });
@@ -121,7 +121,7 @@ describe('④ 입력 검증 — 브라우저가 보내는 3개 필드만', () =>
   it('모르는 필드가 있으면 거절한다', () => {
     const v = validate({ ...ok, coupon_code: 'FORCED', admin: true });
     expect(v.ok).toBe(false);
-    if (!v.ok) {
+    if (v.ok === false) {
       expect(v.status).toBe(400);
       expect(v.error).toContain('coupon_code');
       expect(v.error).toContain('admin');
@@ -224,7 +224,7 @@ describe('⑥ 역할은 user_profiles 만 믿는다 (user_metadata 폴백 없음
     expect(role).toBe('');
     const v = roleVerdict(role);
     expect(v.ok).toBe(false);
-    if (!v.ok) expect(v.status).toBe(403);
+    if (v.ok === false) expect(v.status).toBe(403);
   });
 
   it('🔴 프로필 없음 + user_metadata.role=sub_admin → 거절', () => {

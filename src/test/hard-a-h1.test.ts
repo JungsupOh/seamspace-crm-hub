@@ -123,14 +123,17 @@ describe('H-1 (3) confirm-lucky-seven-pay — orderId ↔ 견적번호 대조', 
       it(`${name} → 400 필수 파라미터 누락`, () => {
         const v = validateInput(body as Record<string, unknown>);
         expect(v.ok).toBe(false);
-        if (!v.ok) { expect(v.status).toBe(400); expect(v.error).toContain('필수 파라미터'); }
+        if (v.ok === false) { expect(v.status).toBe(400); expect(v.error).toContain('필수 파라미터'); }
       });
     }
   });
 
   describe('결제묶음 대조', () => {
     it('맞는 요청은 통과한다', () => {
-      const v = matchVerdict(row(), validateInput(ok).ok ? validateInput(ok).value! : ok as never);
+      // 같은 함수를 두 번 부르면 좁히기가 이어지지 않는다 — 한 번만 부르고 변수에 담는다
+      const parsed = validateInput(ok);
+      expect(parsed.ok).toBe(true);
+      const v = matchVerdict(row(), parsed.ok === true ? parsed.value : (ok as never));
       expect(v).toEqual({ ok: true, alreadyPaid: false });
     });
 
@@ -154,7 +157,7 @@ describe('H-1 (3) confirm-lucky-seven-pay — orderId ↔ 견적번호 대조', 
       const attack = { ...ok, orderId: 'LS-2026-9999' };   // 다른 묶음의 주문번호
       const v = matchVerdict(row(), attack);
       expect(v.ok).toBe(false);
-      if (!v.ok) {
+      if (v.ok === false) {
         expect(v.status).toBe(400);
         expect(v.error).toContain('일치하지 않습니다');
       }
