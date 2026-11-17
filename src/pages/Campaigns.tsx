@@ -1122,10 +1122,14 @@ async function uploadCampaignImage(file: File): Promise<string> {
   const rawExt = dotIdx >= 0 ? file.name.slice(dotIdx + 1) : 'png';
   const ext = rawExt.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'png';
   const path = `${ts}-${crypto.randomUUID()}.${ext}`;
-  const r = await fetch(`${SUPABASE_URL}/storage/v1/object/campaign-images/${path}`, {
+  // 021-8e: **로그인한 관리자가 올리는 이미지**라 로그인 토큰으로 간다.
+  // 전에는 공개 키(anon)를 Authorization 에 넣었는데, 그 키는 공개 화면
+  // 자바스크립트에 들어 있다 — 키만 있으면 누구나 올리고 덮어쓸 수 있었다.
+  // 경로 규칙·파일명·`x-upsert` 는 **그대로**다.
+  const r = await authedFetch(`${SUPABASE_URL}/storage/v1/object/campaign-images/${path}`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${SUPABASE_KEY}`,
+      apikey: SUPABASE_KEY,
       'Content-Type': file.type || 'application/octet-stream',
       'x-upsert': 'true',
     },

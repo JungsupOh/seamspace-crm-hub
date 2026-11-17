@@ -84,7 +84,7 @@ const SCREENS: ScreenCase[] = [
   {
     file: 'pages/Partners.tsx',
     allowedAnonAuth: [
-      { why: ':157 Storage 업로드(partner-files 버킷) — 021-8e 담당' },
+      // 021-8e 완료(2026-11-18): Storage 업로드가 로그인 토큰으로 간다 → 예외 삭제
       { why: ':227 functions/v1/ocr-partner-doc — 021-8a 담당' },
     ],
     // :425 admin-auth 는 이미 session.access_token 을 쓴다(021-8b-1).
@@ -107,7 +107,7 @@ const SCREENS: ScreenCase[] = [
   {
     file: 'pages/Campaigns.tsx',
     allowedAnonAuth: [
-      { why: ':1124 Storage 업로드(campaign-images 버킷) — 021-8e 담당' },
+      // 021-8e 완료(2026-11-18): Storage 업로드가 로그인 토큰으로 간다 → 예외 삭제
       { why: ':1218 functions/v1/get-coupon-status — 021-8a 담당' },
     ],
     allowedPlainRest: [],

@@ -161,10 +161,14 @@ async function uploadPartnerFile(partnerId: string, fileType: FileType, file: Fi
   }
   const path = `${partnerId}/${fileType}-${ts}.${ext}`;
 
-  const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
+  // 021-8e: **로그인한 사람이 올리는 파일**이므로 로그인 토큰으로 간다.
+  // 전에는 공개 키(anon)를 Authorization 에 넣었는데, 그 키는 공개 화면
+  // 자바스크립트에 들어 있다 — 키만 있으면 누구나 올릴 수 있었다.
+  // 경로 규칙·파일명·`x-upsert` 는 **그대로**다.
+  const uploadRes = await authedFetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${SUPABASE_KEY}`,
+      apikey: SUPABASE_KEY,
       'Content-Type': file.type || 'application/octet-stream',
       'x-upsert': 'true',
     },
