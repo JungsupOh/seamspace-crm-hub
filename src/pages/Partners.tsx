@@ -41,6 +41,7 @@ import { PARTNER_PLAN_LIST, getUnitPrice, getS2BNumber, type QuoteLineItem } fro
 
 const PARTNER_DURATION_OPTIONS = [1, 4, 6, 12];
 import { supabase } from '@/lib/supabase';
+import { SignedFileLink } from '@/components/SignedFileLink';
 import { notifyPartnerDeal } from '@/lib/telegram';
 import { PARTNER_COUNTRIES, PARTNER_LOCALES, PARTNER_CURRENCIES, defaultsForCountry } from '@/lib/partner-i18n';
 
@@ -1026,12 +1027,12 @@ function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerShe
                         </span>
                       ) : existing ? (
                         <>
-                          <a href={existing.file_url} target="_blank" rel="noreferrer"
+                          <SignedFileLink stored={existing.file_url}
                             onClick={e => e.stopPropagation()}
                             className="text-xs text-primary hover:underline flex items-center gap-1 max-w-[140px]">
                             <ExternalLink className="h-3 w-3 shrink-0" />
                             <span className="truncate">{existing.file_name}</span>
-                          </a>
+                          </SignedFileLink>
                           <button onClick={e => { e.stopPropagation(); handleDeleteFile(existing.id); }}
                             className="text-muted-foreground/40 hover:text-red-500 transition-colors">
                             <Trash2 className="h-3.5 w-3.5" />
