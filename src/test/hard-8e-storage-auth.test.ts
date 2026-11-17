@@ -151,8 +151,32 @@ describe('정책 초안', () => {
     const f = ls();
     expect(f.some(x => /deal_files/.test(x)), 'deal-files 초안').toBe(true);
     expect(f.some(x => /campaign_images/.test(x)), 'campaign-images 초안').toBe(true);
+    expect(f.some(x => /partner_files/.test(x)), 'partner-files 초안').toBe(true);
     expect(f).toContain('h8_dryrun.sql');
     expect(f).toContain('h8_rollback.sql');
+  });
+
+  it('**`partner-files` 는 admin 에게만 연다** (M035)', () => {
+    const d = read(`${DIR}/h8_03_partner_files.sql.draft`);
+    const live = d.split('\n').filter(l => !l.trim().startsWith('--')).join('\n');
+    // 세 동작 전부 app_is_admin() 을 건다
+    for (const cmd of ['insert', 'update', 'delete']) {
+      const m = live.match(new RegExp(`for ${cmd} to authenticated[\\s\\S]*?;`));
+      expect(m, `${cmd} 정책이 없다`).not.toBeNull();
+      expect(m![0], `${cmd} 가 app_is_admin() 을 안 건다`).toContain('app_is_admin()');
+    }
+    // `public` 에게 열지 않는다
+    expect(live).not.toMatch(/to public/);
+    // **SELECT 정책을 만들지 않는다** (버킷이 공개라 정책과 무관)
+    expect(live).not.toMatch(/for select/);
+  });
+
+  it('드라이런이 **세 역할로** partner-files 를 눌러 본다', () => {
+    const dry = read(`${DIR}/h8_dryrun.sql`);
+    expect(dry).toContain('⑥ anon: partner-files 업로드');
+    expect(dry).toContain('⑥ 파트너: partner-files 업로드');
+    expect(dry).toContain('⑥ admin: partner-files 업로드');
+    expect(dry).toContain('업로드가 살아난다');
   });
 
   it('**SELECT 를 건드리지 않는다** (이미 나간 공개 링크가 있다)', () => {
