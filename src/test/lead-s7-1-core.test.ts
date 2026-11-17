@@ -402,26 +402,95 @@ describe('마이그레이션 — 추가만, 기존을 건드리지 않는다', (
     expect(B).toMatch(/references public\.partner_contracts\(id\) on delete restrict/);
   });
 
-  it('RLS 가 켜져 있고 **읽기(using)와 쓰기(with check) 둘 다** 자기 partner_id 로 좁다', () => {
-    expect(A).toContain('enable row level security');
+  // fix1 (2026-11-17): 처음에는 H-4 의 partner_scoped_* 를 베껴 **FOR ALL** 로 두었다.
+  // 그러면 파트너 계정이 자기 계약의 수량·단가·수수료율을 직접 고칠 수 있었다
+  // (수량을 늘리면 발급 한도가 늘어난다). 베껴야 했던 것은 **partners** 다 —
+  // 읽기는 자기 것 OR admin, 쓰기는 admin 전용으로 **나뉘어** 있다.
+  describe('정책 — 파트너는 **읽기만**, 쓰기는 admin 전용 (fix1)', () => {
+    const SCOPED =
+      'partner_id = (select up.partner_id from public.user_profiles up where up.id = auth.uid())';
+    const ADMIN = /\(select up\.role from public\.user_profiles up where up\.id = auth\.uid\(\)\) = any \(array\['admin','sub_admin'\]\)/;
 
-    // ⚠️ 처음에는 "어딘가에 이 문자열이 있다"만 봤다. 그러면 using 을 true 로
-    //    바꿔도 with check 쪽 문자열이 남아 통과한다(변이 시험에서 드러났다).
-    //    읽기가 끩는 것이 유출이므로 **두 절을 따로** 본다.
-    const pol = (A.match(/create policy "partner_scoped_partner_contracts"[\s\S]*?;/) ?? [''])[0];
-    expect(pol, '정책을 찾지 못했다').toBeTruthy();
+    /** 이름으로 정책 한 덩어리를 떼어 낸다 */
+    const policy = (name: string) => {
+      const m = A.match(new RegExp(`create policy "${name}"[\\s\\S]*?;`));
+      return m ? m[0] : '';
+    };
+    const clause = (pol: string, kw: 'using' | 'with check') => {
+      const m = pol.match(new RegExp(`${kw} \\(([\\s\\S]*?)\\)\\s*(?:with check|;)`));
+      return m ? m[1].trim() : '';
+    };
 
-    const using = (pol.match(/using \(([\s\S]*?)\)\s*with check/) ?? ['', ''])[1];
-    const check = (pol.match(/with check \(([\s\S]*)\)\s*;/) ?? ['', ''])[1];
+    it('RLS 가 켜져 있다', () => {
+      expect(A).toContain('enable row level security');
+    });
 
-    for (const [name, clause] of [['using', using], ['with check', check]] as const) {
-      expect(clause.trim(), name).toBeTruthy();
-      expect(clause, name).toContain(
-        'partner_id = (select up.partner_id from public.user_profiles up where up.id = auth.uid())');
-      expect(clause, name).toMatch(/array\['admin','sub_admin'\]/);
-      // 전체 허용으로 돌아가지 않았는지
-      expect(clause.trim(), name).not.toMatch(/^true$/);
-    }
+    it('**FOR ALL 정책이 없다** — 하나로 묶으면 읽기와 쓰기가 같은 조건이 된다', () => {
+      expect(A).not.toMatch(/create policy[^;]*\bfor all\b/i);
+    });
+
+    it('읽기: 자기 계약 **또는** admin', () => {
+      const pol = policy('partner_contracts_select');
+      expect(pol, '읽기 정책을 찾지 못했다').toBeTruthy();
+      expect(pol).toMatch(/for select/);
+      const u = clause(pol, 'using');
+      expect(u).toContain(SCOPED);
+      expect(u).toMatch(ADMIN);
+      expect(u).not.toMatch(/^true$/);
+    });
+
+    it('**쓰기는 admin 전용이다 — partner_id 조건이 아예 없다**', () => {
+      for (const name of ['partner_contracts_admin_insert', 'partner_contracts_admin_update']) {
+        const pol = policy(name);
+        expect(pol, name).toBeTruthy();
+        // 자기 partner 면 쓸 수 있다는 조건이 섞이면 안 된다
+        expect(pol, name).not.toContain(SCOPED);
+        expect(pol, name).toMatch(ADMIN);
+      }
+    });
+
+    it('insert 는 with check, update 는 using·with check 둘 다 admin 이다', () => {
+      const ins = policy('partner_contracts_admin_insert');
+      expect(ins).toMatch(/for insert/);
+      expect(clause(ins, 'with check')).toMatch(ADMIN);
+
+      const upd = policy('partner_contracts_admin_update');
+      expect(upd).toMatch(/for update/);
+      // using 이 비면 **아무 행도 못 고치고**, 넓으면 남의 행을 고친다. 둘 다 admin 이어야 한다.
+      expect(clause(upd, 'using'), 'using').toMatch(ADMIN);
+      expect(clause(upd, 'with check'), 'with check').toMatch(ADMIN);
+      expect(clause(upd, 'using')).not.toMatch(/^true$/);
+    });
+
+    it('fix1 이전 이름(한 개짜리 FOR ALL)이 남아 있지 않다', () => {
+      expect(A).not.toMatch(/create policy "partner_scoped_partner_contracts"/);
+      // 혹시 손으로 올려 본 적이 있을 수 있어 DROP 은 남겨 둔다
+      expect(A).toContain('drop policy if exists "partner_scoped_partner_contracts"');
+    });
+
+    it('드라이런이 **파트너 쓰기 거부를 실제로 찔러 본다**', () => {
+      const D = read('../audit/dryrun_lead_s7_1_contracts.sql');
+      for (const probe of [
+        '파트너가 자기 계약 SELECT', '다른 파트너 계약 SELECT',
+        '파트너가 자기 계약 UPDATE', '파트너가 계약 INSERT', '파트너가 계약 DELETE',
+      ]) {
+        expect(D, probe).toContain(probe);
+      }
+      // 건수로 본다 — "오류가 없었다"를 성공으로 읽지 않는다
+      expect(D).toContain('건수로');
+      expect(D).toContain("set local role authenticated");
+      expect(D).toContain('reset role');
+    });
+
+    it('롤백이 새 정책 이름 네 개를 모두 안다', () => {
+      const R = read('../audit/rollback_lead_s7_1_contracts.sql');
+      for (const name of [
+        'partner_contracts_select', 'partner_contracts_admin_insert',
+        'partner_contracts_admin_update', 'partner_contracts_no_delete',
+      ]) {
+        expect(R, name).toContain(name);
+      }
+    });
   });
 
   it('**삭제 불가**다 (원장)', () => {

@@ -144,24 +144,65 @@ create index if not exists idx_partner_contracts_status
   on public.partner_contracts (status) where voided_at is null;
 
 -- ── 보안 ──
+--
+-- ⚠️ fix1 (2026-11-17, 제시카 검토): 처음에는 H-4 의 partner_scoped_* 를 그대로 베껴
+--    **FOR ALL** 로 두었다. 그러면 파트너 계정이 자기 로그인 토큰으로 **자기 계약의
+--    수량·단가·수수료율·상태를 직접 고칠 수 있다** — 수량을 늘리면 발급 한도가 늘어난다.
+--    설계(lead_s6_design.md 5-2)의 "금액·단가·수수료율을 파트너가 수정 못 하게(읽기만)"를
+--    어기는 것이었다.
+--
+--    베껴야 했던 것은 partner_deals(FOR ALL)가 아니라 **partners** 다. 같은 저장소에
+--    이미 올바른 모양이 있었다: 읽기는 authenticated_read_own_partner(자기 것 OR admin),
+--    쓰기는 admin_insert/update/delete_partners(admin·sub_admin 전용).
+--
+--    이 표는 **돈의 조건**을 담으므로 partners 와 같은 쪽이 맞다:
+--      읽기  = 자기 계약 OR admin·sub_admin   (파트너가 자기 조건을 봐야 한다)
+--      쓰기  = admin·sub_admin 만             (계약 조건은 우리가 정한다)
+--      삭제  = 아무도 못 함 (restrictive using(false))
+
 alter table public.partner_contracts enable row level security;
 
--- H-4 의 partner_scoped_* 와 **같은 모양**을 유지한다(비교하기 쉽게 인라인으로 둔다).
-drop policy if exists "partner_scoped_partner_contracts" on public.partner_contracts;
-create policy "partner_scoped_partner_contracts"
+-- 읽기: 파트너는 **자기 계약만** 본다. H-4 와 같은 판정식을 쓴다(비교하기 쉽게 인라인).
+drop policy if exists "partner_contracts_select" on public.partner_contracts;
+create policy "partner_contracts_select"
   on public.partner_contracts
-  for all
+  for select
   to authenticated
   using (
     partner_id = (select up.partner_id from public.user_profiles up where up.id = auth.uid())
     or (select up.role from public.user_profiles up where up.id = auth.uid()) = any (array['admin','sub_admin'])
-  )
-  with check (
-    partner_id = (select up.partner_id from public.user_profiles up where up.id = auth.uid())
-    or (select up.role from public.user_profiles up where up.id = auth.uid()) = any (array['admin','sub_admin'])
   );
 
+-- 쓰기: **admin·sub_admin 만.** 파트너는 자기 계약도 고칠 수 없다.
+--       계약 조건(수량·단가·수수료율·상태)은 우리가 정하는 것이다.
+drop policy if exists "partner_contracts_admin_insert" on public.partner_contracts;
+create policy "partner_contracts_admin_insert"
+  on public.partner_contracts
+  for insert
+  to authenticated
+  with check (
+    (select up.role from public.user_profiles up where up.id = auth.uid()) = any (array['admin','sub_admin'])
+  );
+
+drop policy if exists "partner_contracts_admin_update" on public.partner_contracts;
+create policy "partner_contracts_admin_update"
+  on public.partner_contracts
+  for update
+  to authenticated
+  using (
+    (select up.role from public.user_profiles up where up.id = auth.uid()) = any (array['admin','sub_admin'])
+  )
+  with check (
+    (select up.role from public.user_profiles up where up.id = auth.uid()) = any (array['admin','sub_admin'])
+  );
+
+-- 옛 이름이 어딘가에 남아 있으면 지운다(이 파일은 아직 미적용이지만, 손으로 한 번
+-- 올려 본 적이 있을 수 있다. 없으면 아무 일도 하지 않는다).
+drop policy if exists "partner_scoped_partner_contracts" on public.partner_contracts;
+
 -- 계약은 지우지 않는다 — 잘못 만든 것도 voided_at 으로 남긴다.
+-- (PERMISSIVE delete 정책이 아예 없어 기본 거부지만, 나중에 누가 하나 더해도
+--  이 restrictive 정책이 AND 로 남아 계속 막는다.)
 drop policy if exists "partner_contracts_no_delete" on public.partner_contracts;
 create policy "partner_contracts_no_delete"
   on public.partner_contracts as restrictive for delete to authenticated using ( false );
@@ -169,7 +210,7 @@ create policy "partner_contracts_no_delete"
 revoke all on public.partner_contracts from anon;
 revoke all on public.partner_contracts from public;
 
--- 상태·금액을 고치려면 UPDATE 가 필요하다. DELETE 는 주지 않는다.
+-- 권한은 넓게 두고 **정책이 걸러 준다**(기존 표들과 같은 방식). DELETE 는 주지 않는다.
 grant select, insert, update on public.partner_contracts to authenticated;
 
 comment on table public.partner_contracts is
