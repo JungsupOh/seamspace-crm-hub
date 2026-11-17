@@ -23,6 +23,8 @@ import { issueLicense, getPartnerLicenses, resendLicenseEmail, revokeLicense, ex
 // LEAD-S7-4 — 내 계약(도매 선구매) 구역·계약 선택·요청
 import PortalContracts from '@/components/partner-portal/PortalContracts';
 import PortalLeads from '@/components/partner-portal/PortalLeads';
+// M032: 목록을 새로 못 읽었을 때 조용히 넘어가지 않는다
+import { REFRESH_FAIL_MSG } from '@/lib/partnerPortalMsg';
 import PortalAccounts from '@/components/partner-portal/PortalAccounts';
 import { getMyContracts } from '@/lib/partnerPortalContracts';
 import { contractChoice, contractLabel } from '@/lib/portalIssueContract';
@@ -97,6 +99,21 @@ export default function PartnerPortal() {
           canEditPartnerDeals, canManageLicenses } = useAuth();
   // 코드는 manager만 원문 열람. member/viewer는 마스킹.
   const maskCode = (code: string) => canManageLicenses ? code : '••••••';
+
+  /**
+   * 이용권 목록을 다시 읽는다. **실패하면 알려 준다** (M032).
+   *
+   * 전에는 여섯 군데가 `.catch(() => {})` 로 조용히 넘어갔다. 그래서 발급은
+   * 됐는데 목록이 안 바뀌고, 파트너가 **두 번 발급**할 수 있었다.
+   * 문구는 한 곳(`REFRESH_FAIL_MSG`)에만 둔다 — 여섯 군데로 흩어지면 언젠가 달라진다.
+   */
+  const refreshLicenses = (pid?: string | null) => {
+    const id = pid ?? partner?.id;
+    if (!id) return;
+    getPartnerLicenses(id)
+      .then(setLicenses)
+      .catch(() => toast.warning(t(REFRESH_FAIL_MSG)));
+  };
   const isIntl = partnerLocale !== 'ko';
   const t = makeT(partnerLocale);
   const curUnit = currencyUnit(partnerCurrency);
@@ -201,7 +218,12 @@ export default function PartnerPortal() {
   // 발급된 이용권 로드 (발급 권한 파트너만)
   useEffect(() => {
     if (!partner?.id || !canIssueLicenses) return;
-    getPartnerLicenses(partner.id).then(setLicenses).catch(() => setLicenses([]));
+    // M032: 첫 로드도 조용하면 안 된다. 실패인데 **빈 목록**을 보여 주면
+    //       "발급한 게 없네" 로 읽혀서 또 발급하게 된다 — 삼키는 것보다 나쁘다.
+    //       화면은 그려야 하니 빈 배열은 그대로 두고, **알려 준다.**
+    getPartnerLicenses(partner.id)
+      .then(setLicenses)
+      .catch(() => { setLicenses([]); toast.warning(t(REFRESH_FAIL_MSG)); });
   }, [partner?.id, canIssueLicenses]);
 
   // 학교 검색 (디바운스) — 국내(ko)에서만 사용
@@ -550,7 +572,7 @@ export default function PartnerPortal() {
           ? t({ ko: `이용권 발급 완료 · 이메일 발송됨 (${res.coupon_code})`, ja: `ライセンス発行完了・メール送信済み (${res.coupon_code})`, en: `License issued & emailed (${res.coupon_code})` })
           : t({ ko: `이용권 발급됨 · 이메일 발송 실패 (${res.coupon_code})`, ja: `ライセンス発行済み・メール送信失敗 (${res.coupon_code})`, en: `License issued, email failed (${res.coupon_code})` }),
       );
-      getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
+      refreshLicenses(partner.id);
 
       // 구매자를 기준으로 발급했으면 그 구매자 정보를 발급 내용과 일치시킨다.
       // (구매자 이메일이 비어 있는데 이용권만 다른 주소로 나가 서로 어긋나던 문제)
@@ -562,9 +584,13 @@ export default function PartnerPortal() {
         if (!target?.buyer_email && issueForm.contactEmail.trim()) patch.buyer_email = issueForm.contactEmail.trim();
         if (!target?.buyer_phone && issueForm.contactPhone.trim()) patch.buyer_phone = issueForm.contactPhone.trim();
         if (Object.keys(patch).length > 0) {
-          await updateDealBuyer(bId, patch).catch(() => {});
+          // M032: 조용히 넘어가지 않는다. **발급은 이미 됐으므로** 여기서
+          //       실패해도 발급을 되돌리지 않는다 — 알려 주기만 한다.
+          let touched = true;
+          await updateDealBuyer(bId, patch).catch(() => { touched = false; });
           const refreshed = await getDealBuyers(dealId).catch(() => null);
           if (refreshed) setDealBuyersMap(prev => ({ ...prev, [dealId]: refreshed }));
+          if (!touched || !refreshed) toast.warning(t(REFRESH_FAIL_MSG));
         }
       }
     } catch (e) {
@@ -582,7 +608,7 @@ export default function PartnerPortal() {
     try {
       await resendLicenseEmail(lic, partner?.name, partnerLocale, partner?.contact_email ?? undefined);
       toast.success(t({ ko: '재발송 완료', ja: '再送信完了', en: 'Resent' }));
-      if (partner?.id) getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
+      if (partner?.id) refreshLicenses(partner.id);
     } catch (e) {
       toast.error(`${t({ ko: '재발송 실패', ja: '再送信に失敗しました', en: 'Resend failed' })}: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -609,7 +635,7 @@ export default function PartnerPortal() {
     try {
       await setLicenseBuyer(lic.id, buyerId);
       toast.success(t({ ko: '구매자에 연결했습니다', ja: '購入者に紐づけました', en: 'Linked to buyer' }));
-      if (partner?.id) getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
+      if (partner?.id) refreshLicenses(partner.id);
     } catch (e) {
       toast.error(`${t({ ko: '연결 실패', ja: '紐づけに失敗しました', en: 'Link failed' })}: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -659,7 +685,7 @@ export default function PartnerPortal() {
       if (res.result === 'revoked') {
         toast.success(t({ ko: '회수되었습니다', ja: '回収しました', en: 'Revoked' }));
         setRevokeTarget(null);
-        if (partner?.id) getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
+        if (partner?.id) refreshLicenses(partner.id);
       } else if (res.result === 'not_found') {
         toast.error(t({ ko: 'mDiary에 없는 코드입니다', ja: 'mDiaryに存在しないコードです', en: 'Code not found in mDiary' }));
         setRevokeTarget(null);
@@ -689,7 +715,7 @@ export default function PartnerPortal() {
       const expireDate = y.toISOString().slice(0, 10);
       await expireLicenseGroup(lic, expireGroup.used_group_id, expireDate, revokeReason);
       toast.success(t({ ko: '그룹을 만료시켰습니다', ja: 'グループを失効させました', en: 'Group expired' }));
-      if (partner?.id) getPartnerLicenses(partner.id).then(setLicenses).catch(() => {});
+      if (partner?.id) refreshLicenses(partner.id);
     } catch (e) {
       toast.error(`${t({ ko: '그룹 만료 실패', ja: 'グループ失効に失敗しました', en: 'Group expire failed' })}: ${e instanceof Error ? e.message : String(e)}`);
     } finally {

@@ -330,3 +330,17 @@ export const CONTACT_OWNER_MSG = {
   end_user: { ko: '기관 담당자', ja: '機関の担当者', en: 'Organization' },
   partner:  { ko: '파트너 대행', ja: 'パートナー代理', en: 'Partner-held' },
 } as const;
+
+// ───────────────── 목록을 새로 못 읽었을 때 (M032) ─────────────────
+//
+// 전에는 조용히 넘어갔다(`.catch(() => {})`). 그래서 **발급은 됐는데 목록이
+// 안 바뀌는** 일이 생기고, 파트너가 "안 됐나 보다" 하고 **두 번 발급**할 수 있었다.
+//
+// ⚠️ 문구가 "발급이 실패했다"로 읽히면 안 된다 — 그러면 더 확실하게 두 번 누른다.
+//    **"했던 일은 됐을 수 있다. 새로고침해서 보고 나서 다시 하라"** 가 정확한 말이다.
+
+export const REFRESH_FAIL_MSG = {
+  ko: '목록을 새로 불러오지 못했습니다. 방금 하신 작업은 완료됐을 수 있으니, 새로고침해서 확인한 뒤 다시 시도해 주세요.',
+  ja: '一覧を再読み込みできませんでした。先ほどの操作は完了している可能性があります。再読み込みでご確認のうえ、改めてお試しください。',
+  en: 'We could not refresh the list. Your last action may have completed — please refresh to check before trying again.',
+} as const;
