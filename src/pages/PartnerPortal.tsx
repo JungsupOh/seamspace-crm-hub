@@ -104,6 +104,10 @@ export default function PartnerPortal() {
 
   const { data: allDeals } = useDeals();
   const [partner, setPartner] = useState<PartnerInfo | null>(null);
+  // ⚠️ `partner` 는 **첫 렌더에서 null 이다**(아래 useEffect 가 받아 온다).
+  //    예전에는 본문이 `partner.id` 를 그냥 읽어서, 받아 오기 전·실패했을 때
+  //    렌더 중 터지고 **파트너에게 흰 화면**이 떴다. 그래서 조회 상태를 남긴다.
+  const [partnerLoad, setPartnerLoad] = useState<'loading' | 'ok' | 'failed'>('loading');
   const [deals, setDeals] = useState<PartnerDeal[]>([]);
   const [dealBuyersMap, setDealBuyersMap] = useState<Record<string, PartnerDealBuyer[]>>({});
   const [loading, setLoading] = useState(true);
@@ -166,8 +170,12 @@ export default function PartnerPortal() {
       headers: { apikey: SUPABASE_KEY },
     })
       .then(r => r.json())
-      .then(rows => { if (rows[0]) setPartner(rows[0]); })
-      .catch(() => {});
+      .then(rows => {
+        // 빈 응답도 **실패로 본다** — 예전에는 조용히 넘어가서 흰 화면이 됐다.
+        if (rows?.[0]) { setPartner(rows[0]); setPartnerLoad('ok'); }
+        else setPartnerLoad('failed');
+      })
+      .catch(() => setPartnerLoad('failed'));
   }, [userProfile?.partner_id]);
 
   // 파트너 딜 로드
@@ -701,6 +709,36 @@ export default function PartnerPortal() {
     return (
       <div className="flex items-center justify-center h-[60vh]">
         <p className="text-muted-foreground">{t({ ko: '파트너 계정이 연결되어 있지 않습니다. 관리자에게 문의하세요.', ja: 'パートナーアカウントが連携されていません。管理者にお問い合わせください。', en: 'No partner account linked. Please contact the administrator.' })}</p>
+      </div>
+    );
+  }
+
+  // ⚠️ 여기까지 왔다고 `partner` 가 있는 것이 **아니다.**
+  //    위 가드는 `userProfile.partner_id`(로그인 정보)를 볼 뿐이고, `partner` 는
+  //    따로 받아 온다. 받아 오기 전·실패했을 때 본문이 `partner.id` 를 읽으면
+  //    렌더 중에 터지고 **파트너에게 흰 화면**이 뜬다. 그래서 여기서 멈춘다.
+  if (!partner) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] gap-3">
+        <p className="text-muted-foreground">
+          {partnerLoad === 'failed'
+            ? t({ ko: '파트너 정보를 불러오지 못했습니다.',
+                  ja: 'パートナー情報を読み込めませんでした。',
+                  en: 'Could not load your partner information.' })
+            : t({ ko: '불러오는 중…', ja: '読み込み中…', en: 'Loading…' })}
+        </p>
+        {partnerLoad === 'failed' && (
+          <>
+            <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+              {t({ ko: '다시 시도', ja: '再試行', en: 'Try again' })}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              {t({ ko: '계속 보이면 담당자에게 알려 주세요.',
+                   ja: '繰り返し表示される場合は担当者にご連絡ください。',
+                   en: 'If this keeps happening, please contact your account manager.' })}
+            </p>
+          </>
+        )}
       </div>
     );
   }
