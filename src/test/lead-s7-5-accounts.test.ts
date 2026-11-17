@@ -33,6 +33,8 @@ const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '')
 const MIG = read('supabase/migrations/20261203000000_lead_s7_5_partner_audit_log.sql');
 const DRY = read('../audit/dryrun_lead_s7_5_audit.sql');
 const FN  = read('supabase/functions/partner-accounts/index.ts');
+const FIX1 = read('supabase/migrations/20261204000100_lead_s7_5_fix1_audit_grants.sql');
+const DRY1 = read('../audit/dryrun_lead_s7_5_fix1_grants.sql');
 
 const PA: Caller = { role: 'partner_admin', partnerId: 'p1', id: 'u-admin' };
 const OUR: Caller = { role: 'admin', partnerId: null, id: 'u-ops' };
@@ -318,6 +320,34 @@ describe('감사 표 — 읽기만, 아무도 못 고친다', () => {
     expect(c).toContain('revoke all on public.partner_audit_log from anon');
     expect(c).toContain('revoke all on public.partner_audit_log from public');
     expect(c).toMatch(/grant select on public\.partner_audit_log to authenticated/);
+  });
+
+  // ── fix1 (2026-11-18): 적용 뒤 읽기 전용 확인에서 찾은 구멍 ──
+  it('**authenticated 의 쓰기 권한을 거둔다** — grant 만으로는 좁아지지 않는다', () => {
+    const c = sql(FIX1);
+    expect(c).toMatch(/revoke insert, update, delete, truncate, references, trigger\s*\n\s*on public\.partner_audit_log from authenticated/);
+  });
+
+  it('읽기(SELECT)와 service_role 은 건드리지 않는다', () => {
+    const c = sql(FIX1);
+    expect(c).toMatch(/grant select on public\.partner_audit_log to authenticated/);
+    expect(c).not.toMatch(/revoke[^;]*service_role/i);
+    expect(c).not.toMatch(/revoke[^;]*\bselect\b[^;]*authenticated/i);
+    expect(c).not.toMatch(/drop|delete from/i);
+  });
+
+  it('왜 놓쳤는지 파일에 적어 두었다 (grant 는 더하기일 뿐)', () => {
+    expect(FIX1).toContain('arwdDxtm');
+    expect(FIX1).toContain('거두지 않으면 좁아지지 않는다');
+  });
+
+  it('fix1 드라이런도 실제 역할 전환으로 보고, **시험 계정을 직접 만든다**', () => {
+    expect(DRY1).not.toMatch(/^\\\w/m);
+    expect((DRY1.match(/set local role authenticated/g) ?? []).length).toBeGreaterThanOrEqual(3);
+    // M010 의 지적: 운영에 member 가 없어 건너뛰지 않게
+    expect(DRY1).toContain("insert into public.user_profiles");
+    expect(DRY1).toContain("'partner_member'");
+    expect(sql(DRY1).trimEnd().endsWith('rollback;')).toBe(true);
   });
 
   it('동작 이름을 CHECK 로 좁힌다', () => {
