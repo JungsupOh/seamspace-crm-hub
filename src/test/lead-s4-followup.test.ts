@@ -143,10 +143,15 @@ describe('화면', () => {
 });
 
 describe('범위', () => {
-  it('마이그레이션을 더하지 않았다', () => {
-    const newer = fs.readdirSync(path.resolve(process.cwd(), 'supabase/migrations'))
-      .filter(f => /^\d{14}_/.test(f) && f.slice(0, 14) > '20261206000000');
-    expect(newer).toEqual([]);
+  it('이 단위는 마이그레이션을 더하지 않았다', () => {
+    // (처음에는 "뒤 번호가 없다"로 적었는데, **다음 단위가 생길 때마다 깨지는**
+    //  시험이었다. 이 단위가 자기 마이그레이션을 만들지 않았는지만 본다.)
+    const mine = fs.readdirSync(path.resolve(process.cwd(), 'supabase/migrations'))
+      .filter(f => /s4_followup/i.test(f));
+    expect(mine).toEqual([]);
+    // 수신 거부 표·칸은 S2 가 이미 만들었다 — 이 단위는 화면만 고쳤다
+    expect(fs.existsSync(path.resolve(process.cwd(),
+      'supabase/migrations/20261127000000_lead_s2_unsubscribe.sql'))).toBe(true);
   });
 
   it('억제 규칙을 건드리지 않았다', () => {
