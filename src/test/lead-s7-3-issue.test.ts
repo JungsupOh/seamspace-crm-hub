@@ -14,7 +14,8 @@ import path from 'node:path';
 
 import {
   balanceOf as fBalance, canIssue, countsTowardIssued as fCounts,
-  isStaleReservation as fStale, issuedSeatMonths as fIssued, overageOf,
+  isStaleReservation as fStale, issuedSeatMonths as fIssued,
+  issuedSeatMonthsOf as fIssuedOf, overageOf,
   seatMonths, STALE_RESERVATION_MINUTES,
 } from '../lib/partnerContract';
 import {
@@ -28,6 +29,8 @@ const read = (p: string) => fs.readFileSync(path.resolve(process.cwd(), p), 'utf
 const sql = (s: string) => s.split('\n').map(l => l.replace(/--.*$/, '')).join('\n');
 
 const FN   = read('supabase/functions/partner-issue-license/index.ts');
+const DRY3 = read('../audit/dryrun_lead_s7_3_issue.sql');
+const DRY1 = read('../audit/dryrun_lead_s7_3_fix1_licenses.sql');
 const RPC  = read('supabase/migrations/20261201000100_lead_s7_3_reserve_rpc.sql');
 const MIG  = read('supabase/migrations/20261201000000_lead_s7_3_license_contract_link.sql');
 
@@ -482,5 +485,155 @@ describe('발급 함수 — 예약 → 쿠폰 → 확정', () => {
     expect(FN).toContain("user_metadata 로 폴백하지 않는다");
     expect(FN).toMatch(/if \(isPartner && role !== 'partner_admin'\)/);
     expect(FN).toMatch(/const partnerId = isPartner \? profile\?\.partner_id/);
+  });
+});
+
+// ══════════════════════ fix2 (A) — SQL 의 NULL 3값 논리 ══════════════════════
+//
+// 제시카가 운영 드라이런에서 잡았다: `user_count` 가 NULL 이면
+//   `NULL ~ '^[0-9]+$'` → **NULL**, `not NULL` → **NULL**
+// 이라 `count(*) filter (where … and NULL)` 에서 **조용히 빠지고**,
+// 합계의 `case` 는 `else 0` 으로 떨어져 **0 으로 셌다.**
+// 수량을 모르는 발급이 0 이 되어 **잔량이 부풀었다**(fail-open).
+describe('RPC 의 수량 세기 — **NULL 안전**해야 한다 (fix2 A)', () => {
+  const body = sql(RPC);
+
+  it('정규식 결과를 `coalesce(..., false)` 로 감싼다', () => {
+    expect(body).toMatch(/coalesce\(user_count ~ '\^\[0-9\]\+\$', false\)/);
+    expect(body).toMatch(/coalesce\(duration\s+~ '\^\[0-9\]\+\$', false\)/);
+  });
+
+  it('**맨 정규식을 쓰는 곳이 없다** (하나라도 남으면 그 줄이 NULL 로 샌다)', () => {
+    const bare = body.match(/(?<!coalesce\()\b(user_count|duration) ~ '\^\[0-9\]\+\$'/g) ?? [];
+    expect(bare, `감싸지 않은 정규식: ${bare.join(', ')}`).toHaveLength(0);
+  });
+
+  it('**수량을 한 번만 계산하고 NULL = 셀 수 없음**으로 삼는다', () => {
+    // 합계와 미상 카운트를 따로 쓰면 둘이 어긋날 수 있다(그게 이 버그였다).
+    expect(body).toMatch(/with counted as \(/);
+    expect(body).toMatch(/else null/);
+    expect(body).toMatch(/select coalesce\(sum\(sm\), 0\), count\(\*\) filter \(where sm is null\)/);
+  });
+
+  it('옛 방식(`else 0` + 따로 센 filter)이 남아 있지 않다', () => {
+    expect(body).not.toMatch(/else 0\s*\n?\s*end\), 0\)/);
+    expect(body).not.toMatch(/filter \(\s*\n?\s*where \(seat_months is null/);
+  });
+
+  it('`status` 가 NULL 이어도 발급으로 센다', () => {
+    expect(body).toMatch(/coalesce\(status, 'issued'\) <> 'failed'/);
+  });
+
+  it('구매 합계도 NULL 안전하다 (sum 이 NULL 이면 0)', () => {
+    expect(body).toMatch(/coalesce\(sum\(seat_months\), 0\) into v_purchased/);
+  });
+
+  it('드라이런이 **다섯 가지 NULL 모양을 하나씩** 찔러 본다', () => {
+    for (const probe of ['user_count NULL', 'duration NULL', '둘 다 NULL',
+                         "user_count ''0''", '빈 문자열', 'status 도 NULL']) {
+      expect(DRY3, probe).toContain(probe);
+    }
+  });
+
+  it('드라이런이 **반대 방향**도 본다 (전부 막아 버리는 실수)', () => {
+    expect(DRY3).toContain('수량 아는 줄만 있을 때');
+    expect(DRY3).toContain('잘못 막힘 ❌');
+  });
+
+  it('드라이런이 동적 SQL·중첩 declare 를 쓰지 않는다 (사람이 읽고 돌린다)', () => {
+    expect(DRY3).not.toContain('execute format');
+    expect(DRY3).not.toMatch(/^\s+declare$/m);
+  });
+});
+
+describe('TS 두 구현이 **NULL·빈 값·소수에서 같은 분류**를 낸다 (fix2 A)', () => {
+  // SQL 은 문자열 시험 + 드라이런으로 증명하고, 여기서는 화면·서버 모듈을 맞춰 본다.
+  const cases: Array<Record<string, unknown>> = [
+    { seat_months: 480 }, { seat_months: '480' }, { seat_months: 480.5 },
+    { seat_months: 0 }, { seat_months: -5 }, { seat_months: null },
+    { seat_months: '' }, { seat_months: '  ' }, { seat_months: 'abc' },
+    { seat_months: true }, { seat_months: [] },
+    { user_count: '40', duration: '12' }, { user_count: 40, duration: 12 },
+    { user_count: null, duration: '12' }, { user_count: '40', duration: null },
+    { user_count: null, duration: null }, { user_count: '', duration: '12' },
+    { user_count: '  ', duration: '12' }, { user_count: '0', duration: '12' },
+    { user_count: '-1', duration: '12' }, { user_count: '1.5', duration: '12' },
+    { user_count: 'abc', duration: '12' }, { user_count: ' 40 ', duration: ' 12 ' },
+    {},
+  ];
+
+  it('22가지 모양에서 화면과 서버가 같은 답을 낸다', () => {
+    for (const c of cases) {
+      expect(fIssuedOf(c as never), JSON.stringify(c))
+        .toBe(licenseSeatMonths(c as never));
+    }
+  });
+
+  it('**셀 수 없는 것은 null 이다 — 0 이 아니다**', () => {
+    for (const c of [{ user_count: null, duration: null }, { seat_months: null },
+                     { user_count: '', duration: '' }, {}]) {
+      expect(fIssuedOf(c as never), JSON.stringify(c)).toBeNull();
+      expect(licenseSeatMonths(c as never), JSON.stringify(c)).toBeNull();
+    }
+  });
+
+  it('소수는 받지 않는다 (DB 는 bigint 다)', () => {
+    expect(fIssuedOf({ seat_months: 480.5 })).toBeNull();
+    expect(licenseSeatMonths({ seat_months: 480.5 })).toBeNull();
+  });
+
+  it('합계·미상 카운트도 같다', () => {
+    expect(fIssued(cases as never)).toEqual(sIssued(cases as never));
+    // 셀 수 있는 것은 다섯 줄이다:
+    //   {480} · {'480'} · {40×12} · {'40'×'12'} · {' 40 '×' 12 '}
+    expect(fIssued(cases as never).total).toBe(480 * 5);
+  });
+});
+
+// ══════════════════════ fix2 (B) — 트리거가 아무것도 막지 않던 버그 ══════════════════════
+describe('칸 보호 트리거는 **security definer 가 아니다** (fix2 B)', () => {
+  const guard = read('supabase/migrations/20261201000200_lead_s7_3_fix1_licenses_write_guard.sql');
+  const fn = guard.slice(guard.indexOf('create or replace function public.partner_licenses_guard_partner_update'),
+                         guard.indexOf('revoke all on function'));
+
+  it('**`security definer` 를 쓰지 않는다** — 쓰면 current_user 가 소유자가 되어 전부 통과한다', () => {
+    const code = fn.replace(/--.*$/gm, '');
+    expect(code).not.toMatch(/\bsecurity\s+definer\b/i);
+  });
+
+  it('호출자 판별에 `current_user` 를 쓴다 (invoker 라서 진짜 호출자다)', () => {
+    expect(fn).toMatch(/if current_user <> 'authenticated' then/);
+  });
+
+  it('왜 definer 를 버렸는지 적어 두었다 (같은 실수를 되풀이하지 않게)', () => {
+    // 설명이 여러 줄에 걸쳐 있어 줄바꿈·주석 표시를 지우고 본다.
+    // 설명이 여러 줄에 걸쳐 있고 `current_user` 에 백틱이 붙어 있어,
+    // 줄바꿈·주석 표시만 지우고 **백틱 없는 부분**으로 찾는다.
+    const flat = guard.replace(/\n--\s*/g, ' ');
+    expect(flat).toContain('호출자가 아니라 함수 소유자(postgres)');
+    expect(guard).toContain('트리거가 아무것도 막지 못했다');
+  });
+
+  it('search_path 는 그대로 고정한다', () => {
+    expect(fn).toMatch(/set search_path = public, pg_temp/);
+  });
+
+  it('드라이런이 **거부 사유를 구분한다** (CHECK·없는 칸과 트리거를 섞지 않는다)', () => {
+    expect(DRY1).toContain("sqlstate = '42501'");
+    expect(DRY1).toContain('트리거가 막음 ✅');
+    expect(DRY1).toContain('다른 이유로 거부 ⚠️');
+    expect(DRY1).toContain('v_trigger_msg');
+  });
+
+  it('드라이런이 **CHECK 에 가리지 않는 값**으로 seat_months 를 시험한다', () => {
+    // 0 을 넣으면 CHECK (NULL 또는 > 0) 가 먼저 막아 트리거를 못 본다
+    expect(DRY1).toMatch(/set seat_months = 1 where id = mine/);
+    expect(DRY1).not.toMatch(/set seat_months = 0 where id = mine/);
+    expect(DRY1).toContain('CHECK 가 먼저 막아');
+  });
+
+  it('드라이런이 `contract_id` 칸을 **트랜잭션 안에서 준비**한다 (없으면 시험이 가려진다)', () => {
+    expect(DRY1).toMatch(/alter table public\.partner_licenses add column if not exists contract_id uuid;/);
+    expect(DRY1).toContain('칸이 없다" 오류로 가려져');
   });
 });

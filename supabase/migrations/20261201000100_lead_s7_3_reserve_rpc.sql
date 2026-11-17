@@ -32,6 +32,10 @@
 --   수량: seat_months 가 있으면 그것, 없으면 user_count × duration,
 --         그것도 셀 수 없으면 **셀 수 없음**(0 으로 치지 않는다 — 0 으로 치면
 --         잔량이 많아 보여 초과 발급이 난다)
+--         ⚠️ NULL 안전해야 한다. `NULL ~ '정규식'` 은 false 가 아니라 **NULL** 이고,
+--            `not NULL` 도 NULL 이라 `filter (where ... )` 에서 **조용히 빠진다**.
+--            그래서 정규식마다 `coalesce(..., false)` 로 감싸고, 수량을 **한 번만**
+--            계산해 NULL 이면 "셀 수 없음"으로 삼는다(fix2).
 -- ============================================================================
 
 create or replace function public.partner_reserve_license_seats(
@@ -113,23 +117,35 @@ begin
    where contract_id = p_contract_id and voided_at is null;
 
   -- ── 발급 합계 ('failed' 만 뺀다. revoked·reserved 는 센다) ──
-  select
-    coalesce(sum(
+  --
+  -- ⚠️ fix2: 한 줄의 수량을 **한 곳에서만** 정한다.
+  --    전에는 합계(case)와 미상 카운트(filter)를 따로 썼는데, `user_count` 가 NULL 이면
+  --    `NULL ~ '^[0-9]+$'` 는 **NULL** 이고 `not NULL` 도 NULL 이라 filter 에서 빠졌다.
+  --    같은 줄이 합계에서는 `else 0` 으로 떨어져 **0 으로 세고**, 미상에도 안 잡혔다
+  --    → 수량을 모르는 발급이 조용히 0 이 되어 **잔량이 부풀었다**(fail-open).
+  --
+  --    이제 `sm` 을 한 번만 계산하고 **NULL = "셀 수 없음"** 으로 삼는다.
+  --    합계는 NULL 을 더하지 않고, 미상은 `sm is null` 로 센다 → 둘이 어긋날 수 없다.
+  --    정규식 결과는 `coalesce(..., false)` 로 감싸 NULL 을 "셀 수 없다" 쪽으로 보낸다.
+  with counted as (
+    select
       case
         when seat_months is not null and seat_months > 0 then seat_months
-        when user_count ~ '^[0-9]+$' and duration ~ '^[0-9]+$'
-             and user_count::bigint > 0 and duration::bigint > 0
+        when coalesce(user_count ~ '^[0-9]+$', false)
+         and coalesce(duration   ~ '^[0-9]+$', false)
+         and user_count::bigint > 0
+         and duration::bigint   > 0
           then user_count::bigint * duration::bigint
-        else 0
-      end), 0),
-    count(*) filter (
-      where (seat_months is null or seat_months <= 0)
-        and not (user_count ~ '^[0-9]+$' and duration ~ '^[0-9]+$'
-                 and user_count::bigint > 0 and duration::bigint > 0))
-  into v_issued, v_unknown
-    from public.partner_licenses
-   where contract_id = p_contract_id
-     and coalesce(status, 'issued') <> 'failed';
+        else null          -- 셀 수 없음
+      end as sm
+      from public.partner_licenses
+     where contract_id = p_contract_id
+       -- status 가 NULL 이면 'issued' 로 본다(기본값과 같다) → NULL 안전
+       and coalesce(status, 'issued') <> 'failed'
+  )
+  select coalesce(sum(sm), 0), count(*) filter (where sm is null)
+    into v_issued, v_unknown
+    from counted;
 
   -- 수량을 셀 수 없는 줄이 있으면 잔량을 믿을 수 없다 → 사람이 보게 막는다.
   if v_unknown > 0 then

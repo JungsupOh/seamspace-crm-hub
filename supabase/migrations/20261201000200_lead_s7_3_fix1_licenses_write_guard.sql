@@ -91,12 +91,29 @@ drop policy if exists "partner_scoped_partner_licenses" on public.partner_licens
 
 -- ── 2) 칸 단위 보호 트리거 ──
 
+-- ⚠️ fix2: **`security definer` 를 쓰지 않는다.**
+--
+--    처음에는 `security definer` + `if current_user <> 'authenticated'` 로 썼다.
+--    그런데 **security definer 함수 안에서 `current_user` 는 호출자가 아니라
+--    함수 소유자(postgres)** 다. 그래서 그 분기에 **항상** 걸려 무조건 통과했고,
+--    트리거가 아무것도 막지 못했다(제시카가 운영 드라이런으로 잡았다 —
+--    문자열 시험은 구문만 보므로 이것을 잡지 못한다).
+--
+--    고치는 길은 둘이었다:
+--      ① `security definer` 를 두고 `current_setting('role', true)` 로 호출자를 본다
+--      ② `security definer` 를 **없앤다**(기본 invoker) → `current_user` 가 진짜 호출자다
+--    ②를 골랐다. 이유:
+--      · 더 단순하다. 판별 값이 하나뿐이고, "소유자 권한으로 돈다"는 위험 자체가 없다.
+--      · 읽어야 하는 것은 **자기 프로필 한 줄**뿐이고, `user_profiles` 의 SELECT 정책이
+--        `(id = auth.uid()) or app_is_admin()` 이라 **파트너도 admin 도 자기 행을 읽는다**
+--        (운영에서 확인). definer 권한이 필요 없다.
+--      · service_role 은 RLS 를 지나가므로 그쪽도 문제없다 —
+--        애초에 `current_user <> 'authenticated'` 에서 먼저 통과한다.
+--
+--    `set search_path` 는 definer 가 아니어도 남겨 둔다(스키마를 명시해도 습관으로 둔다).
 create or replace function public.partner_licenses_guard_partner_update()
 returns trigger
 language plpgsql
-security definer
--- ⚠️ security definer 는 소유자 권한으로 돈다. search_path 를 고정하지 않으면
---    호출자가 같은 이름의 가짜 user_profiles 를 앞세울 수 있다.
 set search_path = public, pg_temp
 as $$
 declare
@@ -106,7 +123,7 @@ begin
   -- 로그인한 사람이 아니면 통과한다.
   --   · PostgREST 는 키에 따라 역할을 바꾼다: anon / authenticated / service_role.
   --   · 엣지 함수는 service_role, SQL 편집기는 postgres 다.
-  --   둘 중 하나만 봐도 되지만 **둘 다** 본다(한쪽이 비는 환경이 있을 수 있다).
+  --   **invoker 라서** 여기의 current_user 가 진짜 호출자다(definer 면 소유자가 된다).
   if current_user <> 'authenticated' then
     return new;
   end if;
@@ -163,4 +180,4 @@ revoke delete on public.partner_licenses from authenticated;
 grant select, insert, update on public.partner_licenses to authenticated;
 
 comment on function public.partner_licenses_guard_partner_update() is
-  'LEAD-S7-3 fix1. 파트너 계정은 email_sent·partner_deal_buyer_id 만 고칠 수 있다. 허용 목록 방식이라 새 칸은 기본이 막힘. service_role·admin 은 통과.';
+  'LEAD-S7-3 fix1/fix2. 파트너 계정은 email_sent·partner_deal_buyer_id 만 고칠 수 있다. 허용 목록 방식이라 새 칸은 기본이 막힘. service_role·admin 은 통과. security invoker 다 — definer 로 바꾸면 current_user 가 소유자가 되어 아무것도 막지 못한다.';

@@ -76,12 +76,25 @@ export function isLiveContract(c: Contract): boolean {
  * 발급 최소 단위는 1명 × 1개월이라 **정수만** 받는다. 반 달은 없다(James 위임 확정 ①).
  * 셀 수 없으면 `null` — 0 으로 바꾸면 "공짜로 발급"이 되어 잔량이 줄지 않는다.
  */
+/**
+ * 사람이 적은 값을 **정수 수량**으로 읽는다. 아니면 null.
+ *
+ * ⚠️ `Number(true)` 는 **1** 이고 `Number([])` 는 **0** 이다. 숫자·문자열이 아닌 것을
+ *    먼저 걷어내지 않으면 `true` 가 수량 1 로 둔갑한다(fix2 에서 대조 시험이 잡았다 —
+ *    `_shared/seat-balance.ts` 는 처음부터 걸러내고 있었다).
+ *    `Number(null)`·`Number('')` 은 0 이라 아래 `<= 0` 에서 걸린다.
+ */
+function intQty(v: unknown): number | null {
+  if (typeof v !== 'number' && typeof v !== 'string') return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 export function seatMonths(userCount: unknown, months: unknown): number | null {
-  const u = Number(userCount);
-  const m = Number(months);
-  if (!Number.isInteger(u) || !Number.isInteger(m)) return null;
-  if (u <= 0 || m <= 0) return null;
-  return u * m;
+  // (partner_licenses 의 user_count·duration 은 **text** 라 문자열도 받는다.)
+  const u = intQty(userCount);
+  const m = intQty(months);
+  return u !== null && m !== null ? u * m : null;
 }
 
 // ───────────────────────── 잔량 ─────────────────────────
@@ -155,8 +168,11 @@ export function purchasedSeatMonths(rows: readonly PurchaseRow[]): number {
  * **발급 당시의 수량**이 흔들리면 안 된다(설계 1-2). 없으면 그때만 곱한다(옛 기록).
  */
 export function issuedSeatMonthsOf(row: IssuedRow): number | null {
-  const fixed = Number(row.seat_months);
-  if (Number.isFinite(fixed) && fixed > 0) return fixed;
+  // ⚠️ fix2: 정수만 받고, 숫자·문자열이 아닌 것은 걷어낸다(`intQty`).
+  //    전에는 `Number.isFinite` 라 480.5 를 받았고, `Number(true)` 가 1 이라
+  //    `true` 도 받았다 — `_shared/seat-balance.ts` 와 **다른 답**이었다.
+  const fixed = intQty(row.seat_months);
+  if (fixed !== null) return fixed;
   return seatMonths(row.user_count, row.duration);
 }
 

@@ -192,8 +192,15 @@ describe('칸 보호 트리거 — **허용 목록**', () => {
     expect(fn).toMatch(/raise exception[\s\S]{0,160}errcode = '42501'/);
   });
 
-  it('**security definer 인데 search_path 를 고정했다**', () => {
-    expect(fn).toContain('security definer');
+  // fix2: `security definer` 를 **버렸다.** definer 함수 안에서 `current_user` 는
+  //       호출자가 아니라 소유자(postgres)라 트리거가 **아무것도 막지 못했다**.
+  //       이제 invoker 이고, `current_user` 가 진짜 호출자다.
+  it('**security definer 가 아니다** — 쓰면 current_user 가 소유자가 되어 전부 통과한다', () => {
+    const code = fn.replace(/--.*$/gm, '');
+    expect(code).not.toMatch(/\bsecurity\s+definer\b/i);
+  });
+
+  it('search_path 는 그대로 고정한다', () => {
     expect(fn).toMatch(/set search_path = public, pg_temp/);
   });
 
@@ -219,11 +226,19 @@ describe('드라이런 — 세 역할로 실제로 찔러 본다', () => {
     expect(DRY).toContain('create trigger trg_partner_licenses_guard_update');
   });
 
+  // fix2: 드라이런의 ④ 문구가 바뀌었다(거부 사유를 구분하느라).
+  //       "그 칸을 시험한다"는 목적은 그대로다.
   it('**막아야 하는 칸을 하나씩 찔러 본다**', () => {
-    for (const probe of ['seat_months 고치기', 'status 고치기', 'contract_id 고치기',
-                         'user_count·duration', 'coupon_code 고치기']) {
+    for (const probe of ['파트너: status', '파트너: user_count·duration',
+                         'coupon_code', 'seat_months (=1)', 'contract_id']) {
       expect(DRY, probe).toContain(probe);
     }
+  });
+
+  it('**거부 사유가 트리거인지 구분한다** (CHECK·없는 칸과 섞지 않는다)', () => {
+    expect(DRY).toContain("sqlstate = '42501'");
+    expect(DRY).toContain('트리거가 막음 ✅');
+    expect(DRY).toContain('다른 이유로 거부 ⚠️');
   });
 
   it('**포털이 쓰는 두 칸이 되는지 본다** (여기가 ❌ 면 적용하면 안 된다)', () => {
