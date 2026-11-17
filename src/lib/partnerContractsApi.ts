@@ -219,3 +219,55 @@ export async function getPartnerLicenseSeats(partnerId: string): Promise<License
   await ok(res, '발급 조회');
   return res.json();
 }
+
+// ───────────────────────── 파트너 요청 (LEAD-S7-4) ─────────────────────────
+
+const REQUEST_URL = `${SUPABASE_URL}/rest/v1/partner_requests`;
+
+export interface PartnerRequestRow {
+  id: string;
+  kind: 'purchase' | 'revoke';
+  partner_id: string;
+  contract_id: string | null;
+  license_id: string | null;
+  seat_months: number | null;
+  reason: string | null;
+  status: 'open' | 'handled' | 'dismissed';
+  requested_by: string;
+  requested_at: string;
+  handled_at: string | null;
+  handled_note: string | null;
+}
+
+const REQUEST_COLS = [
+  'id', 'kind', 'partner_id', 'contract_id', 'license_id', 'seat_months',
+  'reason', 'status', 'requested_by', 'requested_at', 'handled_at', 'handled_note',
+].join(',');
+
+/** 관리자: 모든 파트너의 요청(열린 것 먼저). RLS 가 admin 에게만 전체를 보여 준다. */
+export async function getPartnerRequests(onlyOpen = false): Promise<PartnerRequestRow[]> {
+  const filter = onlyOpen ? '&status=eq.open' : '';
+  const res = await authedFetch(
+    `${REQUEST_URL}?select=${REQUEST_COLS}${filter}&order=requested_at.desc&limit=500`,
+    { headers: H },
+  );
+  await ok(res, '요청 조회');
+  return res.json();
+}
+
+/**
+ * 요청을 처리했다고 표시한다. **status 와 처리 기록만** 바꾼다 —
+ * 요청 내용(종류·대상·수량·사유)은 파트너가 보낸 사실이라 고치지 않는다.
+ */
+export async function markRequestHandled(
+  id: string, handledBy: string, status: 'handled' | 'dismissed', note?: string,
+): Promise<void> {
+  const res = await authedFetch(`${REQUEST_URL}?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: H,
+    body: JSON.stringify({
+      status, handled_by: handledBy, handled_at: new Date().toISOString(),
+      handled_note: note?.trim() || null,
+    }),
+  });
+  await ok(res, '요청 처리');
+}

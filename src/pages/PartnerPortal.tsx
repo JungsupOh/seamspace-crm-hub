@@ -20,6 +20,14 @@ import { LocalizedDateInput } from '@/components/LocalizedDateInput';
 import { makeT, formatMoney, currencyUnit, formatIntlPhone } from '@/lib/partner-i18n';
 import { authedFetch } from '@/lib/authedFetch';
 import { issueLicense, getPartnerLicenses, resendLicenseEmail, revokeLicense, expireLicenseGroup, getCouponGroupInfo, setLicenseBuyer, type PartnerLicense, type CouponGroupInfo } from '@/lib/partner-licenses';
+// LEAD-S7-4 — 내 계약(도매 선구매) 구역·계약 선택·요청
+import PortalContracts from '@/components/partner-portal/PortalContracts';
+import { getMyContracts } from '@/lib/partnerPortalContracts';
+import { contractChoice, contractLabel } from '@/lib/portalIssueContract';
+import { toSettlementMethod } from '@/lib/partnerContract';
+import { sendPartnerRequest } from '@/lib/partnerPortalContracts';
+import { PORTAL_MSG, issueBlockMessage } from '@/lib/partnerPortalMsg';
+import { todayKst } from '@/lib/leadFollowup';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -114,6 +122,12 @@ export default function PartnerPortal() {
   const [issuing, setIssuing] = useState(false);
   const [issueForm, setIssueForm] = useState<IssueForm>(emptyIssueForm());
   const [issuedCode, setIssuedCode] = useState<string | null>(null);
+
+  // ── LEAD-S7-4: 도매 선구매 계약 ──
+  //    계약이 없으면(지금 운영이 그렇다) 아래는 전부 빈 값이고 화면은 그대로다.
+  const [myContracts, setMyContracts] = useState<Parameters<typeof contractChoice>[0]>([]);
+  const [issueContractId, setIssueContractId] = useState<string | null>(null);
+  const choice = contractChoice(myContracts, issueContractId, todayKst());
   // 펼친 딜(아코디언) — 구매자별 이용권을 그 자리에서 보여준다
   const [expandedDeals, setExpandedDeals] = useState<Set<string>>(new Set());
   const toggleExpand = (id: string) => setExpandedDeals(prev => {
@@ -503,6 +517,9 @@ export default function PartnerPortal() {
     setIssuing(true);
     try {
       const res = await issueLicense({
+        // LEAD-S7-4: 도매 계약이 둘 이상이면 고른 것을, 하나면 그것을 보낸다.
+        //   계약이 없으면 null 이라 서버가 기존 동작 그대로 간다.
+        contractId: choice.contractId,
         partnerDealId: issueForm.partnerDealId || null,
         partnerDealBuyerId: issueForm.partnerDealBuyerId || null,
         customerName: issueForm.customerName,
@@ -541,7 +558,13 @@ export default function PartnerPortal() {
         }
       }
     } catch (e) {
-      toast.error(`${t({ ko: '발급 실패', ja: '発行に失敗しました', en: 'Issue failed' })}: ${e instanceof Error ? e.message : String(e)}`);
+      // LEAD-S7-4: 서버가 **거절 코드**를 보내면 파트너 언어로 고른다
+      //   (서버 문구는 영어·한국어뿐이라 일본어가 빠진다).
+      //   모르는 코드면 서버가 준 글을 그대로 쓴다.
+      const code = (e as { code?: string })?.code;
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(code ? issueBlockMessage(code, msg, t)
+        : `${t({ ko: '발급 실패', ja: '発行に失敗しました', en: 'Issue failed' })}: ${msg}`);
     } finally { setIssuing(false); }
   };
 
@@ -588,10 +611,38 @@ export default function PartnerPortal() {
     setRevokeConfirmOpen(true);
   };
 
+  /**
+   * LEAD-S7-4: 이 이용권이 **도매형 계약**에서 나간 것인가.
+   *   도매형이면 수량이 걸려 있어 직접 무효화하지 않고 **요청**으로 바꾼다.
+   *   커미션형·계약 없음은 **지금 동작 그대로**다.
+   */
+  const isWholesaleLicense = (lic: PartnerLicense | null): boolean => {
+    const cid = (lic as { contract_id?: string | null } | null)?.contract_id;
+    if (!cid) return false;
+    return myContracts.some(c => c.id === cid
+      && toSettlementMethod(c.settlement_method) === 'wholesale');
+  };
+
   const confirmRevoke = async () => {
     const lic = revokeTarget;
     setRevokeConfirmOpen(false);
     if (!lic) return;
+
+    // 도매형 이용권은 **요청까지만** — 쿠폰이 즉시 꺼지지 않는다는 것을 문구가 말한다.
+    if (isWholesaleLicense(lic)) {
+      setRevoking(true);
+      try {
+        const r = await sendPartnerRequest({
+          kind: 'revoke', licenseId: lic.id, reason: revokeReason.trim() || null,
+        });
+        r.ok ? toast.success(r.message) : toast.error(r.message);
+        setRevokeTarget(null);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      } finally { setRevoking(false); }
+      return;
+    }
+
     setRevoking(true);
     try {
       const res = await revokeLicense(lic, revokeReason);
@@ -695,6 +746,14 @@ export default function PartnerPortal() {
           </div>
         </div>
       </div>
+
+      {/* LEAD-S7-4: 내 계약(도매 선구매) — 계약이 없으면 통째로 보이지 않는다 */}
+      <PortalContracts
+        partnerId={partner.id}
+        locale={partnerLocale}
+        licenses={licenses}
+        canRequest={canIssueLicenses || canEditPartnerDeals}
+      />
 
       {/* 딜 추가 버튼 */}
       {/* 이용권 발급은 항상 '구매자'에서 시작한다 (딜 펼치기 또는 딜 수정 화면).
@@ -1277,6 +1336,35 @@ export default function PartnerPortal() {
             </div>
           ) : (
             <div className="space-y-3 pt-1">
+              {/* LEAD-S7-4: 어느 계약에서 빠지는지 — 둘 이상이면 고르게 한다 */}
+              {choice.mode !== 'none' && (
+                <div>
+                  <Label className="text-xs">{t(PORTAL_MSG.chooseContract)}</Label>
+                  {choice.mode === 'fixed' ? (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {contractLabel(choice.options[0])} · {t(PORTAL_MSG.contractFixed)}
+                    </p>
+                  ) : (
+                    <>
+                      <select
+                        className="w-full h-8 text-sm rounded-md border bg-background px-2"
+                        value={issueContractId ?? ''}
+                        onChange={e => setIssueContractId(e.target.value || null)}
+                      >
+                        <option value="">—</option>
+                        {choice.options.map(c => (
+                          <option key={c.id} value={c.id}>{contractLabel(c)}</option>
+                        ))}
+                      </select>
+                      {choice.needsPick && (
+                        <p className="text-xs text-amber-700 mt-0.5">
+                          {t(PORTAL_MSG.chooseContractRequired)}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <Label className="text-xs">{t({ ko: '고객명', ja: '顧客名', en: 'Customer name' })}</Label>
@@ -1317,7 +1405,9 @@ export default function PartnerPortal() {
               </div>
               <div className="flex justify-end gap-2 pt-2 border-t">
                 <Button variant="outline" size="sm" onClick={() => setIssueDialogOpen(false)}>{t({ ko: '취소', ja: 'キャンセル', en: 'Cancel' })}</Button>
-                <Button size="sm" onClick={handleIssue} disabled={issuing}>
+                {/* LEAD-S7-4: 계약을 안 골랐으면 막는다. **편의일 뿐**이고
+                    최종 판단은 서버(예약 RPC)다 — 화면 숫자를 믿고 보내지 않는다. */}
+                <Button size="sm" onClick={handleIssue} disabled={issuing || choice.needsPick}>
                   {issuing && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
                   <Ticket className="h-3.5 w-3.5 mr-1" />{t({ ko: '발급 · 이메일 발송', ja: '発行・メール送信', en: 'Issue & Email' })}
                 </Button>
@@ -1360,13 +1450,21 @@ export default function PartnerPortal() {
       <AlertDialog open={revokeConfirmOpen} onOpenChange={setRevokeConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t({ ko: '이용권 회수', ja: 'ライセンス回収', en: 'Revoke License' })}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {isWholesaleLicense(revokeTarget)
+                ? t(PORTAL_MSG.requestRevoke)
+                : t({ ko: '이용권 회수', ja: 'ライセンス回収', en: 'Revoke License' })}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {t({
-                ko: `${revokeTarget?.coupon_code ?? ''} 코드를 회수합니다. 아직 사용 전이면 즉시 무효화되고, 이미 사용 중이면 그룹 만료 여부를 다시 확인합니다. 발급 이력은 정산 근거로 남습니다.`,
-                ja: `${revokeTarget?.coupon_code ?? ''} を回収します。未使用なら即時無効化し、使用中ならグループ失効を再確認します。発行履歴は精算の根拠として残ります。`,
-                en: `Revoke ${revokeTarget?.coupon_code ?? ''}. If unused it’s voided immediately; if already in use you’ll confirm expiring the group. The record is kept for settlement.`,
-              })}
+              {/* LEAD-S7-4: 도매형이면 **요청**이다 — 쿠폰이 즉시 꺼지지 않는다는 것을 말한다.
+                  커미션형·계약 없음은 지금 문구 그대로(바로 회수된다). */}
+              {isWholesaleLicense(revokeTarget)
+                ? t(PORTAL_MSG.requestRevokeHint).replace(/\*\*/g, '')
+                : t({
+                    ko: `${revokeTarget?.coupon_code ?? ''} 코드를 회수합니다. 아직 사용 전이면 즉시 무효화되고, 이미 사용 중이면 그룹 만료 여부를 다시 확인합니다. 발급 이력은 정산 근거로 남습니다.`,
+                    ja: `${revokeTarget?.coupon_code ?? ''} を回収します。未使用なら即時無効化し、使用中ならグループ失効を再確認します。発行履歴は精算の根拠として残ります。`,
+                    en: `Revoke ${revokeTarget?.coupon_code ?? ''}. If unused it’s voided immediately; if already in use you’ll confirm expiring the group. The record is kept for settlement.`,
+                  })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-1.5">

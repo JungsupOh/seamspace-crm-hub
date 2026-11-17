@@ -18,6 +18,7 @@ import type { DealFields, ContactFields } from '@/types/airtable';
 import { authedFetch } from '@/lib/authedFetch';
 import PartnerContractsSection from '@/components/partners/PartnerContractsSection';
 import ReceivablesSummary from '@/components/partners/ReceivablesSummary';
+import PartnerRequests from '@/components/partners/PartnerRequests';
 import { airtable, type AirtableRecord } from '@/lib/airtable';
 import { getPartnerDeals, getAllPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals, createDealBuyers, getDealBuyers, deleteDealBuyers } from '@/lib/partner-deals';
 import { getPartnerLicenses, type PartnerLicense } from '@/lib/partner-licenses';
@@ -2024,7 +2025,7 @@ function PartnerDealsSection({
 
 // ── 메인 페이지 ──────────────────────────────────
 export default function Partners() {
-  const { canEdit } = useAuth();
+  const { canEdit, userProfile } = useAuth();
   const qc = useQueryClient();
   const { data: partners, isLoading } = useQuery({ queryKey: ['partners'], queryFn: getPartners });
   const { data: allDeals } = useDeals();
@@ -2226,6 +2227,14 @@ export default function Partners() {
           </div>
         </div>
       </div>
+
+      {/* LEAD-S7-4: 파트너가 보낸 요청 — 없으면 보이지 않는다 */}
+      {userProfile?.id && (
+        <PartnerRequests
+          adminId={userProfile.id}
+          partnerNames={new Map((list ?? []).map(p => [p.id, p.name ?? '']))}
+        />
+      )}
 
       {/* 미수금 한눈에 (LEAD-S7-2b) — 계약이 없으면 아무것도 보이지 않는다 */}
       <ReceivablesSummary

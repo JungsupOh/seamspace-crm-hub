@@ -46,6 +46,12 @@ export interface PartnerLicense {
 
 export interface IssueLicenseInput {
   partnerId?: string;          // admin이 대신 발급 시. partner 본인은 서버가 강제.
+  /**
+   * LEAD-S7-4. 어느 계약에서 발급할지.
+   * 도매형 계약이 **둘 이상**이면 서버가 요구한다(없으면 400 CONTRACT_REQUIRED).
+   * 하나면 서버가 알아서 고르고, 없으면 기존 동작 그대로다.
+   */
+  contractId?: string | null;
   partnerDealId?: string | null;
   partnerDealBuyerId?: string | null;   // 딜 내 특정 구매자에 귀속
   customerName: string;
@@ -91,6 +97,8 @@ export async function issueLicense(input: IssueLicenseInput): Promise<{ coupon_c
     },
     body: JSON.stringify({
       partnerId:     input.partnerId,
+      // LEAD-S7-4: 도매형 계약이 둘 이상이면 서버가 이것을 요구한다(400 CONTRACT_REQUIRED).
+      contractId:    input.contractId ?? null,
       partnerDealId: input.partnerDealId ?? null,
       partnerDealBuyerId: input.partnerDealBuyerId ?? null,
       customerName:  input.customerName,
@@ -105,11 +113,17 @@ export async function issueLicense(input: IssueLicenseInput): Promise<{ coupon_c
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.coupon_code) {
-    throw new Error(data.error || t({
+    // LEAD-S7-4: 서버가 보낸 **거절 코드**를 들고 간다. 화면이 파트너 언어로 고른다
+    //   (서버 문구는 영어·한국어뿐이라 일본어가 빠진다).
+    //   코드를 모르면 서버가 준 글을 그대로 쓴다.
+    const err = new Error(data.error || t({
       ko: `이용권 발급 실패 (${res.status})`,
       ja: `ライセンス発行に失敗しました (${res.status})`,
       en: `Failed to issue license (${res.status})`,
-    }));
+    })) as Error & { code?: string; balance?: number };
+    if (typeof data.code === 'string') err.code = data.code;
+    if (typeof data.balance === 'number') err.balance = data.balance;
+    throw err;
   }
 
   // 유료 영어 이메일 발송 (실패해도 코드는 이미 발급됨)
