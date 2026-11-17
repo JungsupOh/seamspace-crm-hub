@@ -156,7 +156,25 @@ describe('정책 초안', () => {
     expect(f).toContain('h8_rollback.sql');
   });
 
-  it('**`partner-files` 는 admin 에게만 연다** (M035)', () => {
+  it('**열린 `partner_files_storage_all` 을 먼저 지운다** (M036 정정)', () => {
+    // 처음에는 "정책 0건" 으로 읽고 여는 초안을 썼는데, 목록이 잘려 있었다.
+    // 실제로는 `ALL` + `public` 이 있다 — **지우는 것이 먼저**다.
+    const d = read(`${DIR}/h8_03_partner_files.sql.draft`);
+    const live = d.split('\n').filter(l => !l.trim().startsWith('--')).join('\n');
+    expect(live).toContain('drop policy if exists "partner_files_storage_all" on storage.objects;');
+    // drop 이 create 보다 **먼저** 나온다
+    expect(live.indexOf('drop policy if exists "partner_files_storage_all"'))
+      .toBeLessThan(live.indexOf('create policy "partner_files_insert_admin"'));
+  });
+
+  it('롤백이 **원문을 그대로** 담고 경고한다', () => {
+    const rb = read(`${DIR}/h8_rollback.sql`);
+    expect(rb).toContain('create policy "partner_files_storage_all" on storage.objects');
+    expect(rb).toContain('for all to public');
+    expect(rb).toContain('통장사본 버킷이 다시 누구에게나 열립니다');
+  });
+
+  it('**`partner-files` 는 admin 에게만 연다**', () => {
     const d = read(`${DIR}/h8_03_partner_files.sql.draft`);
     const live = d.split('\n').filter(l => !l.trim().startsWith('--')).join('\n');
     // 세 동작 전부 app_is_admin() 을 건다
@@ -174,9 +192,10 @@ describe('정책 초안', () => {
   it('드라이런이 **세 역할로** partner-files 를 눌러 본다', () => {
     const dry = read(`${DIR}/h8_dryrun.sql`);
     expect(dry).toContain('⑥ anon: partner-files 업로드');
+    expect(dry).toContain('⑥ anon: partner-files 삭제');      // 통장사본 삭제
     expect(dry).toContain('⑥ 파트너: partner-files 업로드');
     expect(dry).toContain('⑥ admin: partner-files 업로드');
-    expect(dry).toContain('업로드가 살아난다');
+    expect(dry).toContain('열린 것이 막히는가');                // 기대가 반대로 고쳐졌다
   });
 
   it('**SELECT 를 건드리지 않는다** (이미 나간 공개 링크가 있다)', () => {
