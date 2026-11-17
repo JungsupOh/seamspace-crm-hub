@@ -238,6 +238,9 @@ export default function Leads() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="ghost" size="sm" asChild>
+            <Link to="/outreach">아웃리치 큐</Link>
+          </Button>
+          <Button variant="ghost" size="sm" asChild>
             <Link to="/leads/facts">쓸 수 있는 사실</Link>
           </Button>
           <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>

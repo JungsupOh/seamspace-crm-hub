@@ -11,6 +11,7 @@ import {
   archiveSummary, buildEditPatch, changeSummary, diffTracked, unarchiveSummary,
   type EditableLead,
 } from '@/lib/leadEdit';
+import { sentActivitySummary } from '@/lib/outreach';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -62,6 +63,11 @@ export interface LeadRow {
 
   // LEAD-S1 — 엑셀 등급의 세부 구분(B-교육·B-기업·C2). 값은 제시카가 채운다.
   segment_detail?: string | null;
+
+  // LEAD-S2 — 수신 거부
+  unsubscribe_token?: string | null;
+  unsubscribed_at?: string | null;
+  marketing_consent?: boolean | null;
 }
 
 export interface LeadActivity {
@@ -91,6 +97,7 @@ const LEAD_COLS = [
   'email_quality', 'email_status', 'notes',
   'followup_stage', 'last_contact_at', 'next_action', 'next_action_due', 'owner', 'close_reason',
   'import_batch_id', 'archived_at', 'segment_detail',
+  'unsubscribe_token', 'unsubscribed_at', 'marketing_consent',
 ].join(',');
 
 export async function getLeads(): Promise<LeadRow[]> {
@@ -610,4 +617,152 @@ export async function updateFact(
       changed_by: actor.userId ?? null,
     });
   }
+}
+
+// ─────────────────── LEAD-S2 — 아웃리치 초안 ───────────────────
+
+export interface OutreachDraft {
+  id: string;
+  lead_id: string;
+  strategy_id?: string | null;
+  language: string;
+  subject?: string | null;
+  body?: string | null;
+  status: string;
+  fact_ids?: unknown;
+  cc_snapshot?: unknown;
+  scheduled_at?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  sent_at?: string | null;
+  sent_activity_id?: string | null;
+  cancelled_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const DRAFT_COLS = [
+  'id', 'lead_id', 'strategy_id', 'language', 'subject', 'body', 'status',
+  'fact_ids', 'cc_snapshot', 'scheduled_at', 'approved_by', 'approved_at',
+  'sent_at', 'sent_activity_id', 'cancelled_reason', 'created_at', 'updated_at',
+].join(',');
+
+export async function getDrafts(leadId: string): Promise<OutreachDraft[]> {
+  const r = await authedFetch(
+    `${SUPABASE_URL}/rest/v1/lead_outreach_drafts?lead_id=eq.${encodeURIComponent(leadId)}` +
+      `&select=${DRAFT_COLS}&order=created_at.desc`,
+    { headers: HEADERS },
+  );
+  if (!r.ok) throw new Error('초안 조회 실패');
+  return r.json();
+}
+
+/** 큐 화면이 쓰는 전체 목록. 상태별 탭이라 전부 읽고 화면에서 가른다. */
+export async function getAllDrafts(): Promise<OutreachDraft[]> {
+  const r = await authedFetch(
+    `${SUPABASE_URL}/rest/v1/lead_outreach_drafts?select=${DRAFT_COLS}` +
+      `&order=updated_at.desc&limit=2000`,
+    { headers: HEADERS },
+  );
+  if (!r.ok) throw new Error('초안 조회 실패');
+  return r.json();
+}
+
+export async function addDraft(row: Record<string, unknown>, actor: Actor): Promise<void> {
+  const r = await authedFetch(`${SUPABASE_URL}/rest/v1/lead_outreach_drafts`, {
+    method: 'POST',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    body: JSON.stringify({ ...row, created_by: actor.userId ?? null }),
+  });
+  if (!r.ok) throw new Error('초안 저장 실패');
+}
+
+async function patchDraft(id: string, patch: Record<string, unknown>): Promise<void> {
+  const r = await authedFetch(
+    `${SUPABASE_URL}/rest/v1/lead_outreach_drafts?id=eq.${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      headers: { ...HEADERS, Prefer: 'return=minimal' },
+      body: JSON.stringify({ ...patch, updated_at: new Date().toISOString() }),
+    },
+  );
+  if (!r.ok) throw new Error('초안 저장 실패');
+}
+
+/** 초안 본문 수정 — **초안 상태에서만** 부른다(화면이 canEditBody 로 막는다). */
+export async function updateDraftBody(
+  id: string, patch: { subject?: string; body?: string; language?: string; fact_ids?: string[] },
+): Promise<void> {
+  await patchDraft(id, patch);
+}
+
+/**
+ * 승인 — 승인자와 시각을 박고, **그때의 CC 대상을 스냅샷으로 남긴다**.
+ * `lead_cc_links` 는 나중에 바뀔 수 있어서, 스냅샷이 없으면 "그때 누구를 참조에
+ * 넣기로 했는지"를 알 수 없다.
+ */
+export async function approveDraft(
+  id: string, ccSnapshot: Array<{ lead_id: string; name?: string | null }>, actor: Actor,
+): Promise<void> {
+  await patchDraft(id, {
+    status: 'approved',
+    approved_by: actor.userId ?? null,
+    approved_at: new Date().toISOString(),
+    cc_snapshot: ccSnapshot,
+  });
+}
+
+export async function scheduleDraft(id: string, scheduledAtIso: string): Promise<void> {
+  await patchDraft(id, { status: 'scheduled', scheduled_at: scheduledAtIso });
+}
+
+export async function cancelDraft(id: string, patch: Record<string, unknown>): Promise<void> {
+  await patchDraft(id, patch);
+}
+
+/**
+ * 발송 완료로 표시한다 — **CRM 이 보내는 것이 아니다.**
+ * 제시카가 James 계정으로 보낸 뒤 돌아와서 누르는 버튼이다.
+ *
+ * 순서: 활동 기록 먼저 → 초안에 그 기록을 잇는다.
+ * 기록이 먼저 들어가고 초안 갱신이 실패하면 "보낸 기록은 있는데 초안이 예약 상태"가
+ * 되어 다시 누르면 복구된다. 반대 순서면 "보냈다고 적혀 있는데 기록이 없다"가 된다.
+ */
+export async function markDraftSent(a: {
+  draftId: string;
+  leadId: string;
+  subject: string;
+  attemptNo: number;
+  strategyId: string | null;
+  stageAfter?: string | null;
+  actor: Actor;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const ins = await authedFetch(`${SUPABASE_URL}/rest/v1/lead_activities`, {
+    method: 'POST',
+    headers: { ...HEADERS, Prefer: 'return=representation' },
+    body: JSON.stringify({
+      lead_id: a.leadId,
+      occurred_at: now,
+      channel: 'email',
+      direction: 'out',
+      summary: sentActivitySummary(a.subject),
+      attempt_no: a.attemptNo,
+      strategy_id: a.strategyId,
+      stage_after: a.stageAfter ?? null,
+      actor: a.actor.name?.trim() || null,
+      actor_user_id: a.actor.userId ?? null,
+    }),
+  });
+  if (!ins.ok) throw new Error('발송 기록 저장 실패');
+  const created = await ins.json();
+  const activityId = Array.isArray(created) && created[0]?.id ? String(created[0].id) : null;
+
+  // 리드의 마지막 접촉일(과 고른 경우 단계)을 갱신한다.
+  await patchLead(a.leadId, {
+    last_contact_at: now,
+    ...(a.stageAfter ? { followup_stage: a.stageAfter } : {}),
+  });
+
+  await patchDraft(a.draftId, { status: 'sent', sent_at: now, sent_activity_id: activityId });
 }

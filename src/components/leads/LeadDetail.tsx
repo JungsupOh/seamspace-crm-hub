@@ -37,6 +37,7 @@ import { OrgMatesPanel } from './OrgMatesPanel';
 import { SignalsPanel } from './SignalsPanel';
 import { ResearchPanel } from './ResearchPanel';
 import { StrategyPanel } from './StrategyPanel';
+import { OutreachPanel } from './OutreachPanel';
 import {
   OUTCOMES, OUTCOME_LABEL, attemptNumbers, currentStrategy, nextAttemptNo,
   pendingRevision, type Outcome,
@@ -391,7 +392,20 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
           onRevised={() => setReviseFrom(null)} />
       </section>
 
-      {/* ④ 빠른 기록 */}
+      {/* ④ 아웃리치 (LEAD-S2) — 전략으로 쓰고 바로 초안을 만든다 */}
+      <section className="space-y-2">
+        <h3 className="text-sm font-medium">아웃리치</h3>
+        {/* 같은 기관에 최근 접촉이 있으면 위에서 이미 경고하고 있다(UI2 R6 재사용) */}
+        {recent && (
+          <p className="text-xs text-amber-700">
+            ⚠️ 이 기관에는 {recent.daysAgo}일 전 {recent.name}님에게 연락했습니다 —
+            중복으로 보내지 않도록 확인하세요.
+          </p>
+        )}
+        <OutreachPanel lead={lead} actor={actor} allLeads={allLeads} />
+      </section>
+
+      {/* ⑤ 빠른 기록 */}
       <section className="space-y-2.5">
         <h3 className="text-sm font-medium">빠른 기록</h3>
         <div className="flex flex-wrap gap-2">
@@ -465,7 +479,7 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
         </div>
       </section>
 
-      {/* ⑤ 접촉 타임라인 */}
+      {/* ⑥ 접촉 타임라인 */}
       <section className="space-y-2">
         <h3 className="text-sm font-medium">
           활동 기록 {acts ? `(${acts.length})` : ''}
@@ -515,7 +529,7 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
           )}
       </section>
 
-      {/* ⑥ 현장 기록 · 관심 신호 (LEAD-S1) */}
+      {/* ⑦ 현장 기록 · 관심 신호 (LEAD-S1) */}
       <details className="rounded-lg border px-3 py-2" open={(signalCount ?? 0) > 0}>
         <summary className="cursor-pointer text-sm font-medium">
           현장 기록 · 관심 신호
@@ -528,7 +542,7 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
         </div>
       </details>
 
-      {/* ⑦ 조사 메모 (LEAD-S1) */}
+      {/* ⑧ 조사 메모 (LEAD-S1) */}
       <details className="rounded-lg border px-3 py-2">
         <summary className="cursor-pointer text-sm font-medium">조사 메모</summary>
         <div className="mt-3">
