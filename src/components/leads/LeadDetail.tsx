@@ -34,15 +34,16 @@ import {
 } from '@/lib/leadFollowup';
 import { CountrySelect } from './CountrySelect';
 import { OrgMatesPanel } from './OrgMatesPanel';
+import { SignalsPanel } from './SignalsPanel';
+import { ResearchPanel } from './ResearchPanel';
+import { StrategyPanel } from './StrategyPanel';
+import {
+  OUTCOMES, OUTCOME_LABEL, attemptNumbers, currentStrategy, nextAttemptNo,
+  pendingRevision, type Outcome,
+} from '@/lib/leadStrategy';
+import { getSignals, getStrategies } from '@/lib/leadsApi';
 
 const NONE = '__none__';
-
-/** 다음 단위(LEAD-S)에서 채울 자리 — 지금은 안내 문구만. */
-const COMING = [
-  { title: '현장 기록 · 관심 신호', desc: '부스에서 들은 관심사(보드게임·가격·LMS 연동·특수교육 등) 태그와 자유 메모' },
-  { title: '조사 메모', desc: '기관을 찾아본 내용과 근거 링크' },
-  { title: '접근 전략 버전', desc: '전략 1판·2판… 덮어쓰지 않고 쌓는다. 근거·목표·접근 각도·쓸 수 있는 사실·하지 않을 말' },
-];
 
 function Help({ text }: { text: string }) {
   return (
@@ -73,21 +74,23 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
     setForm({
       name: lead.name ?? '', school_name: lead.school_name ?? '', position: lead.position ?? '',
       email: lead.email ?? '', phone: lead.phone ?? '', country: lead.country ?? '',
-      segment: lead.segment ?? '', probability: lead.probability ?? null,
+      segment: lead.segment ?? '', segment_detail: lead.segment_detail ?? '',
+      probability: lead.probability ?? null,
       event_name: lead.event_name ?? '', owner: lead.owner ?? '',
       source_type: lead.source_type ?? '', notes: lead.notes ?? '',
       email_status: lead.email_status ?? '', followup_stage: lead.followup_stage ?? '',
     });
   }, [lead.id, lead.name, lead.school_name, lead.position, lead.email, lead.phone, lead.country,
-      lead.segment, lead.probability, lead.event_name, lead.owner, lead.source_type,
-      lead.notes, lead.email_status, lead.followup_stage]);
+      lead.segment, lead.segment_detail, lead.probability, lead.event_name, lead.owner,
+      lead.source_type, lead.notes, lead.email_status, lead.followup_stage]);
 
   const set = (k: keyof EditableLead, v: unknown) => setForm(p => ({ ...p, [k]: v }));
 
   const before: EditableLead = useMemo(() => ({
     name: lead.name ?? '', school_name: lead.school_name ?? '', position: lead.position ?? '',
     email: lead.email ?? '', phone: lead.phone ?? '', country: lead.country ?? '',
-    segment: lead.segment ?? '', probability: lead.probability ?? null,
+    segment: lead.segment ?? '', segment_detail: lead.segment_detail ?? '',
+    probability: lead.probability ?? null,
     event_name: lead.event_name ?? '', owner: lead.owner ?? '',
     source_type: lead.source_type ?? '', notes: lead.notes ?? '',
     email_status: lead.email_status ?? '', followup_stage: lead.followup_stage ?? '',
@@ -167,6 +170,7 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
   const [log, setLog] = useState({
     channel: 'email' as Channel, direction: 'out' as 'out' | 'in', summary: '',
     stageAfter: '', nextAction: '', nextDue: '', closeReason: '',
+    outcome: '', learning: '',
   });
   useEffect(() => {
     setLog({
@@ -175,6 +179,7 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
       nextAction: lead.next_action ?? '',
       nextDue: lead.next_action_due ?? suggestFirstContactDue(lead.probability),
       closeReason: lead.close_reason ?? '',
+      outcome: '', learning: '',
     });
   }, [lead.id, lead.followup_stage, lead.next_action, lead.next_action_due, lead.close_reason, lead.probability]);
 
@@ -183,16 +188,50 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
     queryFn: () => getActivities(lead.id),
   });
 
+  // ── LEAD-S1: 전략과 n차 접촉 ──
+  const { data: strategies } = useQuery({
+    queryKey: ['lead_strategies', lead.id],
+    queryFn: () => getStrategies(lead.id),
+  });
+  const curStrategy = useMemo(() => currentStrategy(strategies ?? []), [strategies]);
+
+  /** 타임라인에 보일 차수 — 저장된 번호를 믿지 않고 시간순으로 다시 센다. */
+  const attemptMap = useMemo(() => attemptNumbers(acts ?? []), [acts]);
+  const strategyVersionById = useMemo(() => {
+    const m = new Map<string, number>();
+    (strategies ?? []).forEach(st => m.set(st.id, st.version));
+    return m;
+  }, [strategies]);
+
+  /**
+   * 결과가 적힌 접촉이 있는데 아직 그것을 근거로 쓴 전략 판이 없으면
+   * "전략을 고칠까요?" 를 띄운다. **자동으로 바꾸지 않는다**(명령서 지시).
+   */
+  const revisionHint = useMemo(
+    () => pendingRevision(acts ?? [], strategies ?? []), [acts, strategies]);
+  const [reviseFrom, setReviseFrom] = useState<string | null>(null);
+
+  // 접힌 상태에서 개수만 보여 준다(요구 S1-2). 목록 자체는 패널이 따로 읽는다.
+  const { data: signals } = useQuery({
+    queryKey: ['lead_signals', lead.id], queryFn: () => getSignals(lead.id),
+  });
+  const signalCount = signals ? signals.filter(x => !x.voided_at).length : null;
+
   const saveLog = useMutation({
     mutationFn: () => saveActivity({
       leadId: lead.id, channel: log.channel, direction: log.direction, summary: log.summary,
       stageAfter: log.stageAfter as FollowupStage,
       nextAction: log.nextAction, nextActionDue: log.nextDue, closeReason: log.closeReason,
       actor: actor.name ?? undefined, actorUserId: actor.userId ?? null,
+      // LEAD-S1 — 보낸 접촉에만 차수·전략을 붙인다(받은 기록은 차수가 없다).
+      attemptNo: log.direction === 'out' ? nextAttemptNo(acts ?? []) : null,
+      strategyId: log.direction === 'out' ? curStrategy?.id ?? null : null,
+      outcome: log.outcome || null,
+      learning: log.learning,
     }),
     onSuccess: () => {
       toast.success('기록했습니다');
-      setLog(p => ({ ...p, summary: '' }));
+      setLog(p => ({ ...p, summary: '', learning: '' }));
       refresh();
       qc.invalidateQueries({ queryKey: ['lead_activities', lead.id] });
     },
@@ -242,6 +281,30 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
         </div>
       </div>
 
+      {/* LEAD-S1 — 결과가 적힌 접촉이 있는데 아직 그것을 근거로 쓴 전략 판이 없으면 묻는다.
+          **자동으로 전략을 바꾸지 않는다**(명령서 지시). 사람이 눌러야 새 판이 시작된다. */}
+      {revisionHint && !reviseFrom && (
+        <div className="rounded-lg border border-primary/40 bg-primary/5 px-3 py-2.5 flex flex-wrap
+          items-center justify-between gap-2">
+          <div className="text-sm">
+            결과가 기록됐습니다
+            {revisionHint.outcome && (
+              <strong> ({OUTCOME_LABEL[revisionHint.outcome as Outcome] ?? String(revisionHint.outcome)})</strong>
+            )}
+            . 전략을 고칠까요?
+            {revisionHint.learning && (
+              <span className="block text-xs text-muted-foreground mt-0.5">
+                알게 된 점: {String(revisionHint.learning)}
+              </span>
+            )}
+          </div>
+          <Button size="sm" variant="outline"
+            onClick={() => setReviseFrom(revisionHint.id ?? null)}>
+            새 버전 작성
+          </Button>
+        </div>
+      )}
+
       {/* ① 기본 정보 */}
       <section className="space-y-2.5">
         <h3 className="text-sm font-medium">기본 정보</h3>
@@ -257,6 +320,12 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
           <F label="세그먼트">
             <Pick value={form.segment} onChange={v => set('segment', v)}
               options={['A', 'B', 'C', 'D', 'E'].map(s => [s, s])} />
+          </F>
+          <F label="세그먼트 상세">
+            {/* LEAD-S1 S1-4 — 엑셀 등급의 세부 구분(B-교육·B-기업·C2).
+                가져오기가 A~E 로 줄여 저장해 구분이 사라졌다. 값은 제시카가 채운다. */}
+            <Input className="h-9" value={form.segment_detail ?? ''}
+              onChange={e => set('segment_detail', e.target.value)} placeholder="B-교육 · C2" />
           </F>
           <F label="가능성 (1~5)">
             <Pick value={form.probability == null ? '' : String(form.probability)}
@@ -314,7 +383,15 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
         />
       </section>
 
-      {/* ③ 빠른 기록 */}
+      {/* ③ 접근 전략 (LEAD-S1) — 흐름의 중심이라 기록 입력 바로 위에 둔다 */}
+      <section className="space-y-2">
+        <h3 className="text-sm font-medium">접근 전략</h3>
+        <StrategyPanel leadId={lead.id} actor={actor}
+          reviseFrom={reviseFrom}
+          onRevised={() => setReviseFrom(null)} />
+      </section>
+
+      {/* ④ 빠른 기록 */}
       <section className="space-y-2.5">
         <h3 className="text-sm font-medium">빠른 기록</h3>
         <div className="flex flex-wrap gap-2">
@@ -346,6 +423,23 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
               placeholder="예: 예산 없음 / 타사 선택 / 응답 없음" />
           </F>
         )}
+        {/* LEAD-S1 — 보낸 접촉의 결과와 알게 된 점. 다음 전략 판의 근거가 된다. */}
+        {log.direction === 'out' && (
+          <div className="flex gap-2">
+            <div className="w-[150px]">
+              <Label className="text-xs">결과</Label>
+              <Pick value={log.outcome} onChange={v => setLog(p => ({ ...p, outcome: v }))}
+                options={OUTCOMES.map(o => [o, OUTCOME_LABEL[o]])} />
+            </div>
+            <div className="flex-1">
+              <Label className="text-xs">알게 된 점</Label>
+              <Input className="h-9" value={log.learning}
+                onChange={e => setLog(p => ({ ...p, learning: e.target.value }))}
+                placeholder="예: 예산은 내년 3월 확정, 결정권자는 학과장" />
+            </div>
+          </div>
+        )}
+
         <div className="flex gap-2">
           <div className="flex-[2]">
             <Label className="text-xs">다음 행동</Label>
@@ -358,12 +452,20 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
               onChange={e => setLog(p => ({ ...p, nextDue: e.target.value }))} />
           </div>
         </div>
-        <Button size="sm" disabled={logBlocked || saveLog.isPending} onClick={() => saveLog.mutate()}>
-          {saveLog.isPending ? '저장 중…' : '기록'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" disabled={logBlocked || saveLog.isPending} onClick={() => saveLog.mutate()}>
+            {saveLog.isPending ? '저장 중…' : '기록'}
+          </Button>
+          {log.direction === 'out' && (
+            <span className="text-xs text-muted-foreground">
+              {nextAttemptNo(acts ?? [])}차 접촉으로 기록됩니다
+              {curStrategy && ` · 전략 v${curStrategy.version}`}
+            </span>
+          )}
+        </div>
       </section>
 
-      {/* ④ 타임라인 */}
+      {/* ⑤ 접촉 타임라인 */}
       <section className="space-y-2">
         <h3 className="text-sm font-medium">
           활동 기록 {acts ? `(${acts.length})` : ''}
@@ -375,18 +477,37 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
             <ul className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
               {acts.map(a => {
                 const isChange = isChangeRecord(a.summary);
+                // LEAD-S1 — 차수는 **시간순으로 다시 센 값**을 쓴다(저장된 번호에 구멍이 생길 수 있다).
+                const attempt = attemptMap.get(a.id);
+                const stratV = a.strategy_id ? strategyVersionById.get(a.strategy_id) : undefined;
                 return (
                   <li key={a.id}
-                    className={`text-xs flex gap-2 ${a.voided_at ? 'opacity-50 line-through' : ''}`}>
-                    <span className="text-muted-foreground w-[76px] shrink-0 tabular-nums">
-                      {kstDate(a.occurred_at)}
-                    </span>
-                    <span className="w-14 shrink-0 text-muted-foreground">
-                      {isChange ? '변경' : `${CHANNEL_LABEL[a.channel as Channel] ?? a.channel}${a.direction === 'in' ? ' ←' : ' →'}`}
-                    </span>
-                    <span className={`flex-1 ${isChange ? 'text-muted-foreground' : ''}`}>{a.summary}</span>
-                    {a.stage_after && <span className="text-muted-foreground shrink-0">{a.stage_after}</span>}
-                    {a.actor && <span className="text-muted-foreground shrink-0">{a.actor}</span>}
+                    className={`text-xs ${a.voided_at ? 'opacity-50' : ''}`}>
+                    <div className={`flex gap-2 ${a.voided_at ? 'line-through' : ''}`}>
+                      <span className="text-muted-foreground w-[76px] shrink-0 tabular-nums">
+                        {kstDate(a.occurred_at)}
+                      </span>
+                      <span className="w-14 shrink-0 text-muted-foreground">
+                        {isChange ? '변경' : `${CHANNEL_LABEL[a.channel as Channel] ?? a.channel}${a.direction === 'in' ? ' ←' : ' →'}`}
+                      </span>
+                      <span className={`flex-1 ${isChange ? 'text-muted-foreground' : ''}`}>{a.summary}</span>
+                      {attempt && (
+                        <Badge variant="outline" className="h-4 px-1 text-[10px] shrink-0">
+                          {attempt}차
+                        </Badge>
+                      )}
+                      {a.stage_after && <span className="text-muted-foreground shrink-0">{a.stage_after}</span>}
+                      {a.actor && <span className="text-muted-foreground shrink-0">{a.actor}</span>}
+                    </div>
+                    {(a.outcome || a.learning || stratV) && (
+                      <div className="ml-[92px] mt-0.5 flex flex-wrap gap-x-2 text-muted-foreground">
+                        {a.outcome && (
+                          <span>결과: {OUTCOME_LABEL[a.outcome as Outcome] ?? a.outcome}</span>
+                        )}
+                        {stratV && <span>전략 v{stratV}</span>}
+                        {a.learning && <span>알게 된 점: {a.learning}</span>}
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -394,18 +515,26 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
           )}
       </section>
 
-      {/* ⑤ 다음 단위 자리 */}
-      <section className="space-y-1.5">
-        {COMING.map(c => (
-          <details key={c.title} className="rounded-lg border px-3 py-2">
-            <summary className="cursor-pointer text-sm text-muted-foreground">
-              {c.title} <span className="text-xs">— 준비 중</span>
-            </summary>
-            <p className="mt-1.5 text-xs text-muted-foreground">{c.desc}</p>
-            <p className="mt-1 text-xs text-muted-foreground">다음 단위에서 채웁니다.</p>
-          </details>
-        ))}
-      </section>
+      {/* ⑥ 현장 기록 · 관심 신호 (LEAD-S1) */}
+      <details className="rounded-lg border px-3 py-2" open={(signalCount ?? 0) > 0}>
+        <summary className="cursor-pointer text-sm font-medium">
+          현장 기록 · 관심 신호
+          {signalCount !== null && (
+            <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">{signalCount}</Badge>
+          )}
+        </summary>
+        <div className="mt-3">
+          <SignalsPanel leadId={lead.id} actor={actor} />
+        </div>
+      </details>
+
+      {/* ⑦ 조사 메모 (LEAD-S1) */}
+      <details className="rounded-lg border px-3 py-2">
+        <summary className="cursor-pointer text-sm font-medium">조사 메모</summary>
+        <div className="mt-3">
+          <ResearchPanel leadId={lead.id} actor={actor} />
+        </div>
+      </details>
     </div>
   );
 }

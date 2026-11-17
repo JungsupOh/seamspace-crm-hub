@@ -10,7 +10,7 @@
 // ⚠️ 보안: DB 호출은 전부 `leadsApi.ts` 를 거치고, 그쪽은 authedFetch(로그인 토큰)만 쓴다.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
@@ -28,6 +28,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { LeadDetail } from '@/components/leads/LeadDetail';
 import { countryLabel, countryShort } from '@/lib/countries';
 import { emailStatusLabel, excludeArchived, isMailable } from '@/lib/leadEdit';
+import { getStrategyHeads } from '@/lib/leadsApi';
+import { currentStrategy } from '@/lib/leadStrategy';
 
 import {
   deleteImportBatch, getActivities, getCampaignNames, getLeads, insertLeads, patchLead,
@@ -57,6 +59,25 @@ export default function Leads() {
     staleTime: 1000 * 60 * 2,
   });
   const { data: campaigns } = useQuery({ queryKey: ['campaign_names'], queryFn: getCampaignNames });
+
+  /**
+   * LEAD-S1 — 목록에 "현재 전략 vN"과 "다음 접촉 계획"을 작게 보여 준다.
+   * 리드마다 따로 부르지 않고 **한 번에 읽어** 리드별 최대 버전만 남긴다
+   * (리드 270건에 각각 조회하면 화면이 멈춘다).
+   */
+  const { data: strategyHeads } = useQuery({
+    queryKey: ['strategy_heads'], queryFn: getStrategyHeads, staleTime: 1000 * 60 * 2,
+  });
+  const strategyByLead = useMemo(() => {
+    const m = new Map<string, { version: number; next_contact_plan?: string | null }>();
+    for (const h of strategyHeads ?? []) {
+      const prev = m.get(h.lead_id);
+      if (!prev || h.version > prev.version) {
+        m.set(h.lead_id, { version: h.version, next_contact_plan: h.next_contact_plan });
+      }
+    }
+    return m;
+  }, [strategyHeads]);
   const campaignName = useMemo(() => {
     const m = new Map<string, string>();
     (campaigns ?? []).forEach(c => m.set(c.id, c.name));
@@ -76,6 +97,7 @@ export default function Leads() {
   const [fOwner, setFOwner] = useState<string>(ALL);
   const [fStage, setFStage] = useState<string>(ALL);
   const [fMail, setFMail] = useState<string>(ALL);
+  const [fStrategy, setFStrategy] = useState<string>(ALL);
   const [showArchived, setShowArchived] = useState(false);
   const [q, setQ] = useState('');
 
@@ -125,6 +147,9 @@ export default function Leads() {
       // 메일 발송 가능 / 발송 보류 (요구 R4)
       if (fMail === 'mailable' && !isMailable(l)) return false;
       if (fMail === 'hold' && l.email_status !== 'hold') return false;
+      // LEAD-S1 — 전략이 아직 없는 리드를 찾아 채우려는 용도
+      if (fStrategy === 'none' && strategyByLead.has(l.id)) return false;
+      if (fStrategy === 'has' && !strategyByLead.has(l.id)) return false;
       if (needle) {
         const hay = [l.name, l.school_name, l.email, eventOf(l), countryLabel(l.country, ''), l.notes]
           .filter(Boolean).join(' ').toLowerCase();
@@ -132,7 +157,8 @@ export default function Leads() {
       }
       return true;
     });
-  }, [leads, fMarket, fRegion, fEvent, fCountry, fOwner, fStage, fMail, showArchived, q, eventOf]);
+  }, [leads, fMarket, fRegion, fEvent, fCountry, fOwner, fStage, fMail, fStrategy,
+      showArchived, q, eventOf, strategyByLead]);
 
   // "오늘 할 팔로업"·"7일 넘게 접촉 없음"은 **보관본을 반드시 뺀다**(요구 R8).
   // "보관된 리드 보기"를 켜도 이 두 목록에는 넣지 않는다 — 시험 리드가 거기 남으면
@@ -195,7 +221,7 @@ export default function Leads() {
 
   const resetFilters = () => {
     setFMarket(ALL); setFRegion(ALL); setFEvent(ALL);
-    setFCountry(ALL); setFOwner(ALL); setFStage(ALL); setFMail(ALL);
+    setFCountry(ALL); setFOwner(ALL); setFStage(ALL); setFMail(ALL); setFStrategy(ALL);
     setShowArchived(false); setQ('');
   };
 
@@ -210,7 +236,10 @@ export default function Leads() {
             전체 {leads?.length ?? 0}건 · 필터 결과 {filtered.length}건
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/leads/facts">쓸 수 있는 사실</Link>
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
             <Upload className="h-4 w-4 mr-1.5" />해외 명단 가져오기
           </Button>
@@ -251,6 +280,8 @@ export default function Leads() {
           options={FOLLOWUP_STAGES.map(s => [s, s])} />
         <FilterSelect label="메일" value={fMail} onChange={setFMail}
           options={[['mailable', '발송 가능만'], ['hold', '발송 보류만']]} />
+        <FilterSelect label="전략" value={fStrategy} onChange={setFStrategy}
+          options={[['none', '전략 없음'], ['has', '전략 있음']]} />
         <label className="flex items-center gap-1.5 h-9 text-xs cursor-pointer">
           <Checkbox checked={showArchived} onCheckedChange={v => setShowArchived(v === true)} />
           보관된 리드 보기
@@ -288,7 +319,7 @@ export default function Leads() {
             <TabsContent value="due" className="mt-3">
               {due.length === 0
                 ? <Empty text="오늘 할 팔로업이 없습니다." />
-                : <LeadList rows={due} today={today} eventOf={eventOf}
+                : <LeadList rows={due} today={today} eventOf={eventOf} strategyByLead={strategyByLead}
                     selectedId={selectedId} onSelect={selectLead} showDue />}
             </TabsContent>
 
@@ -298,7 +329,7 @@ export default function Leads() {
               </p>
               {stale.length === 0
                 ? <Empty text="7일 넘게 접촉 없는 리드가 없습니다." />
-                : <LeadList rows={stale} today={today} eventOf={eventOf}
+                : <LeadList rows={stale} today={today} eventOf={eventOf} strategyByLead={strategyByLead}
                     selectedId={selectedId} onSelect={selectLead} showStale />}
             </TabsContent>
 
@@ -306,6 +337,7 @@ export default function Leads() {
               {byProbability.length === 0
                 ? <Empty text="리드가 없습니다." />
                 : <LeadList rows={byProbability} today={today} eventOf={eventOf}
+                    strategyByLead={strategyByLead}
                     selectedId={selectedId} onSelect={selectLead} showDue showStale />}
             </TabsContent>
 
@@ -391,8 +423,9 @@ function FilterSelect({ label, value, onChange, options }: {
 
 // ─────────────────────────── 목록 ───────────────────────────
 
-function LeadList({ rows, today, eventOf, selectedId, onSelect, showDue, showStale }: {
+function LeadList({ rows, today, eventOf, strategyByLead, selectedId, onSelect, showDue, showStale }: {
   rows: LeadRow[]; today: string; eventOf: (l: LeadRow) => string;
+  strategyByLead: Map<string, { version: number; next_contact_plan?: string | null }>;
   selectedId: string | null; onSelect: (id: string) => void;
   showDue?: boolean; showStale?: boolean;
 }) {
@@ -429,9 +462,26 @@ function LeadList({ rows, today, eventOf, selectedId, onSelect, showDue, showSta
                 <div className="text-xs text-muted-foreground mt-0.5 flex flex-wrap gap-x-2">
                   <span>{countryShort(l.country)}</span>
                   <span>{l.followup_stage || '신규'}</span>
-                  <span>가능성 {l.probability ?? '—'}</span>
+                  <span>
+                    가능성 {l.probability ?? '—'}
+                    {l.segment && ` · ${l.segment}`}
+                    {l.segment_detail && ` (${l.segment_detail})`}
+                  </span>
                   {eventOf(l) && <span className="truncate max-w-[140px]">{eventOf(l)}</span>}
                 </div>
+                {/* LEAD-S1 — 현재 전략 버전과 다음 접촉 계획 */}
+                {strategyByLead.get(l.id) && (
+                  <div className="text-xs mt-0.5 flex flex-wrap items-center gap-x-1.5">
+                    <Badge variant="outline" className="h-4 px-1 text-[10px]">
+                      v{strategyByLead.get(l.id)!.version}
+                    </Badge>
+                    {strategyByLead.get(l.id)!.next_contact_plan && (
+                      <span className="text-muted-foreground truncate max-w-[200px]">
+                        {strategyByLead.get(l.id)!.next_contact_plan}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="text-right shrink-0 text-xs">
                 {showDue && l.next_action_due && (

@@ -25,6 +25,8 @@ export interface EditableLead {
   notes?: string | null;
   email_status?: string | null;
   followup_stage?: string | null;
+  /** LEAD-S1 — 엑셀 등급 세부 구분(B-교육·B-기업·C2). 세그먼트 옆에 작게 보인다. */
+  segment_detail?: string | null;
 }
 
 /** 바뀌면 **활동 기록을 남기는** 칸 (요구 R1). 메모·직함처럼 자주 다듬는 칸은 뺀다. */
@@ -49,6 +51,7 @@ export const FIELD_LABEL: Record<keyof EditableLead, string> = {
   notes: '메모',
   email_status: '이메일 상태',
   followup_stage: '단계',
+  segment_detail: '세그먼트 상세',
 };
 
 export const EMAIL_STATUS_LABEL: Record<string, string> = {

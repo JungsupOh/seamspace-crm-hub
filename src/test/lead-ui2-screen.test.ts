@@ -216,12 +216,18 @@ describe('R5 · 분할 화면', () => {
     expect(idx).toEqual([...idx].sort((a, b) => a - b));
   });
 
-  it('다음 단위 자리 3개가 "준비 중"으로 있다', () => {
+  // LEAD-S1 에서 "준비 중" 자리 3개가 **실제 기능**으로 채워졌다.
+  // 목적(그 세 가지가 상세에 있다)은 그대로 두고, "준비 중" 대신 패널이 붙었는지 본다.
+  it('세 자리가 실제 기능으로 채워졌다 (LEAD-S1)', () => {
     const d = read('src/components/leads/LeadDetail.tsx');
-    for (const t of ['현장 기록 · 관심 신호', '조사 메모', '접근 전략 버전']) {
+    for (const t of ['현장 기록 · 관심 신호', '조사 메모', '접근 전략']) {
       expect(d, t).toContain(t);
     }
-    expect(d).toContain('준비 중');
+    for (const c of ['<SignalsPanel', '<ResearchPanel', '<StrategyPanel']) {
+      expect(d, c).toContain(c);
+    }
+    // 더 이상 "준비 중" 안내가 아니다
+    expect(d).not.toContain('준비 중');
   });
 
   it('기존 기능이 남아 있다 (탭 4개·리드 추가·가져오기·지역 칩)', () => {
