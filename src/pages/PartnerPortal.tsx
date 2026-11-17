@@ -22,6 +22,7 @@ import { authedFetch } from '@/lib/authedFetch';
 import { issueLicense, getPartnerLicenses, resendLicenseEmail, revokeLicense, expireLicenseGroup, getCouponGroupInfo, setLicenseBuyer, type PartnerLicense, type CouponGroupInfo } from '@/lib/partner-licenses';
 // LEAD-S7-4 — 내 계약(도매 선구매) 구역·계약 선택·요청
 import PortalContracts from '@/components/partner-portal/PortalContracts';
+import PortalAccounts from '@/components/partner-portal/PortalAccounts';
 import { getMyContracts } from '@/lib/partnerPortalContracts';
 import { contractChoice, contractLabel } from '@/lib/portalIssueContract';
 import { toSettlementMethod } from '@/lib/partnerContract';
@@ -746,6 +747,16 @@ export default function PartnerPortal() {
           </div>
         </div>
       </div>
+
+      {/* LEAD-S7-5: 계정 — **파트너 관리자에게만** 보인다 */}
+      {userProfile?.id && (
+        <PortalAccounts
+          partnerId={partner.id}
+          locale={partnerLocale}
+          myId={userProfile.id}
+          isPartnerAdmin={userProfile.role === 'partner_admin'}
+        />
+      )}
 
       {/* LEAD-S7-4: 내 계약(도매 선구매) — 계약이 없으면 통째로 보이지 않는다 */}
       <PortalContracts

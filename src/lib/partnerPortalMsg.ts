@@ -171,3 +171,83 @@ export function issueBlockMessage(
     ? serverMessage
     : t({ ko: '발급하지 못했습니다.', ja: '発行できませんでした。', en: 'We could not issue the license.' });
 }
+
+// ── 계정 구역 (LEAD-S7-5) ──
+//
+// 파트너 **관리자에게만** 보이는 구역이다. 문구를 여기 모아 번역 빠짐을 한 곳에서 잡는다.
+export const ACCOUNT_MSG = {
+  sectionTitle: { ko: '계정', ja: 'アカウント', en: 'Accounts' },
+  invite:       { ko: '직원 초대', ja: 'スタッフを招待', en: 'Invite a teammate' },
+  inviteHint: {
+    ko: '초대하면 그 주소로 로그인 계정이 만들어집니다. 비밀번호는 본인이 재설정으로 정합니다.',
+    ja: '招待するとそのアドレスでログインアカウントが作成されます。パスワードは本人がリセットで設定します。',
+    en: 'We create a sign-in account for that address. They set their own password with a reset link.',
+  },
+  email:  { ko: '이메일', ja: 'メール', en: 'Email' },
+  name:   { ko: '이름 (선택)', ja: '名前（任意）', en: 'Name (optional)' },
+  role:   { ko: '역할', ja: '役割', en: 'Role' },
+  status: { ko: '상태', ja: '状態', en: 'Status' },
+  send:   { ko: '초대 보내기', ja: '招待を送る', en: 'Send invite' },
+
+  roleAdmin:  { ko: '관리자', ja: '管理者', en: 'Administrator' },
+  roleMember: { ko: '운영자', ja: '運営者', en: 'Member' },
+  roleViewer: { ko: '게스트', ja: 'ゲスト', en: 'Guest' },
+  roleHint: {
+    ko: '관리자 역할은 저희가 지정합니다. 여기서는 운영자·게스트만 줄 수 있습니다.',
+    ja: '管理者の役割は当社が指定します。ここでは運営者・ゲストのみ付与できます。',
+    en: 'We assign the Administrator role. Here you can grant Member or Guest only.',
+  },
+
+  statusInvited:  { ko: '초대함', ja: '招待済み', en: 'Invited' },
+  statusActive:   { ko: '사용 중', ja: '利用中', en: 'Active' },
+  statusInactive: { ko: '비활성', ja: '無効', en: 'Deactivated' },
+
+  deactivate: { ko: '비활성화', ja: '無効化', en: 'Deactivate' },
+  reactivate: { ko: '다시 사용', ja: '再有効化', en: 'Reactivate' },
+  changeRole: { ko: '역할 바꾸기', ja: '役割を変更', en: 'Change role' },
+
+  cannotSelf: {
+    ko: '자기 계정은 비활성화할 수 없습니다.',
+    ja: '自分のアカウントは無効化できません。',
+    en: 'You cannot deactivate your own account.',
+  },
+  cannotLastAdmin: {
+    ko: '마지막 관리자 계정이라 비활성화할 수 없습니다.',
+    ja: '最後の管理者アカウントのため無効化できません。',
+    en: 'This is the last administrator account, so it cannot be deactivated.',
+  },
+  keepsHistory: {
+    ko: '비활성화해도 발급·요청 기록은 그대로 남습니다.',
+    ja: '無効化しても発行・依頼の記録は残ります。',
+    en: 'Deactivating an account keeps its issuance and request history.',
+  },
+
+  auditTitle: { ko: '최근 계정 기록', ja: '最近のアカウント記録', en: 'Recent account activity' },
+  auditEmpty: { ko: '기록이 없습니다.', ja: '記録はありません。', en: 'No activity yet.' },
+  actInvite:      { ko: '초대', ja: '招待', en: 'Invited' },
+  actInviteFail:  { ko: '초대 실패', ja: '招待失敗', en: 'Invite failed' },
+  actDeactivate:  { ko: '비활성화', ja: '無効化', en: 'Deactivated' },
+  actReactivate:  { ko: '다시 사용', ja: '再有効化', en: 'Reactivated' },
+  actRoleChange:  { ko: '역할 변경', ja: '役割変更', en: 'Role changed' },
+} as const satisfies Record<string, Msg>;
+
+export const ROLE_MSG = {
+  partner_admin:  ACCOUNT_MSG.roleAdmin,
+  partner_member: ACCOUNT_MSG.roleMember,
+  partner_viewer: ACCOUNT_MSG.roleViewer,
+} as const;
+
+export const STATUS_MSG = {
+  invited:  ACCOUNT_MSG.statusInvited,
+  active:   ACCOUNT_MSG.statusActive,
+  inactive: ACCOUNT_MSG.statusInactive,
+  invite_failed: ACCOUNT_MSG.statusInactive,
+} as const;
+
+export const AUDIT_ACTION_MSG = {
+  invite:        ACCOUNT_MSG.actInvite,
+  invite_failed: ACCOUNT_MSG.actInviteFail,
+  deactivate:    ACCOUNT_MSG.actDeactivate,
+  reactivate:    ACCOUNT_MSG.actReactivate,
+  role_change:   ACCOUNT_MSG.actRoleChange,
+} as const;
