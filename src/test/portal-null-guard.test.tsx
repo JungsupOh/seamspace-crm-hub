@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
-// 포털이 `partner` 없이도 **터지지 않는다** (M024)
+// 포털이 `partner` 없이도 **터지지 않는다** (M025 · 핫픽스 M029)
+//
+// 운영에서 실제로 터지고 있던 것을 `5da227c` 로 먼저 고쳐 올렸고(파트너 계정
+// 10개가 흰 화면), 여기 판은 7b(내 리드)가 붙은 뒤의 것이다.
 //
 // 무엇이 잘못돼 있었나
 //   본문의 가드는 `userProfile?.partner_id`(로그인 정보)만 봤는데, 본문은
@@ -42,6 +45,8 @@ vi.mock('@/components/partner-portal/PortalContracts', () => ({
 vi.mock('@/components/partner-portal/PortalAccounts', () => ({
   default: ({ partnerId }: { partnerId: string }) => <div>계정:{partnerId}</div>,
 }));
+// 7b(내 리드)는 이 트리에 있고 운영에는 아직 없다 — 그래서 핫픽스 판에는
+// 이 가짜가 없었다. 여기서는 필요하다.
 vi.mock('@/components/partner-portal/PortalLeads', () => ({
   default: () => <div>리드</div>,
 }));
