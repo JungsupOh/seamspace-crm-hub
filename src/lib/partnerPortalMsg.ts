@@ -251,3 +251,78 @@ export const AUDIT_ACTION_MSG = {
   reactivate:    ACCOUNT_MSG.actReactivate,
   role_change:   ACCOUNT_MSG.actRoleChange,
 } as const;
+
+// ───────────────────────── 내 리드 (LEAD-S7-7b) ─────────────────────────
+
+export const LEAD_MSG = {
+  title:        { ko: '내 리드',            ja: 'マイリード',          en: 'My leads' },
+  intro:        { ko: '직접 찾은 기관을 등록해 두면 보호 기간 동안 그 건은 귀하의 것입니다.',
+                  ja: '自分で見つけた機関を登録すると、保護期間中はその案件はあなたのものです。',
+                  en: 'Register an organization you found and it is yours for the protection period.' },
+  add:          { ko: '리드 등록',          ja: 'リード登録',          en: 'Register a lead' },
+  cancel:       { ko: '취소',               ja: 'キャンセル',          en: 'Cancel' },
+  submit:       { ko: '등록',               ja: '登録',                en: 'Register' },
+  empty:        { ko: '아직 등록한 리드가 없습니다.',
+                  ja: 'まだ登録したリードがありません。',
+                  en: 'You have not registered any leads yet.' },
+  loading:      { ko: '불러오는 중…',       ja: '読み込み中…',         en: 'Loading…' },
+
+  schoolName:   { ko: '기관 이름',          ja: '機関名',              en: 'Organization' },
+  schoolKind:   { ko: '종류',               ja: '種別',                en: 'Type' },
+  person:       { ko: '담당자',             ja: '担当者',              en: 'Contact person' },
+  position:     { ko: '직책',               ja: '役職',                en: 'Position' },
+  email:        { ko: '이메일',             ja: 'メール',              en: 'Email' },
+  phone:        { ko: '전화',               ja: '電話',                en: 'Phone' },
+  country:      { ko: '국가',               ja: '国',                  en: 'Country' },
+
+  ownerAsk:     { ko: '이 연락처는 누구의 것입니까?',
+                  ja: 'この連絡先は誰のものですか？',
+                  en: 'Whose contact details are these?' },
+  ownerEndUser: { ko: '기관의 담당자 (최종 사용자)',
+                  ja: '機関の担当者（エンドユーザー）',
+                  en: "The organization's contact (end user)" },
+  ownerPartner: { ko: '우리 회사가 대신 받습니다 (파트너 대행)',
+                  ja: '当社が代理で受け取ります（パートナー代理）',
+                  en: 'We receive it on their behalf (partner)' },
+  consent:      { ko: '이 분의 정보를 제공하고 Tebahsoft 가 연락해도 된다는 동의를 받았습니다.',
+                  ja: 'この方の情報を提供し、Tebahsoft が連絡することへの同意を得ています。',
+                  en: 'I have their consent to share these details and for Tebahsoft to contact them.' },
+  consentWhy:   { ko: '동의를 받은 분만 등록해 주세요. 누가 언제 확인했는지 기록됩니다.',
+                  ja: '同意を得た方のみ登録してください。誰がいつ確認したかを記録します。',
+                  en: 'Please register only people who consented. We record who confirmed it and when.' },
+  agentNote:    { ko: '파트너 대행으로 등록하면 저희가 그 주소로 고객용 안내 메일을 보내지 않습니다.',
+                  ja: 'パートナー代理で登録した場合、その宛先に顧客向け案内メールは送りません。',
+                  en: 'For partner-held contacts we will not send customer mailings to that address.' },
+
+  protection:   { ko: '보호 기간',          ja: '保護期間',            en: 'Protection' },
+  daysLeft:     { ko: '일 남음',            ja: '日残り',              en: 'days left' },
+  protEnded:    { ko: '보호 기간이 끝났습니다',
+                  ja: '保護期間が終了しました',
+                  en: 'Protection has ended' },
+  protSoon:     { ko: '곧 끝납니다',        ja: 'まもなく終了します',  en: 'Ending soon' },
+  protHow:      { ko: '등록일부터 90일간 보호되고, 접촉 기록을 남기면 그날부터 다시 90일입니다.',
+                  ja: '登録日から90日間保護され、接触を記録するとその日から再び90日です。',
+                  en: 'Protected for 90 days from registration; recording a contact restarts the 90 days.' },
+  lastContact:  { ko: '마지막 접촉',        ja: '最終接触',            en: 'Last contact' },
+  noContact:    { ko: '아직 접촉 기록 없음', ja: '接触記録なし',        en: 'No contact recorded' },
+  contactAsk:   { ko: '접촉하셨다면 알려 주세요 — 저희가 기록하면 보호 기간이 연장됩니다.',
+                  ja: '接触された場合はお知らせください。記録すると保護期間が延長されます。',
+                  en: 'Tell us when you make contact — we record it and the protection period restarts.' },
+
+  viewerOnly:   { ko: '보기 전용 계정에서는 기관 이름까지만 보입니다.',
+                  ja: '閲覧専用アカウントでは機関名までの表示となります。',
+                  en: 'View-only accounts see the organization name only.' },
+  viewerNoAdd:  { ko: '보기 전용 계정은 리드를 등록할 수 없습니다.',
+                  ja: '閲覧専用アカウントはリードを登録できません。',
+                  en: 'View-only accounts cannot register leads.' },
+
+  sumTotal:     { ko: '전체',               ja: '全体',                en: 'Total' },
+  sumProtected: { ko: '보호 중',            ja: '保護中',              en: 'Protected' },
+  sumEnding:    { ko: '곧 끝남',            ja: 'まもなく終了',        en: 'Ending soon' },
+  sumNoContact: { ko: '접촉 없음',          ja: '接触なし',            en: 'No contact' },
+} as const;
+
+export const CONTACT_OWNER_MSG = {
+  end_user: { ko: '기관 담당자', ja: '機関の担当者', en: 'Organization' },
+  partner:  { ko: '파트너 대행', ja: 'パートナー代理', en: 'Partner-held' },
+} as const;

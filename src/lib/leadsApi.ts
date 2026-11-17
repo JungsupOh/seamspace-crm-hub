@@ -72,6 +72,11 @@ export interface LeadRow {
   // LEAD-S4 — 리드 유형(브리프 H항)
   lead_type?: string | null;
   lead_tags?: unknown;
+
+  // LEAD-S7-7a — 파트너가 직접 넣은 리드. NULL = 우리가 넣은 리드.
+  partner_id?: string | null;
+  partner_claimed_at?: string | null;
+  contact_owner?: string | null;
 }
 
 export interface LeadActivity {
@@ -103,6 +108,10 @@ const LEAD_COLS = [
   'import_batch_id', 'archived_at', 'segment_detail',
   'unsubscribe_token', 'unsubscribed_at', 'marketing_consent',
   'lead_type', 'lead_tags',
+  // LEAD-S7-7b: 파트너 등록 구분·보호 기간 (⚠️ 마이그레이션 20261205000000 이
+  // 적용된 뒤에 배포해야 한다 — 없는 칸을 요청하면 PostgREST 가 400 을 돌려주고
+  // 목록이 통째로 안 보인다. S4 에서 한 번 겪었다.)
+  'partner_id', 'partner_claimed_at', 'contact_owner',
 ].join(',');
 
 export async function getLeads(): Promise<LeadRow[]> {

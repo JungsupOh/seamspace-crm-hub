@@ -31,6 +31,9 @@ import { emailStatusLabel, excludeArchived, isMailable } from '@/lib/leadEdit';
 import { getStrategyHeads } from '@/lib/leadsApi';
 import { currentStrategy } from '@/lib/leadStrategy';
 import { LEAD_TYPES, LEAD_TYPE_LABEL, leadTypeLabel, toLeadType } from '@/lib/leadType';
+// LEAD-S7-7b: 파트너가 넣은 리드 구분·보호 기간 (계산은 서버와 같은 규칙)
+import { contactOwnerLabel, isPartnerLead, partnerLeadTone, protectionLabel }
+  from '@/lib/leadPartner';
 
 import {
   deleteImportBatch, getActivities, getCampaignNames, getLeads, insertLeads, patchLead,
@@ -465,6 +468,19 @@ function LeadList({ rows, today, eventOf, strategyByLead, selectedId, onSelect, 
                   {l.lead_type && (
                     <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                       {leadTypeLabel(l.lead_type)}
+                    </Badge>
+                  )}
+                  {isPartnerLead(l) && (
+                    <Badge variant="outline"
+                      className={`h-4 px-1 text-[10px] ${
+                        partnerLeadTone(l, new Date()) === 'open'
+                          ? 'border-slate-300 text-slate-500'
+                          : partnerLeadTone(l, new Date()) === 'ending'
+                            ? 'border-amber-400 text-amber-700'
+                            : 'border-emerald-400 text-emerald-700'}`}
+                      title={['파트너가 등록한 리드', contactOwnerLabel(l.contact_owner),
+                              protectionLabel(l, new Date())].filter(Boolean).join(' · ')}>
+                      파트너 · {protectionLabel(l, new Date())}
                     </Badge>
                   )}
                   {l.email_status === 'hold' && (

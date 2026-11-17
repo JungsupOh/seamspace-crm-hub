@@ -536,9 +536,15 @@ describe('범위', () => {
     }
   });
 
-  it('포털 화면(7b)을 만들지 않았다', () => {
-    expect(fs.existsSync(path.resolve(process.cwd(),
-      'src/components/partner-portal/PortalLeads.tsx'))).toBe(false);
+  it('**서버가 화면을 모른다** — 7b 가 생겨도 7a 는 그대로다', () => {
+    // (7a 를 낼 때는 "포털 화면이 아직 없다"로 적었는데, 7b 가 생기면 늘 깨지는
+    //  시험이었다. 지키려던 것은 "서버가 화면에 기대지 않는다"이므로 그것을 본다.)
+    const logic = read('supabase/functions/partner-lead/logic.ts');
+    for (const src of [FN, logic]) {
+      expect(src).not.toMatch(/@\/(lib|components|pages)\//);
+      expect(src).not.toMatch(/\bimport\b[^\n]*\.\.\/\.\.\/src\//);
+      expect(src).not.toContain('PortalLeads');
+    }
   });
 
   it('기존 admin 화면을 건드리지 않았다', () => {
