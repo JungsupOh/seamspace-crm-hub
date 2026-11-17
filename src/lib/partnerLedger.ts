@@ -30,6 +30,8 @@ export const BILLING_LABEL: Record<BillingStatus, string> = {
 /** 구매 회차 한 줄. `PurchaseRow`(수량)에 돈 쪽을 더한 것. */
 export interface PurchaseLine extends PurchaseRow {
   id?: string;
+  /** 사람이 적은 매모. 표에 있는 칸이다 — 화면이 보여 주고 고칠 수 있다. */
+  memo?: string | null;
   /**
    * 무효 사유. 표에는 `voided_at` 과 **짝으로** 있어야 한다(CHECK).
    * 처음에 이 칸을 형에서 못 썼다 — 화면이 "왜 무효한지"를 보여 주려면 필요하다.

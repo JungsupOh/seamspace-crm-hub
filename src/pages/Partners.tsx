@@ -16,6 +16,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useDeals, useCreateDeal, useContacts } from '@/hooks/use-airtable';
 import type { DealFields, ContactFields } from '@/types/airtable';
 import { authedFetch } from '@/lib/authedFetch';
+import PartnerContractsSection from '@/components/partners/PartnerContractsSection';
+import ReceivablesSummary from '@/components/partners/ReceivablesSummary';
 import { airtable, type AirtableRecord } from '@/lib/airtable';
 import { getPartnerDeals, getAllPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals, createDealBuyers, getDealBuyers, deleteDealBuyers } from '@/lib/partner-deals';
 import { getPartnerLicenses, type PartnerLicense } from '@/lib/partner-licenses';
@@ -943,6 +945,15 @@ function PartnerSheet({ open, onClose, initial, onSaved, onCreated }: PartnerShe
               commissionRate={f.commission_rate ?? 15}
               crmDeals={partnerDeals}
               allCrmDeals={allDeals ?? []}
+            />
+          )}
+
+          {/* 파트너 계약 (LEAD-S7-2b) — 계약이 없는 파트너는 기존 방식 그대로 동작한다 */}
+          {isEdit && (
+            <PartnerContractsSection
+              partnerId={initial!.id}
+              partnerCurrency={f.currency}
+              files={files}
             />
           )}
 
@@ -2215,6 +2226,15 @@ export default function Partners() {
           </div>
         </div>
       </div>
+
+      {/* 미수금 한눈에 (LEAD-S7-2b) — 계약이 없으면 아무것도 보이지 않는다 */}
+      <ReceivablesSummary
+        partnerNames={new Map((list ?? []).map(p => [p.id, p.name ?? '']))}
+        onOpenPartner={pid => {
+          const target = (list ?? []).find(p => p.id === pid);
+          if (target) setDetailPartner(target);
+        }}
+      />
 
       {/* 검색 */}
       <div className="relative w-64">
