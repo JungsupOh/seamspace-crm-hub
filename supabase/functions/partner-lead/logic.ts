@@ -95,6 +95,33 @@ export function canSeeDetail(role: string): boolean {
 }
 
 /**
+ * 접촉을 기록할 수 있는가 (fix1).
+ * 등록할 수 있는 사람이 기록도 한다 — **보는 사람(viewer)은 못 한다.**
+ */
+export function canRecordContact(role: string): boolean {
+  return canCreateLead(role);
+}
+
+/**
+ * 접촉 기록으로 갱신하는 칸. **하나뿐이다.**
+ *
+ * 허용 목록을 따로 두는 이유: 여기에 칸을 더하면 파트너가 우리 리드의 다른 값을
+ * 고칠 수 있게 된다. 시험이 이 배열의 길이를 센다.
+ */
+export const CONTACT_UPDATE_FIELDS = ['last_contact_at'] as const;
+
+/**
+ * 접촉 기록으로 쓸 행. **서버 시각만** 쓴다 — 본문의 날짜는 쳐다보지 않는다.
+ *
+ * 파트너가 날짜를 정할 수 있으면 보호 기간을 **마음대로 늘릴 수 있다**
+ * (미래로 적으면 90일이 그만큼 더 간다). 그래서 받지 않는다.
+ */
+export function contactUpdate(nowIso: string): Record<string, unknown> {
+  return { last_contact_at: nowIso };
+}
+
+
+/**
  * 역할에 따라 **목록에서도** 칸을 줄인다.
  * viewer 는 "몇 건이 어느 기관에 있는지"까지만 — 사람 이름·연락처는 안 된다.
  */
@@ -507,6 +534,10 @@ export function denialMessage(code: string, locale: string): string {
                'Consent confirmation is required for an end user\'s details.');
     case 'TOO_LONG':
       return L('입력이 너무 깁니다.', '入力が長すぎます。', 'The input is too long.');
+    case 'CONTACT_RECORDED':
+      return L('접촉을 기록했습니다. 보호 기간이 오늘부터 다시 시작합니다.',
+               '接触を記録しました。保護期間は本日から再開します。',
+               'Contact recorded. The protection period restarts today.');
     case 'RATE_LIMIT':
       return L('잠시 후 다시 시도해 주세요.', 'しばらくしてから再度お試しください。',
                'Please try again in a moment.');

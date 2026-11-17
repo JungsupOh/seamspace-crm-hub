@@ -15,7 +15,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { sendTelegram } from '../_shared/telegram.ts';
 import {
-  alertText, canCreateLead, canSeeDetail, canUseLeads, denialMessage,
+  alertText, canCreateLead, canRecordContact, canSeeDetail, canUseLeads,
+  contactUpdate, denialMessage,
   duplicateMessage, findDuplicates, overRateLimit, pickForRole, pickLocale,
   protectionDaysLeft, resolvePartnerId, selectClause, toLeadRow, validateLead,
   type Caller,
@@ -144,7 +145,47 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ── 5) 등록 ──
+    // ── 5) 접촉 기록 (fix1) ──
+    if (action === 'contact') {
+      if (!canRecordContact(caller.role)) return deny('NOT_ALLOWED');
+      const id = typeof body.id === 'string' ? body.id : '';
+      if (!id) return deny('NOT_FOUND', 404);
+
+      // 분당 횟수 제한 — 기록도 쓰기다
+      const since60 = new Date(Date.now() - 60_000).toISOString();
+      const { count: recentC } = await admin
+        .from('campaign_leads')
+        .select('id', { count: 'exact', head: true })
+        .eq('partner_id', partnerId)
+        .gte('last_contact_at', since60);
+      if (overRateLimit(recentC ?? 0)) return deny('RATE_LIMIT', 429);
+
+      // **자기 파트너가 등록한 리드만.** 남의 리드도 우리 리드도 없는 것과 같은 답.
+      const nowIso = new Date().toISOString();
+      const { data: updated, error: upErr } = await admin
+        .from('campaign_leads')
+        .update(contactUpdate(nowIso))   // **갱신하는 칸은 last_contact_at 하나뿐**
+        .eq('id', id)
+        .eq('partner_id', partnerId)
+        .select(selectClause())
+        .maybeSingle();
+      if (upErr) {
+        console.error('[partner-lead] contact failed', upErr.code);
+        return json({ error: 'CONTACT_FAILED' }, 500);
+      }
+      if (!updated) return deny('NOT_FOUND', 404);
+
+      const row = updated as unknown as Record<string, unknown>;
+      return json({
+        ok: true,
+        message: denialMessage('CONTACT_RECORDED', locale),
+        lead: pickForRole(row, caller.role),
+        protection_days_left: protectionDaysLeft(
+          row.partner_claimed_at, row.last_contact_at, new Date()),
+      });
+    }
+
+    // ── 6) 등록 ──
     if (action === 'create') {
       if (!canCreateLead(caller.role)) return deny('NOT_ALLOWED');
 

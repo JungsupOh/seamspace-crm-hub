@@ -20,7 +20,8 @@ import { Info, Plus, ShieldCheck } from 'lucide-react';
 
 import {
   canSubmit, createLead, emptyLeadForm, formProblem, getMyLeads, hasContact,
-  leadSummary, protectionTone, type LeadFormInput, type PortalLead,
+  leadSummary, protectionTone, recordContact,
+  type LeadFormInput, type PortalLead,
 } from '@/lib/partnerPortalLeads';
 import { CONTACT_OWNER_MSG, LEAD_MSG } from '@/lib/partnerPortalMsg';
 import { makeT, type PartnerLocale } from '@/lib/partner-i18n';
@@ -184,7 +185,9 @@ export default function PortalLeads({ locale, country, role }: Props) {
           <p className="text-sm text-muted-foreground">{T('empty')}</p>
         )}
 
-        {(leads ?? []).map(l => <LeadRow key={l.id} lead={l} locale={locale} />)}
+        {(leads ?? []).map(l => (
+          <LeadRow key={l.id} lead={l} locale={locale} canRecord={!isViewer} />
+        ))}
 
         {(leads?.length ?? 0) > 0 && (
           <p className="text-[11px] text-muted-foreground flex items-start gap-1.5">
@@ -200,11 +203,25 @@ export default function PortalLeads({ locale, country, role }: Props) {
   );
 }
 
-function LeadRow({ lead, locale }: { lead: PortalLead; locale: PartnerLocale }) {
+function LeadRow(
+  { lead, locale, canRecord }: { lead: PortalLead; locale: PartnerLocale; canRecord: boolean },
+) {
   const t = makeT(locale);
   const T = (k: keyof typeof LEAD_MSG) => t(LEAD_MSG[k]);
+  const qc = useQueryClient();
   const tone = protectionTone(lead.protection_days_left);
   const days = lead.protection_days_left ?? 0;
+
+  // **날짜를 보내지 않는다** — 서버가 자기 시각으로 적는다
+  const record = useMutation({
+    mutationFn: () => recordContact(lead.id),
+    onSuccess: r => {
+      if (!r.ok) { toast.error(r.message); return; }
+      toast.success(r.message);
+      qc.invalidateQueries({ queryKey: ['portal-leads'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   return (
     <div className="rounded-lg border p-3 space-y-1.5">
@@ -233,6 +250,7 @@ function LeadRow({ lead, locale }: { lead: PortalLead; locale: PartnerLocale }) 
         </div>
       )}
 
+      <div className="flex items-end justify-between gap-2">
       <p className="text-xs">
         {hasContact(lead)
           ? <>{T('lastContact')}: {String(lead.last_contact_at).slice(0, 10)}</>
@@ -243,6 +261,14 @@ function LeadRow({ lead, locale }: { lead: PortalLead; locale: PartnerLocale }) 
           </span>
         )}
       </p>
+      {canRecord && (
+        <Button size="sm" variant="outline" className="h-7 text-xs shrink-0"
+          disabled={record.isPending} title={T('recordHint')}
+          onClick={() => record.mutate()}>
+          {T('recordBtn')}
+        </Button>
+      )}
+      </div>
     </div>
   );
 }

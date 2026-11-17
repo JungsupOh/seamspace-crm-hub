@@ -320,18 +320,26 @@ describe('문구 — 세 언어', () => {
 
 // ══════════════════ 범위 ══════════════════
 describe('범위', () => {
-  it('7a 서버 로직을 고치지 않았다', () => {
-    const logic = read('supabase/functions/partner-lead/logic.ts');
+  // (7b 를 낼 때는 "contact 동작이 아직 없다"로 적었는데, M016 이 7a-fix1 로
+  //  그 동작을 승인해 추가했다. 늘 깨지는 시험 대신 **화면이 서버 규칙을 넘어서지
+  //  않는지**를 본다 — 지키려던 것은 그것이다.)
+  it('화면이 쓰는 동작은 **함수에 있는 것뿐**', () => {
     const fn = read('supabase/functions/partner-lead/index.ts');
-    // 7b 에서 더한 action 이 없다
-    expect(fn).not.toContain("'contact'");
-    expect(logic).not.toContain('recordContact');
+    const used = [...read('src/lib/partnerPortalLeads.ts')
+      .matchAll(/action: '(\w+)'/g)].map(m => m[1]);
+    expect(used.length).toBeGreaterThan(0);
+    for (const a of used) {
+      expect(fn, `함수에 ${a} 동작이 없다`).toContain(`if (action === '${a}')`);
+    }
   });
 
-  it('접촉 기록 단추를 만들지 않았다 — 서버에 그 길이 없다', () => {
-    expect(UI).not.toMatch(/action: 'contact'|recordContact/);
-    // 대신 "알려 주세요" 로 적어 두었다
-    expect(LEAD_MSG.contactAsk.ko).toContain('알려 주세요');
+  it('**화면이 접촉 날짜를 보내지 않는다** — 서버 시각만 쓴다', () => {
+    const api = read('src/lib/partnerPortalLeads.ts');
+    const fn = api.slice(api.indexOf('export async function recordContact'),
+                         api.indexOf('export async function createLead'));
+    expect(fn.length).toBeGreaterThan(20);
+    expect(fn).toContain("call({ action: 'contact', id })");
+    expect(fn).not.toMatch(/occurredOn|new Date|Date\.now/);
   });
 
   it('키·개인정보를 코드에 담지 않았다', () => {

@@ -87,6 +87,24 @@ export async function getLeadDetail(id: string): Promise<PortalLead | null> {
   return (d.lead as PortalLead) ?? null;
 }
 
+/**
+ * 접촉을 기록한다 (7a fix1).
+ *
+ * **날짜를 보내지 않는다.** 서버가 자기 시각으로 적는다 — 파트너가 날짜를 정할 수
+ * 있으면 보호 기간을 마음대로 늘릴 수 있다.
+ */
+export async function recordContact(id: string): Promise<LeadResult> {
+  const d = await call({ action: 'contact', id });
+  if (!d.__ok) {
+    return { ok: false, message: String(d.message ?? d.error ?? 'Could not record the contact.') };
+  }
+  return {
+    ok: true,
+    message: String(d.message ?? ''),
+    lead: d.lead as PortalLead,
+  };
+}
+
 export async function createLead(input: LeadFormInput): Promise<LeadResult> {
   const d = await call({
     action: 'create',
