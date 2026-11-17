@@ -63,6 +63,49 @@ export function hasUnsubscribeLine(body: unknown, token: unknown, base = UNSUBSC
 }
 
 /**
+ * **언어를 바꾸면 거부 문구도 바뀐다** — S4 후속.
+ *
+ * `appendUnsubscribeLine` 은 "이미 있으면 넣지 않는다"로 중복을 막는데,
+ * 있는지 보는 기준이 **링크**다(링크는 두 언어가 같다). 그래서 한국어로 쓰다가
+ * 영어로 바꾸면 **한글 문구가 그대로 남았다** — 영어 메일에 한글 한 줄이 남는다.
+ * 눈에 잘 안 띄고, 눈에 띄었을 때는 이미 보낸 뒤다.
+ *
+ * 그래서 자리를 지키면서 **그 줄만** 바꾼다. 거부 문구가 없으면 끝에 붙인다.
+ */
+export function replaceUnsubscribeLine(
+  body: unknown, token: unknown, lang: MailLang, base = UNSUBSCRIBE_BASE,
+): string {
+  const text = typeof body === 'string' ? body : '';
+  const line = unsubscribeLine(token, lang, base);
+  const url = unsubscribeUrl(token, base);
+  if (!line || !url) return text;
+  if (!text.includes(url)) return appendUnsubscribeLine(text, token, lang, base);
+
+  // 링크를 품은 **줄만** 갈아 끼운다 — 사람이 쓴 다른 줄은 건드리지 않는다.
+  const lines = text.split('\n');
+  let replaced = false;
+  const out = lines.map(l => {
+    if (!l.includes(url)) return l;
+    if (replaced) return null;          // 두 줄 이상 있으면 뒤엣것은 지운다
+    replaced = true;
+    return line;
+  }).filter(l => l !== null) as string[];
+  return out.join('\n');
+}
+
+/**
+ * 새 초안의 기본 본문 — S4 후속.
+ *
+ * 전에는 거부 문구 **한 줄만** 넣어 두어서, 글을 쓰려면 그 줄 앞에 커서를 올려야
+ * 했다(끝에 커서가 가면 거부 문구 **뒤에** 쓰게 된다). 위에 빈 줄을 두어
+ * **쓸 자리를 먼저** 준다.
+ */
+export function newDraftBody(token: unknown, lang: MailLang, base = UNSUBSCRIBE_BASE): string {
+  const line = unsubscribeLine(token, lang, base);
+  return line ? `\n\n${line}` : '';
+}
+
+/**
  * `List-Unsubscribe` 헤더 값 — **지금은 쓰지 않는다.**
  *
  * CRM 이 메일을 보내지 않으므로 헤더를 넣을 자리가 없다. 나중에 발송 API 를 쓰게 되면

@@ -176,11 +176,15 @@ describe('상태 흐름이 화면에 반영됐다', () => {
 describe('초안 작성 화면', () => {
   const p = read('src/components/leads/OutreachPanel.tsx');
 
-  // LEAD-S4(d): 자리를 정하는 규칙이 appendUnsubscribeLine 으로 옮겨졌다
+  // LEAD-S4(d): 자리를 정하는 규칙이 `outreach.ts` 로 옮겨졌다
   // (전에는 화면이 커서 위치에 넣어 본문 맨 앞에 들어가는 결함이 있었다).
+  // S4 후속: 같은 useEffect 가 새 초안이면 `newDraftBody`, 언어가 바뀌면
+  // `replaceUnsubscribeLine` 을 쓴다 — **자리를 정하는 곳은 여전히 한 곳**이다.
   it('수신 거부 문구를 본문 **끝**에 미리 넣는다', () => {
     expect(p).toContain('appendUnsubscribeLine');
-    expect(p).toMatch(/useEffect\([\s\S]{0,400}appendUnsubscribeLine/);
+    expect(p).toMatch(/useEffect\([\s\S]{0,600}(newDraftBody|replaceUnsubscribeLine)/);
+    // 커서 위치에 넣는 옛 방식이 돌아오지 않았다
+    expect(p).not.toMatch(/insertAtCursor\(\s*unsubLine/);
   });
 
   it('거부 문구를 지우면 경고하고 다시 넣을 수 있다', () => {

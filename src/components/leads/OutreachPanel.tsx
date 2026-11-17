@@ -22,6 +22,7 @@ import {
 import {
   DRAFT_STATUS_LABEL, MAIL_LANGS, MAIL_LANG_LABEL, buildCancel, buildDraft, canEditBody,
   appendUnsubscribeLine, checkApproval, checkSuppression, findRiskyPhrases, hasUnsubscribeLine,
+  newDraftBody, replaceUnsubscribeLine,
   localTimeAt, offsetLabel, outgoingText, pendingFactPhrase, scheduleFromLocal,
   suggestStageAfterSend, suppressionText, timezoneOffsetFor, unsubscribeLine,
   type DraftStatus, type MailLang,
@@ -162,8 +163,14 @@ function DraftEditor({ lead, actor, facts, strategyId, existing, onClose, onSave
   // 자리를 결정하는 규칙은 appendUnsubscribeLine 한 곳에 있다 — 그래야 "다시 넣기" 와
   // 기본 본문이 같은 자리에 넣는다.
   useEffect(() => {
-    if (existing) return;
-    setBody(b => appendUnsubscribeLine(b, lead.unsubscribe_token, lang));
+    setBody(b => {
+      // 새 초안이면 **쓸 자리를 먼저** 비워 둔다(S4 후속).
+      if (!b.trim() && !existing) return newDraftBody(lead.unsubscribe_token, lang);
+      // 언어를 바꾸면 **그 줄만 갈아 끼운다**. 전에는 한국어로 쓰다 영어로 바꾸면
+      // 한글 문구가 그대로 남았다 — `append` 가 **링크로만** 있는지 보는데
+      // 링크는 두 언어가 같아서 "이미 있다"로 넘어갔다.
+      return replaceUnsubscribeLine(b, lead.unsubscribe_token, lang);
+    });
   }, [lang, lead.unsubscribe_token, existing]);
 
   const hasUnsub = hasUnsubscribeLine(body, lead.unsubscribe_token);

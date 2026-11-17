@@ -180,11 +180,16 @@ describe('(d) 거부 문구는 본문 끝에 — 중복 금지', () => {
     expect(hasUnsubscribeLine(appendUnsubscribeLine('Hi', TOK, 'en'), TOK)).toBe(true);
   });
 
-  it('화면이 "다시 넣기"와 기본 본문에 **같은 함수**를 쓴다', () => {
+  it('화면이 자리를 **직접 정하지 않는다** — 규칙은 outreach.ts 에 있다', () => {
     const o = read('src/components/leads/OutreachPanel.tsx');
-    expect((o.match(/appendUnsubscribeLine\(/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    // "다시 넣기"·새 초안·언어 바꾸기가 전부 outreach.ts 의 함수를 쓴다
+    // (S4 후속에서 새 초안과 언어 바꾸기가 각자 함수를 갖게 됐다)
+    const helpers = ['appendUnsubscribeLine(', 'newDraftBody(', 'replaceUnsubscribeLine(']
+      .filter(h => o.includes(h));
+    expect(helpers.length).toBe(3);
     // 커서 위치에 넣는 옛 방식이 남아 있지 않다
     expect(o).not.toContain('insertAtCursor(`\\n\\n${unsubLine}`)');
+    expect(o).not.toMatch(/insertAtCursor\(\s*unsubLine/);
   });
 });
 
