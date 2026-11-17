@@ -19,6 +19,8 @@ import { authedFetch } from '@/lib/authedFetch';
 import PartnerContractsSection from '@/components/partners/PartnerContractsSection';
 import ReceivablesSummary from '@/components/partners/ReceivablesSummary';
 import PartnerRequests from '@/components/partners/PartnerRequests';
+import PartnerOnboardingWizard, { OnboardingBadgeView }
+  from '@/components/partners/PartnerOnboardingWizard';
 import { airtable, type AirtableRecord } from '@/lib/airtable';
 import { getPartnerDeals, getAllPartnerDeals, createPartnerDeal, updatePartnerDeal, deletePartnerDeal, calcCommission, autoLinkPartnerDeals, createDealBuyers, getDealBuyers, deleteDealBuyers } from '@/lib/partner-deals';
 import { getPartnerLicenses, type PartnerLicense } from '@/lib/partner-licenses';
@@ -72,6 +74,9 @@ interface Partner {
   locale: string | null;      // PartnerLocale — 'ko' | 'ja' | 'en'
   currency: string | null;    // PartnerCurrency — 'KRW' | 'JPY' | 'USD'
   country: string | null;     // PARTNER_COUNTRIES의 code — 'KR' | 'JP' | ...
+  // LEAD-S7-6: 등록 마법사. NULL = 마법사 이전에 들어온 기존 파트너(완료로 본다).
+  onboarding_status?: 'draft' | 'done' | null;
+  onboarding_steps?: Record<string, boolean> | null;
   created_at: string;
 }
 
@@ -2026,6 +2031,8 @@ function PartnerDealsSection({
 // ── 메인 페이지 ──────────────────────────────────
 export default function Partners() {
   const { canEdit, userProfile } = useAuth();
+  // LEAD-S7-6: 해외 파트너 등록 마법사
+  const [wizardFor, setWizardFor] = useState<Partner | null | undefined>(undefined);
   const qc = useQueryClient();
   const { data: partners, isLoading } = useQuery({ queryKey: ['partners'], queryFn: getPartners });
   const { data: allDeals } = useDeals();
@@ -2174,6 +2181,28 @@ export default function Partners() {
             />
           </PartnerSheetErrorBoundary>
         )}
+
+      {/* LEAD-S7-6: 등록 마법사 — 메인 목록에서 연다 */}
+      {wizardFor !== undefined && (
+        <PartnerOnboardingWizard
+          initial={wizardFor as unknown as Record<string, unknown> | null}
+          onClose={() => setWizardFor(undefined)}
+          save={async (payload, finish) => {
+            // 기존 create/update 경로를 **그대로** 쓴다(복제하지 않는다).
+            void finish;
+            if (wizardFor?.id) {
+              await updatePartner(wizardFor.id, payload as never);
+              return wizardFor.id;
+            }
+            const row = await createPartner(payload as never);
+            return row?.id ?? null;
+          }}
+          onSaved={() => {
+            setWizardFor(undefined);
+            qc.invalidateQueries({ queryKey: ['partners'] });
+          }}
+        />
+      )}
       </div>
     );
   }
@@ -2227,6 +2256,20 @@ export default function Partners() {
           </div>
         </div>
       </div>
+
+      {/* LEAD-S7-6: 해외 파트너 등록 마법사 — 중간에 멈춘 파트너가 한눈에 보인다 */}
+      {canEdit && (
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setWizardFor(null)}>
+            <Plus className="h-4 w-4 mr-1.5" />해외 파트너 등록 (마법사)
+          </Button>
+          {(list ?? []).filter(p => p.onboarding_status === 'draft').length > 0 && (
+            <span className="text-xs text-amber-700">
+              작성 중 {(list ?? []).filter(p => p.onboarding_status === 'draft').length}곳
+            </span>
+          )}
+        </div>
+      )}
 
       {/* LEAD-S7-4: 파트너가 보낸 요청 — 없으면 보이지 않는다 */}
       {userProfile?.id && (
@@ -2285,6 +2328,7 @@ export default function Partners() {
                   className="hover:bg-muted/30 transition-colors cursor-pointer">
                   <td className="px-4 py-3 font-medium">
                     <div className="flex items-center gap-2">
+                      <OnboardingBadgeView status={p.onboarding_status} />
                       <Building2 className="h-4 w-4 text-muted-foreground/50 shrink-0" />
                       {p.name}
                     </div>
