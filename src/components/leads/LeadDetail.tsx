@@ -17,8 +17,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Archive, ArchiveRestore, HelpCircle, Save } from 'lucide-react';
 
 import {
-  getActivities, getActivitiesForLeads, getCcLinks, saveActivity, saveLeadEdit, setArchived,
-  setCcLink, type Actor, type LeadRow,
+  getActivities, getActivitiesForLeads, getCcLinks, patchLead, saveActivity, saveLeadEdit,
+  setArchived, setCcLink, type Actor, type LeadRow,
 } from '@/lib/leadsApi';
 import {
   EMAIL_STATUS_HELP, EMAIL_STATUS_LABEL, QUALITY_HELP, diffTracked, emailStatusLabel,
@@ -32,6 +32,11 @@ import {
   CHANNELS, CHANNEL_LABEL, FOLLOWUP_STAGES, kstDate, needsCloseReason,
   suggestFirstContactDue, todayKst, type Channel, type FollowupStage,
 } from '@/lib/leadFollowup';
+import {
+  LEAD_TYPES, LEAD_TYPE_HINT, LEAD_TYPE_LABEL, PARTNER_CONVERSION_HINT, TAG_SUGGESTIONS,
+  defaultNextAction, isReadyForPartnerConversion, isStageForeign, leadTagsOf, stagesFor,
+  toggleTag, type LeadType,
+} from '@/lib/leadType';
 import { CountrySelect } from './CountrySelect';
 import { OrgMatesPanel } from './OrgMatesPanel';
 import { SignalsPanel } from './SignalsPanel';
@@ -76,22 +81,26 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
       name: lead.name ?? '', school_name: lead.school_name ?? '', position: lead.position ?? '',
       email: lead.email ?? '', phone: lead.phone ?? '', country: lead.country ?? '',
       segment: lead.segment ?? '', segment_detail: lead.segment_detail ?? '',
-      probability: lead.probability ?? null,
+      lead_type: lead.lead_type ?? '', probability: lead.probability ?? null,
       event_name: lead.event_name ?? '', owner: lead.owner ?? '',
       source_type: lead.source_type ?? '', notes: lead.notes ?? '',
       email_status: lead.email_status ?? '', followup_stage: lead.followup_stage ?? '',
     });
   }, [lead.id, lead.name, lead.school_name, lead.position, lead.email, lead.phone, lead.country,
-      lead.segment, lead.segment_detail, lead.probability, lead.event_name, lead.owner,
-      lead.source_type, lead.notes, lead.email_status, lead.followup_stage]);
+      lead.segment, lead.segment_detail, lead.lead_type, lead.probability, lead.event_name,
+      lead.owner, lead.source_type, lead.notes, lead.email_status, lead.followup_stage]);
 
   const set = (k: keyof EditableLead, v: unknown) => setForm(p => ({ ...p, [k]: v }));
+
+  // 보조 태그는 jsonb 라 EditableLead(문자열 칸들)와 따로 둔다.
+  const [tags, setTags] = useState<string[]>([]);
+  useEffect(() => { setTags(leadTagsOf(lead.lead_tags)); }, [lead.id, lead.lead_tags]);
 
   const before: EditableLead = useMemo(() => ({
     name: lead.name ?? '', school_name: lead.school_name ?? '', position: lead.position ?? '',
     email: lead.email ?? '', phone: lead.phone ?? '', country: lead.country ?? '',
     segment: lead.segment ?? '', segment_detail: lead.segment_detail ?? '',
-    probability: lead.probability ?? null,
+    lead_type: lead.lead_type ?? '', probability: lead.probability ?? null,
     event_name: lead.event_name ?? '', owner: lead.owner ?? '',
     source_type: lead.source_type ?? '', notes: lead.notes ?? '',
     email_status: lead.email_status ?? '', followup_stage: lead.followup_stage ?? '',
@@ -107,8 +116,17 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
       ? findEmailDuplicates(lead.id, form.email, allLeads) : [],
     [form.email, lead.email, lead.id, allLeads]);
 
+  const tagsDirty = useMemo(
+    () => JSON.stringify(leadTagsOf(lead.lead_tags)) !== JSON.stringify(tags),
+    [lead.lead_tags, tags]);
+
   const save = useMutation({
-    mutationFn: () => saveLeadEdit(lead.id, before, form, actor),
+    mutationFn: async () => {
+      const r = await saveLeadEdit(lead.id, before, form, actor);
+      // 태그는 변경 기록 대상이 아니다(유형과 달리 단계 목록을 바꾸지 않는다).
+      if (tagsDirty) await patchLead(lead.id, { lead_tags: tags });
+      return r;
+    },
     onSuccess: (r) => {
       toast.success(r.logged ? '저장하고 변경 기록을 남겼습니다' : '저장했습니다');
       refresh();
@@ -333,9 +351,15 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
               onChange={v => set('probability', v ? Number(v) : null)}
               options={[5, 4, 3, 2, 1].map(n => [String(n), String(n)])} />
           </F>
+          <F label="리드 유형">
+            {/* LEAD-S4(CRM-015) — 유형별로 다른 것은 **단계 목록과 기본 다음 행동뿐**이다. */}
+            <Pick value={form.lead_type} onChange={v => set('lead_type', v)}
+              options={LEAD_TYPES.map(t => [t, LEAD_TYPE_LABEL[t]])} />
+          </F>
           <F label="단계">
+            {/* 유형에 맞는 단계 목록을 보여 준다. 유형이 없으면 기존(고객) 목록이다. */}
             <Pick value={form.followup_stage} onChange={v => set('followup_stage', v)}
-              options={FOLLOWUP_STAGES.map(s => [s, s])} />
+              options={stagesFor(form.lead_type).map(s => [s, s])} />
           </F>
           <F label="출처 유형">
             <Pick value={form.source_type} onChange={v => set('source_type', v)}
@@ -350,6 +374,43 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
             <div className="h-9 flex items-center text-sm">{qualityLabel(lead.email_quality)}</div>
           </F>
         </div>
+        {form.lead_type && (
+          <p className="text-xs text-muted-foreground">
+            {LEAD_TYPE_HINT[form.lead_type as LeadType]}
+            {defaultNextAction(form.lead_type) &&
+              ` · 기본 다음 행동 제안: ${defaultNextAction(form.lead_type)}`}
+          </p>
+        )}
+
+        {/* 유형을 바꿔 단계가 안 맞으면 **알려만** 준다 — 값을 지우거나 바꾸면 이력이 틀어진다. */}
+        {isStageForeign(form.lead_type, form.followup_stage) && (
+          <p className="text-xs text-amber-700">
+            ⚠️ "{form.followup_stage}" 는 이 유형의 단계가 아닙니다.
+            단계를 다시 고르거나 유형을 확인하세요. (값은 그대로 둡니다)
+          </p>
+        )}
+
+        {isReadyForPartnerConversion({ lead_type: form.lead_type, followup_stage: form.followup_stage }) && (
+          <p className="text-xs text-muted-foreground">💡 {PARTNER_CONVERSION_HINT}</p>
+        )}
+
+        {/* 보조 태그 — 한 사람이 고객이면서 연구 파트너일 수 있다(브리프 H항) */}
+        <div>
+          <Label className="text-xs">보조 태그</Label>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {TAG_SUGGESTIONS.map(t => {
+              const on = tags.includes(t);
+              return (
+                <button key={t} type="button" onClick={() => setTags(p => toggleTag(p, t))}
+                  className={`rounded-full border px-2.5 py-1 text-xs transition ${
+                    on ? 'border-primary bg-primary/10 font-medium' : 'hover:bg-muted'}`}>
+                  {t}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <F label="메모">
           <Textarea rows={2} value={form.notes ?? ''} onChange={e => set('notes', e.target.value)} />
         </F>
@@ -363,7 +424,8 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
         )}
 
         <div className="flex items-center gap-2">
-          <Button size="sm" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+          <Button size="sm" disabled={(!dirty && !tagsDirty) || save.isPending}
+            onClick={() => save.mutate()}>
             <Save className="h-4 w-4 mr-1.5" />{save.isPending ? '저장 중…' : '저장'}
           </Button>
           {changes.length > 0 && (
@@ -421,8 +483,10 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
           </div>
           <div className="w-[130px]">
             <Label className="text-xs">단계</Label>
+            {/* LEAD-S4: 기본 정보와 **같은 목록**을 쓴다. 한쪽만 유형을 따르면
+                빠른 기록에서 그 유형에 없는 단계를 고를 수 있어 어긋난다. */}
             <Pick value={log.stageAfter} onChange={v => setLog(p => ({ ...p, stageAfter: v }))}
-              options={FOLLOWUP_STAGES.map(s => [s, s])} allowEmpty={false} />
+              options={stagesFor(lead.lead_type).map(s => [s, s])} allowEmpty={false} />
           </div>
         </div>
         <F label="무엇을 했나 (한 줄)">
@@ -437,8 +501,11 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
               placeholder="예: 예산 없음 / 타사 선택 / 응답 없음" />
           </F>
         )}
-        {/* LEAD-S1 — 보낸 접촉의 결과와 알게 된 점. 다음 전략 판의 근거가 된다. */}
-        {log.direction === 'out' && (
+        {/* LEAD-S1 — 접촉의 결과와 알게 된 점. 다음 전략 판의 근거가 된다.
+            LEAD-S4(a): **받은 기록(답장)에서도** 적을 수 있다 — "답장 받음" 이라는 결과를
+            자연스럽게 남기려면 받은 기록에 적는 것이 맞다. 차수(attempt_no)는
+            보낸 기록만 세는 규칙을 그대로 둔다(받은 것은 우리가 시도한 횟수가 아니다). */}
+        {(
           <div className="flex gap-2">
             <div className="w-[150px]">
               <Label className="text-xs">결과</Label>
@@ -470,12 +537,18 @@ export function LeadDetail({ lead, allLeads, actor, onOpenLead }: {
           <Button size="sm" disabled={logBlocked || saveLog.isPending} onClick={() => saveLog.mutate()}>
             {saveLog.isPending ? '저장 중…' : '기록'}
           </Button>
-          {log.direction === 'out' && (
-            <span className="text-xs text-muted-foreground">
-              {nextAttemptNo(acts ?? [])}차 접촉으로 기록됩니다
-              {curStrategy && ` · 전략 v${curStrategy.version}`}
-            </span>
-          )}
+          {log.direction === 'out'
+            ? (
+              <span className="text-xs text-muted-foreground">
+                {nextAttemptNo(acts ?? [])}차 접촉으로 기록됩니다
+                {curStrategy && ` · 전략 v${curStrategy.version}`}
+              </span>
+            )
+            : (
+              <span className="text-xs text-muted-foreground">
+                받은 기록은 접촉 차수에 세지 않습니다
+              </span>
+            )}
         </div>
       </section>
 

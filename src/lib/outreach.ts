@@ -36,6 +36,25 @@ export function unsubscribeLine(token: unknown, lang: MailLang, base = UNSUBSCRI
     : `If you would rather not hear from us, unsubscribe here: ${url}`;
 }
 
+/**
+ * 본문 **끝**에 거부 문구를 붙인다 — LEAD-S4 (d).
+ *
+ * 전에는 "다시 넣기" 가 커서 위치에 넣어서, 커서가 없으면 **본문 맨 앞에 줄바꿈도 없이**
+ * 들어갔다(제시카 확인). 거부 문구는 늘 맨 끝에 있어야 하므로 자리를 함수가 정한다.
+ *
+ * **이미 들어 있으면 넣지 않는다**(중복 방지).
+ */
+export function appendUnsubscribeLine(
+  body: unknown, token: unknown, lang: MailLang, base = UNSUBSCRIBE_BASE,
+): string {
+  const text = typeof body === 'string' ? body : '';
+  const line = unsubscribeLine(token, lang, base);
+  if (!line) return text;
+  if (hasUnsubscribeLine(text, token, base)) return text;   // 이미 있다
+  const trimmed = text.replace(/\s+$/, '');
+  return trimmed ? `${trimmed}\n\n${line}` : line;
+}
+
 /** 본문에 거부 문구(또는 적어도 그 링크)가 들어 있는가. 지우면 경고한다. */
 export function hasUnsubscribeLine(body: unknown, token: unknown, base = UNSUBSCRIBE_BASE): boolean {
   if (typeof body !== 'string') return false;
@@ -130,6 +149,19 @@ export function suppressionText(r: SuppressionResult): string {
   return r.reasons.map(x => SUPPRESSION_LABEL[x]).join(' · ');
 }
 
+/**
+ * 미정 사실을 본문에 넣을 때 쓰는 문구 — LEAD-S4 (e).
+ *
+ * ⚠️ 전에는 한글 라벨을 괄호로 함께 넣어 **영어 메일에 한글이 섞였다**
+ *    (`(구독 가격 (해외): we will confirm…)` — 제시카 확인).
+ *    그래서 **언어에 맞는 문장만** 넣는다. 무엇에 대한 답인지는 사람이 문맥에 맞게 쓴다.
+ */
+export function pendingFactPhrase(lang: MailLang): string {
+  return lang === 'ko'
+    ? '확인 후 안내드리겠습니다.'
+    : 'We will confirm and get back to you on this.';
+}
+
 // ─────────────────────── 문구 점검 (조언용) ───────────────────────
 
 export interface RiskyPhrase {
@@ -167,6 +199,14 @@ export const RISKY_PHRASES: readonly RiskyPhrase[] = [
 ];
 
 export interface PhraseHit { label: string; why: string; excerpt: string }
+
+/**
+ * 점검할 글 — **수신자에게 나갈 것만** (LEAD-S4 f).
+ * 제목과 본문이다. 화면의 라벨·안내 문구는 섞지 않는다.
+ */
+export function outgoingText(subject: unknown, body: unknown): string {
+  return `${String(subject ?? '')}\n${String(body ?? '')}`;
+}
 
 /** 본문·제목에서 위험 표현을 찾는다. 찾은 자리를 짧게 보여 준다. */
 export function findRiskyPhrases(text: unknown): PhraseHit[] {
@@ -287,7 +327,9 @@ export function checkApproval(a: {
     blockers.push('수신 거부 문구가 본문에 없습니다.');
   }
 
-  for (const h of findRiskyPhrases(`${String(a.subject ?? '')}\n${String(a.body ?? '')}`)) {
+  // LEAD-S4 (f): 점검 대상은 **수신자에게 나갈 본문**이다.
+  // 제목도 수신자가 보므로 함께 보지만, 라벨·내부 메모 같은 것은 섞지 않는다.
+  for (const h of findRiskyPhrases(outgoingText(a.subject, a.body))) {
     warnings.push(`"${h.label}" — ${h.why}`);
   }
 

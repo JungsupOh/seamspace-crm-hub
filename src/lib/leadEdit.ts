@@ -7,6 +7,7 @@
 //   ③ 이메일을 바꾸면 email_normalized 도 **같이** 바꾼다 — 따로 두면 중복 판정이 어긋난다.
 
 import { countryLabel } from './countries';
+import { leadTypeLabel } from './leadType';
 import { normalizeLeadEmail, normalizeLeadPhone } from './leadMarket';
 
 /** 화면에서 고칠 수 있는 칸. */
@@ -27,12 +28,16 @@ export interface EditableLead {
   followup_stage?: string | null;
   /** LEAD-S1 — 엑셀 등급 세부 구분(B-교육·B-기업·C2). 세그먼트 옆에 작게 보인다. */
   segment_detail?: string | null;
+  /** LEAD-S4 — 리드 유형(브리프 H항). 바뀌면 활동 기록에 남는다. */
+  lead_type?: string | null;
 }
 
 /** 바뀌면 **활동 기록을 남기는** 칸 (요구 R1). 메모·직함처럼 자주 다듬는 칸은 뺀다. */
 export const TRACKED_FIELDS = [
   'name', 'school_name', 'email', 'country', 'followup_stage',
   'segment', 'probability', 'email_status',
+  // LEAD-S4: 유형이 바뀌면 단계 목록과 기본 다음 행동이 달라진다 — 이력에 남아야 한다.
+  'lead_type',
 ] as const;
 export type TrackedField = typeof TRACKED_FIELDS[number];
 
@@ -52,6 +57,7 @@ export const FIELD_LABEL: Record<keyof EditableLead, string> = {
   email_status: '이메일 상태',
   followup_stage: '단계',
   segment_detail: '세그먼트 상세',
+  lead_type: '리드 유형',
 };
 
 export const EMAIL_STATUS_LABEL: Record<string, string> = {
@@ -126,6 +132,7 @@ export function displayValue(field: keyof EditableLead, v: unknown): string {
   if (v === null || v === undefined || v === '') return EMPTY;
   if (field === 'country') return countryLabel(v, EMPTY);
   if (field === 'email_status') return emailStatusLabel(v, false);
+  if (field === 'lead_type') return leadTypeLabel(v, EMPTY);
   return String(v);
 }
 

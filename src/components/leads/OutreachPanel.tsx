@@ -21,13 +21,15 @@ import {
 } from '@/lib/leadsApi';
 import {
   DRAFT_STATUS_LABEL, MAIL_LANGS, MAIL_LANG_LABEL, buildCancel, buildDraft, canEditBody,
-  checkApproval, checkSuppression, findRiskyPhrases, hasUnsubscribeLine, localTimeAt,
-  offsetLabel, scheduleFromLocal, suggestStageAfterSend, suppressionText, timezoneOffsetFor,
-  unsubscribeLine, type DraftStatus, type MailLang,
+  appendUnsubscribeLine, checkApproval, checkSuppression, findRiskyPhrases, hasUnsubscribeLine,
+  localTimeAt, offsetLabel, outgoingText, pendingFactPhrase, scheduleFromLocal,
+  suggestStageAfterSend, suppressionText, timezoneOffsetFor, unsubscribeLine,
+  type DraftStatus, type MailLang,
 } from '@/lib/outreach';
 import { currentStrategy, factIdsOf, isConfirmed, nextAttemptNo, PENDING_PLACEHOLDER,
   type OutreachFact } from '@/lib/leadStrategy';
 import { kstDate } from '@/lib/leadFollowup';
+import { stripEmphasis } from './Emphasis';
 import { getActivities } from '@/lib/leadsApi';
 
 export function OutreachPanel({ lead, actor, allLeads }: {
@@ -156,15 +158,17 @@ function DraftEditor({ lead, actor, facts, strategyId, existing, onClose, onSave
   const unsubLine = useMemo(
     () => unsubscribeLine(lead.unsubscribe_token, lang), [lead.unsubscribe_token, lang]);
 
-  // 새 초안이면 거부 문구를 본문 끝에 미리 넣어 둔다(요구 S2-2).
+  // 새 초안이면 거부 문구를 **본문 끝에** 미리 넣어 둔다(요구 S2-2 · S4 d).
+  // 자리를 결정하는 규칙은 appendUnsubscribeLine 한 곳에 있다 — 그래야 "다시 넣기" 와
+  // 기본 본문이 같은 자리에 넣는다.
   useEffect(() => {
     if (existing) return;
-    if (!unsubLine) return;
-    setBody(b => (b.includes(unsubLine) ? b : (b ? `${b}\n\n${unsubLine}` : `\n\n${unsubLine}`)));
-  }, [unsubLine, existing]);
+    setBody(b => appendUnsubscribeLine(b, lead.unsubscribe_token, lang));
+  }, [lang, lead.unsubscribe_token, existing]);
 
   const hasUnsub = hasUnsubscribeLine(body, lead.unsubscribe_token);
-  const risky = useMemo(() => findRiskyPhrases(`${subject}\n${body}`), [subject, body]);
+  // LEAD-S4 (f): 점검 대상은 **수신자에게 나갈 글만**(제목+본문).
+  const risky = useMemo(() => findRiskyPhrases(outgoingText(subject, body)), [subject, body]);
   const confirmed = facts.filter(isConfirmed);
   const pending = facts.filter(f => f.status === 'pending');
 
@@ -189,10 +193,11 @@ function DraftEditor({ lead, actor, facts, strategyId, existing, onClose, onSave
     setFactIds(p => (p.includes(f.id) ? p : [...p, f.id]));
   };
 
+  // LEAD-S4 (e): **언어에 맞는 문장만** 넣는다. 전에는 한글 라벨을 괄호로 함께 넣어
+  // 영어 메일에 한글이 섞였다(`(구독 가격 (해외): we will confirm…)`).
   const insertPending = (f: OutreachFact) => {
-    insertAtCursor(lang === 'ko'
-      ? `(${f.label_ko}: ${PENDING_PLACEHOLDER}드리겠습니다)`
-      : `(${f.label_ko}: we will confirm and get back to you)`);
+    insertAtCursor(pendingFactPhrase(lang));
+    toast.info(`"${f.label_ko}" 는 미정이라 "${PENDING_PLACEHOLDER}" 문구만 넣었습니다`);
   };
 
   const save = useMutation({
@@ -246,7 +251,7 @@ function DraftEditor({ lead, actor, facts, strategyId, existing, onClose, onSave
           )}
           {confirmed.map(f => (
             <button key={f.id} type="button" onClick={() => insertFact(f)}
-              title={f.caveat ? `⚠️ ${f.caveat}` : undefined}
+              title={f.caveat ? `⚠️ ${stripEmphasis(f.caveat)}` : undefined}
               className={`rounded-full border px-2.5 py-1 text-xs hover:bg-muted ${
                 factIds.includes(f.id) ? 'border-primary bg-primary/10' : ''}`}>
               {f.label_ko}
@@ -278,7 +283,8 @@ function DraftEditor({ lead, actor, facts, strategyId, existing, onClose, onSave
           <span>
             <strong>수신 거부 문구가 없습니다.</strong> 이 상태로는 승인할 수 없습니다.
             {unsubLine && (
-              <button type="button" onClick={() => insertAtCursor(`\n\n${unsubLine}`)}
+              <button type="button"
+                onClick={() => setBody(b => appendUnsubscribeLine(b, lead.unsubscribe_token, lang))}
                 className="ml-1.5 underline">다시 넣기</button>
             )}
           </span>

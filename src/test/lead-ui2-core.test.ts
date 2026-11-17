@@ -285,9 +285,11 @@ describe('R6 · 중복 접촉 경고', () => {
 // ══════════════════════ R1 변경 기록 ══════════════════════
 describe('R1 · 변경 기록', () => {
   it('기록 대상 칸이 요구대로다', () => {
+    // LEAD-S4 에서 lead_type 이 더해졌다 — 유형이 바뀌면 단계 목록과 기본 다음 행동이
+    // 달라지므로 이력에 남아야 한다(요구 S4-1).
     expect([...TRACKED_FIELDS].sort()).toEqual([
-      'country', 'email', 'email_status', 'followup_stage', 'name', 'probability',
-      'school_name', 'segment',
+      'country', 'email', 'email_status', 'followup_stage', 'lead_type', 'name',
+      'probability', 'school_name', 'segment',
     ]);
   });
 

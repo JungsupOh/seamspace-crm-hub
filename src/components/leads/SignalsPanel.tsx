@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Check } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { addSignal, getSignals, voidSignal, type Actor } from '@/lib/leadsApi';
 import {
@@ -57,16 +58,26 @@ export function SignalsPanel({ leadId, actor }: { leadId: string; actor: Actor }
 
   return (
     <div className="space-y-2.5">
-      {/* 유형 칩 — 누르면 바로 고른다 */}
+      {/* 유형 칩 — LEAD-S4(c): 고른 것이 **눌렀다**는 뜻이지 저장됐다는 뜻은 아니다.
+          저장은 아래 버튼을 눌러야 한다. 체크 표시와 안내 문구로 그 차이를 분명히 한다.
+          (칩을 누를 때 바로 저장하는 안을 쓰지 않은 이유는 결과 문서 §S4-4 에 적었다.) */}
       <div className="flex flex-wrap gap-1">
         {SIGNAL_TYPES.map(t => (
           <button key={t} type="button" onClick={() => setType(t)}
-            className={`rounded-full border px-2.5 py-1 text-xs transition ${
-              type === t ? 'border-primary bg-primary/10 font-medium' : 'hover:bg-muted'}`}>
+            aria-pressed={type === t}
+            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition ${
+              type === t
+                ? 'border-primary bg-primary text-primary-foreground font-medium'
+                : 'hover:bg-muted'}`}>
+            {type === t && <Check className="h-3 w-3" />}
             {SIGNAL_LABEL[t]}
           </button>
         ))}
       </div>
+      <p className="text-xs text-muted-foreground">
+        <strong>{SIGNAL_LABEL[type]}</strong> 을 골랐습니다. 아직 저장되지 않았습니다 —
+        아래 <strong>"{SIGNAL_LABEL[type]} 추가"</strong> 를 눌러야 기록됩니다.
+      </p>
 
       <div className="flex gap-2">
         <Input className="h-9 flex-1" value={note} onChange={e => setNote(e.target.value)}
@@ -77,8 +88,9 @@ export function SignalsPanel({ leadId, actor }: { leadId: string; actor: Actor }
             {SIGNAL_SOURCES.map(s => <SelectItem key={s} value={s}>{SIGNAL_SOURCE_LABEL[s]}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Button size="sm" className="h-9" disabled={add.isPending} onClick={() => add.mutate()}>
-          추가
+        <Button size="sm" className="h-9 whitespace-nowrap" disabled={add.isPending}
+          onClick={() => add.mutate()}>
+          {add.isPending ? '저장 중…' : `${SIGNAL_LABEL[type]} 추가`}
         </Button>
       </div>
 

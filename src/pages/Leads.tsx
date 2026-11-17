@@ -30,6 +30,7 @@ import { countryLabel, countryShort } from '@/lib/countries';
 import { emailStatusLabel, excludeArchived, isMailable } from '@/lib/leadEdit';
 import { getStrategyHeads } from '@/lib/leadsApi';
 import { currentStrategy } from '@/lib/leadStrategy';
+import { LEAD_TYPES, LEAD_TYPE_LABEL, leadTypeLabel, toLeadType } from '@/lib/leadType';
 
 import {
   deleteImportBatch, getActivities, getCampaignNames, getLeads, insertLeads, patchLead,
@@ -98,6 +99,7 @@ export default function Leads() {
   const [fStage, setFStage] = useState<string>(ALL);
   const [fMail, setFMail] = useState<string>(ALL);
   const [fStrategy, setFStrategy] = useState<string>(ALL);
+  const [fType, setFType] = useState<string>(ALL);
   const [showArchived, setShowArchived] = useState(false);
   const [q, setQ] = useState('');
 
@@ -150,6 +152,9 @@ export default function Leads() {
       // LEAD-S1 — 전략이 아직 없는 리드를 찾아 채우려는 용도
       if (fStrategy === 'none' && strategyByLead.has(l.id)) return false;
       if (fStrategy === 'has' && !strategyByLead.has(l.id)) return false;
+      // LEAD-S4 — 유형. 'none' 은 아직 분류하지 않은 리드를 찾는 용도다.
+      if (fType === 'none' && toLeadType(l.lead_type)) return false;
+      if (fType !== ALL && fType !== 'none' && toLeadType(l.lead_type) !== fType) return false;
       if (needle) {
         const hay = [l.name, l.school_name, l.email, eventOf(l), countryLabel(l.country, ''), l.notes]
           .filter(Boolean).join(' ').toLowerCase();
@@ -157,7 +162,7 @@ export default function Leads() {
       }
       return true;
     });
-  }, [leads, fMarket, fRegion, fEvent, fCountry, fOwner, fStage, fMail, fStrategy,
+  }, [leads, fMarket, fRegion, fEvent, fCountry, fOwner, fStage, fMail, fStrategy, fType,
       showArchived, q, eventOf, strategyByLead]);
 
   // "오늘 할 팔로업"·"7일 넘게 접촉 없음"은 **보관본을 반드시 뺀다**(요구 R8).
@@ -222,7 +227,7 @@ export default function Leads() {
   const resetFilters = () => {
     setFMarket(ALL); setFRegion(ALL); setFEvent(ALL);
     setFCountry(ALL); setFOwner(ALL); setFStage(ALL); setFMail(ALL); setFStrategy(ALL);
-    setShowArchived(false); setQ('');
+    setFType(ALL); setShowArchived(false); setQ('');
   };
 
   if (isLoading) return <div className="p-6"><DataTableSkeleton /></div>;
@@ -237,6 +242,9 @@ export default function Leads() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/leads/funnel">행사별 깔때기</Link>
+          </Button>
           <Button variant="ghost" size="sm" asChild>
             <Link to="/outreach">아웃리치 큐</Link>
           </Button>
@@ -285,6 +293,9 @@ export default function Leads() {
           options={[['mailable', '발송 가능만'], ['hold', '발송 보류만']]} />
         <FilterSelect label="전략" value={fStrategy} onChange={setFStrategy}
           options={[['none', '전략 없음'], ['has', '전략 있음']]} />
+        <FilterSelect label="유형" value={fType} onChange={setFType}
+          options={[...LEAD_TYPES.map(t => [t, LEAD_TYPE_LABEL[t]] as [string, string]),
+                    ['none', '미분류']]} />
         <label className="flex items-center gap-1.5 h-9 text-xs cursor-pointer">
           <Checkbox checked={showArchived} onCheckedChange={v => setShowArchived(v === true)} />
           보관된 리드 보기
@@ -450,6 +461,11 @@ function LeadList({ rows, today, eventOf, strategyByLead, selectedId, onSelect, 
                   <span className="font-medium text-sm">{l.name}</span>
                   {toMarket(l.market) === 'INTL' && (
                     <Badge variant="outline" className="h-4 px-1 text-[10px]">해외</Badge>
+                  )}
+                  {l.lead_type && (
+                    <Badge variant="secondary" className="h-4 px-1 text-[10px]">
+                      {leadTypeLabel(l.lead_type)}
+                    </Badge>
                   )}
                   {l.email_status === 'hold' && (
                     <Badge variant="destructive" className="h-4 px-1 text-[10px]"

@@ -406,7 +406,11 @@ export function pendingRevision(
   activities: readonly ActivityRow[], strategies: readonly Strategy[],
 ): ActivityRow | null {
   const done = [...activities]
-    .filter(a => isOutreach(a) && !!a.outcome && suggestsRevision(a.outcome))
+    // LEAD-S4(a): **보낸 기록뿐 아니라 받은 기록(답장)의 결과도** 본다.
+    // "답장 받음" 은 받은 기록에 적는 것이 자연스럽고, 그것이야말로 전략을 고칠 신호다.
+    // 시스템 기록([변경]·[보관])과 취소된 기록은 여전히 뺀다.
+    .filter(a => !isSystemRecord(a.summary) && !a.voided_at
+      && !!a.outcome && suggestsRevision(a.outcome))
     .sort((a, b) => String(b.occurred_at ?? '').localeCompare(String(a.occurred_at ?? '')));
   const last = done[0];
   if (!last || !last.id) return null;

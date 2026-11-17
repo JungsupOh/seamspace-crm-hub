@@ -68,6 +68,10 @@ export interface LeadRow {
   unsubscribe_token?: string | null;
   unsubscribed_at?: string | null;
   marketing_consent?: boolean | null;
+
+  // LEAD-S4 — 리드 유형(브리프 H항)
+  lead_type?: string | null;
+  lead_tags?: unknown;
 }
 
 export interface LeadActivity {
@@ -98,6 +102,7 @@ const LEAD_COLS = [
   'followup_stage', 'last_contact_at', 'next_action', 'next_action_due', 'owner', 'close_reason',
   'import_batch_id', 'archived_at', 'segment_detail',
   'unsubscribe_token', 'unsubscribed_at', 'marketing_consent',
+  'lead_type', 'lead_tags',
 ].join(',');
 
 export async function getLeads(): Promise<LeadRow[]> {

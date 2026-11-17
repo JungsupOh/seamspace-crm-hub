@@ -23,6 +23,7 @@ import {
   factIdsOf, isConfirmed, type OutreachFact, type StrategyDraft,
 } from '@/lib/leadStrategy';
 import { kstDate } from '@/lib/leadFollowup';
+import { Emphasis } from './Emphasis';
 
 export function StrategyPanel({ leadId, actor, reviseFrom, onRevised }: {
   leadId: string;
@@ -163,7 +164,9 @@ export function StrategyPanel({ leadId, actor, reviseFrom, onRevised }: {
                       </TooltipTrigger>
                       <TooltipContent className="max-w-xs text-xs">
                         {f.statement_en ?? f.statement_ko ?? f.label_ko}
-                        {f.caveat && <div className="mt-1 text-amber-200">⚠️ {f.caveat}</div>}
+                        {f.caveat && (
+                          <div className="mt-1 text-amber-200">⚠️ <Emphasis text={f.caveat} /></div>
+                        )}
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
@@ -248,7 +251,9 @@ function FactChip({ fact }: { fact?: OutreachFact }) {
           {ok
             ? (fact.statement_en ?? fact.statement_ko ?? fact.label_ko)
             : `지금은 쓸 수 없습니다 — "${PENDING_PLACEHOLDER}"로만 답하세요.`}
-          {fact.caveat && <div className="mt-1 text-amber-200">⚠️ {fact.caveat}</div>}
+          {fact.caveat && (
+            <div className="mt-1 text-amber-200">⚠️ <Emphasis text={fact.caveat} /></div>
+          )}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

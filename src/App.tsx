@@ -15,6 +15,7 @@ import Leads from "./pages/Leads";
 import LeadFacts from "./pages/LeadFacts";
 import Unsubscribe from "./pages/Unsubscribe";
 import Outreach from "./pages/Outreach";
+import LeadFunnel from "./pages/LeadFunnel";
 import CampaignForm from "./pages/CampaignForm";
 import Licenses from "./pages/Licenses";
 import PartnerPortal from "./pages/PartnerPortal";
@@ -287,6 +288,16 @@ function AppRoutes() {
           <RequireAuth>
             <AppLayout>
               <Outreach />
+            </AppLayout>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/leads/funnel"
+        element={
+          <RequireAuth>
+            <AppLayout>
+              <LeadFunnel />
             </AppLayout>
           </RequireAuth>
         }

@@ -96,8 +96,12 @@ describe('R1 · 수정 저장과 변경 기록', () => {
   it('같은 이메일 경고는 저장을 막지 않는다', () => {
     const d = read('src/components/leads/LeadDetail.tsx');
     expect(d).toContain('저장은 막지 않습니다');
-    // 저장 버튼 비활성 조건에 중복 여부가 들어가면 안 된다
-    expect(d).toMatch(/disabled=\{!dirty \|\| save\.isPending\}/);
+    // 저장 버튼 비활성 조건에 **중복 여부가 들어가면 안 된다**(막지 않는다는 뜻).
+    // LEAD-S4 에서 보조 태그가 더해져 조건이 `(!dirty && !tagsDirty)` 로 바뀌었다 —
+    // 조건 모양을 못 박지 않고 "중복이 조건에 없다"를 본다.
+    const m = d.match(/disabled=\{[^}]*save\.isPending[^}]*\}/);
+    expect(m, '저장 버튼의 disabled 조건을 찾지 못했다').not.toBeNull();
+    expect(m![0]).not.toMatch(/emailDups|dup/i);
   });
 });
 

@@ -28,6 +28,7 @@ import {
   FACT_STATUSES, FACT_STATUS_LABEL, factStatusLogLine, type FactStatus,
 } from '@/lib/leadStrategy';
 import { kstDate } from '@/lib/leadFollowup';
+import { Emphasis } from '@/components/leads/Emphasis';
 
 export default function LeadFacts() {
   const qc = useQueryClient();
@@ -154,7 +155,8 @@ function FactCard({ fact, actor, onSaved }: {
             )}
             {fact.caveat && (
               <p className="text-xs text-amber-700 mt-1 flex items-start gap-1">
-                <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />{fact.caveat}
+                <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                <span><Emphasis text={fact.caveat} /></span>
               </p>
             )}
           </div>

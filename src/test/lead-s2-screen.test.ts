@@ -176,9 +176,11 @@ describe('상태 흐름이 화면에 반영됐다', () => {
 describe('초안 작성 화면', () => {
   const p = read('src/components/leads/OutreachPanel.tsx');
 
-  it('수신 거부 문구를 본문 끝에 미리 넣는다', () => {
-    expect(p).toContain('unsubscribeLine');
-    expect(p).toMatch(/useEffect\([\s\S]{0,400}unsubLine/);
+  // LEAD-S4(d): 자리를 정하는 규칙이 appendUnsubscribeLine 으로 옮겨졌다
+  // (전에는 화면이 커서 위치에 넣어 본문 맨 앞에 들어가는 결함이 있었다).
+  it('수신 거부 문구를 본문 **끝**에 미리 넣는다', () => {
+    expect(p).toContain('appendUnsubscribeLine');
+    expect(p).toMatch(/useEffect\([\s\S]{0,400}appendUnsubscribeLine/);
   });
 
   it('거부 문구를 지우면 경고하고 다시 넣을 수 있다', () => {
