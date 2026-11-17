@@ -13,6 +13,7 @@ import Partners from "./pages/Partners";
 import Campaigns from "./pages/Campaigns";
 import Leads from "./pages/Leads";
 import LeadFacts from "./pages/LeadFacts";
+import Unsubscribe from "./pages/Unsubscribe";
 import CampaignForm from "./pages/CampaignForm";
 import Licenses from "./pages/Licenses";
 import PartnerPortal from "./pages/PartnerPortal";
@@ -161,6 +162,8 @@ function AppRoutes() {
       <Route path="/event/lucky-seven/status" element={<LuckySevenClosed />} />
       {/* APK 구독 — 공개 페이지 (로그인 불필요) */}
       <Route path="/apk/subscribe" element={<ApkSubscribe />} />
+      {/* 공개 수신 거부 — 로그인 불필요 (LEAD-S2) */}
+      <Route path="/unsubscribe/:token" element={<Unsubscribe />} />
       <Route path="/apk/info" element={<ApkInfo />} />
       <Route path="/apk/download/:versionId" element={<ApkDownload />} />
       <Route path="/apk/unsubscribe" element={<ApkUnsubscribe />} />
