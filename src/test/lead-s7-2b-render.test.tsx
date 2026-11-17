@@ -25,8 +25,9 @@ vi.mock('@/lib/partnerContractsApi', () => ({
   voidPurchase: vi.fn(),
 }));
 
-import PartnerContractsSection, { ISSUE_LINK_PENDING }
+import PartnerContractsSection, { STALE_RESERVATION_HINT, UNLINKED_ISSUE_HINT }
   from '@/components/partners/PartnerContractsSection';
+import { STALE_RESERVATION_MINUTES } from '@/lib/partnerContract';
 import ReceivablesSummary from '@/components/partners/ReceivablesSummary';
 
 function Wrap({ children }: { children: ReactNode }) {
@@ -103,41 +104,137 @@ describe('계약 카드 — 도매형', () => {
   });
 });
 
-describe('도매 현황 — **발급 연결은 S7-3**', () => {
-  it('구매 수량은 보여 주고 **발급·잔량은 비워 둔다** (요구 3)', async () => {
+// LEAD-S7-3 에서 발급이 계약에 이어졌다. 이 구역의 테스트는 "비워 둔다"에서
+// "실제로 센다"로 **목적이 바뀌었다** — 같은 것을 확인하려면 이제 숫자를 봐야 한다.
+describe('도매 현황 — 계약별 발급·잔량 (S7-3)', () => {
+  const PURCHASE = {
+    id: 'pu1', contract_id: 'c1', purchased_on: '2026-09-01', seat_months: 1200,
+    unit_price_per_seat_year: 120, currency: 'USD', amount: 12000,
+    invoice_no: 'INV-1', billing_status: 'billed', invoiced_on: '2026-09-02',
+    paid_on: null, paid_amount: null, memo: null, voided_at: null, void_reason: null,
+    created_at: '2026-09-01T00:00:00Z',
+  };
+
+  it('구매 수량이 요약에 실제로 들어온다', async () => {
     contracts.rows = [CONTRACT];
-    purchases.rows = [{
-      id: 'pu1', contract_id: 'c1', purchased_on: '2026-09-01', seat_months: 1200,
-      unit_price_per_seat_year: 120, currency: 'USD', amount: 12000,
-      invoice_no: 'INV-1', billing_status: 'billed', invoiced_on: '2026-09-02',
-      paid_on: null, paid_amount: null, memo: null, voided_at: null, void_reason: null,
-      created_at: '2026-09-01T00:00:00Z',
-    }];
+    purchases.rows = [PURCHASE];
     render(<Wrap><PartnerContractsSection partnerId="p1" /></Wrap>);
-    await waitFor(() => expect(screen.getByText(ISSUE_LINK_PENDING)).toBeTruthy());
-    expect(screen.getByText(/발급 .*—.* 잔량/)).toBeTruthy();
-
-    // ⚠️ 구매 수량이 **요약에 실제로 들어왔는지** 본다.
-    //    처음에는 이걸 보지 않아, 요약에 구매를 넘기지 않는 변이가 통과했다.
-    //    (계약 수량도 1,200 이라 한 군데만 보면 구별할 수 없다 — 두 건이 나와야 한다.)
-    const quantities = screen.getAllByText('1,200 인원·개월');
-    expect(quantities.length, '계약 수량과 구매 합계 둘 다 보여야 한다').toBe(2);
+    // 계약 수량(1,200)과 구매 합계(1,200)와 잔량(1,200) 세 군데에 나온다.
+    await waitFor(() => expect(screen.getAllByText('1,200 인원·개월').length).toBe(3));
   });
 
-  it('발급 연결 문구가 **지어낸 숫자가 아니라 이유**를 말한다', () => {
-    expect(ISSUE_LINK_PENDING).toContain('S7-3');
-    expect(ISSUE_LINK_PENDING).toContain('어느 계약에서 나간 것인지 저장되지 않아');
-  });
-
-  it('인원·개월이 안 박힌 발급 건수를 참고로 알려 준다', async () => {
+  it('**이 계약의 발급만** 빼서 잔량을 센다', async () => {
     contracts.rows = [CONTRACT];
+    purchases.rows = [PURCHASE];
     licenses.rows = [
-      { id: 'l1', partner_id: 'p1', seat_months: null, user_count: 40, duration: 1, revoked_at: null, created_at: 'x' },
-      { id: 'l2', partner_id: 'p1', seat_months: 60, user_count: 60, duration: 1, revoked_at: null, created_at: 'x' },
+      { id: 'l1', partner_id: 'p1', contract_id: 'c1', status: 'issued',
+        seat_months: 480, user_count: '40', duration: '12', revoked_at: null, created_at: 'x' },
+      // 무효화해도 수량은 돌려주지 않는다
+      { id: 'l2', partner_id: 'p1', contract_id: 'c1', status: 'revoked',
+        seat_months: 120, user_count: '10', duration: '12', revoked_at: 'y', created_at: 'x' },
+      // 다른 계약 것은 이 잔량에 넣지 않는다
+      { id: 'l3', partner_id: 'p1', contract_id: 'c-other', status: 'issued',
+        seat_months: 600, user_count: '50', duration: '12', revoked_at: null, created_at: 'x' },
     ];
     render(<Wrap><PartnerContractsSection partnerId="p1" /></Wrap>);
-    await waitFor(() => expect(screen.getByText(/발급 기록 2건/)).toBeTruthy());
-    expect(screen.getByText(/1건은 인원·개월이 아직 안 박혀 있음/)).toBeTruthy();
+    // 발급 480+120 = 600, 잔량 1200-600 = 600 → **두 군데**에 600 이 나오는 것이 증거다.
+    // (다른 계약의 600 을 넣었다면 발급이 1,200 이 되어 잔량이 0 이 됐을 것이다.)
+    await waitFor(() => expect(screen.getAllByText('600 인원·개월').length).toBe(2));
+    expect(screen.queryByText('0 인원·개월'), '다른 계약 발급이 섞이면 안 된다').toBeNull();
+  });
+
+  it('**계약 전 발급(연결 안 됨)은 잔량에 넣지 않고 따로 알린다**', async () => {
+    contracts.rows = [CONTRACT];
+    purchases.rows = [PURCHASE];
+    licenses.rows = [
+      { id: 'l1', partner_id: 'p1', contract_id: null, status: 'issued',
+        seat_months: null, user_count: '40', duration: '1', revoked_at: null, created_at: 'x' },
+    ];
+    render(<Wrap><PartnerContractsSection partnerId="p1" /></Wrap>);
+    await waitFor(() => expect(screen.getByText(/계약 전 발급 1건 \(연결 안 됨\)/)).toBeTruthy());
+    // 괄호가 든 문구라 정규식을 쓰지 않는다. 부모 요소까지 잡히므로 **존재만** 본다.
+    expect(screen.getAllByText(
+      (_t, el) => (el?.textContent ?? '').includes(UNLINKED_ISSUE_HINT.slice(0, 20)),
+    ).length).toBeGreaterThan(0);
+    // 잔량은 구매 그대로 1,200 (계약 수량·구매·잔량 세 군데)
+    expect(screen.getAllByText('1,200 인원·개월').length).toBe(3);
+  });
+
+  it('**예약으로 오래 남은 줄을 경고한다** (그만큼 잔량이 줄어 있다)', async () => {
+    contracts.rows = [CONTRACT];
+    purchases.rows = [PURCHASE];
+    licenses.rows = [{
+      id: 'l1', partner_id: 'p1', contract_id: 'c1', status: 'reserved',
+      seat_months: 100, user_count: '100', duration: '1', revoked_at: null,
+      created_at: new Date(Date.now() - 60 * 60_000).toISOString(),   // 1시간 전
+    }];
+    render(<Wrap><PartnerContractsSection partnerId="p1" /></Wrap>);
+    await waitFor(() => expect(screen.getByText(/예약 상태로 15분 넘게 남은 발급 1건/)).toBeTruthy());
+    // 괄호가 든 문구라 정규식 대신 함수로 찾는다(괄호가 그룹으로 읽히면 터진다).
+    // 괄호가 든 문구라 정규식을 쓰지 않는다. 부모 요소까지 잡히므로 **존재만** 본다.
+    expect(screen.getAllByText(
+      (_t, el) => (el?.textContent ?? '').includes(STALE_RESERVATION_HINT.slice(0, 15)),
+    ).length).toBeGreaterThan(0);
+  });
+
+  it('방금 만든 예약은 경고하지 않는다 (진행 중일 수 있다)', async () => {
+    contracts.rows = [CONTRACT];
+    purchases.rows = [PURCHASE];
+    licenses.rows = [{
+      id: 'l1', partner_id: 'p1', contract_id: 'c1', status: 'reserved',
+      seat_months: 100, user_count: '100', duration: '1', revoked_at: null,
+      created_at: new Date().toISOString(),
+    }];
+    render(<Wrap><PartnerContractsSection partnerId="p1" /></Wrap>);
+    await waitFor(() => expect(screen.getByText('100 인원·개월')).toBeTruthy());
+    expect(screen.queryByText(/예약 상태로/)).toBeNull();
+  });
+
+  it('잔량이 0 이면 "더 발급할 수 없습니다"', async () => {
+    contracts.rows = [CONTRACT];
+    purchases.rows = [{ ...PURCHASE, seat_months: 480 }];
+    licenses.rows = [{
+      id: 'l1', partner_id: 'p1', contract_id: 'c1', status: 'issued',
+      seat_months: 480, user_count: '40', duration: '12', revoked_at: null, created_at: 'x',
+    }];
+    render(<Wrap><PartnerContractsSection partnerId="p1" /></Wrap>);
+    await waitFor(() => expect(screen.getByText(/더 발급할 수 없습니다/)).toBeTruthy());
+  });
+
+  it('초과 발급이면 음수를 **감추지 않고** 경고색으로', async () => {
+    contracts.rows = [CONTRACT];
+    purchases.rows = [{ ...PURCHASE, seat_months: 100 }];
+    licenses.rows = [{
+      id: 'l1', partner_id: 'p1', contract_id: 'c1', status: 'issued',
+      seat_months: 150, user_count: '150', duration: '1', revoked_at: null, created_at: 'x',
+    }];
+    render(<Wrap><PartnerContractsSection partnerId="p1" /></Wrap>);
+    await waitFor(() => expect(screen.getByText('-50 인원·개월')).toBeTruthy());
+    expect(screen.getByText(/\(초과 발급\)/)).toBeTruthy();
+  });
+
+  it('수량을 알 수 없는 발급이 있으면 **발급이 막힌다고 알린다**', async () => {
+    contracts.rows = [CONTRACT];
+    purchases.rows = [PURCHASE];
+    licenses.rows = [{
+      id: 'l1', partner_id: 'p1', contract_id: 'c1', status: 'issued',
+      seat_months: null, user_count: null, duration: null, revoked_at: null, created_at: 'x',
+    }];
+    render(<Wrap><PartnerContractsSection partnerId="p1" /></Wrap>);
+    await waitFor(() => expect(screen.getByText(/수량을 알 수 없는 발급 기록 1건/)).toBeTruthy());
+    expect(screen.getByText(/발급이 막힙니다/)).toBeTruthy();
+  });
+
+  it('**`failed` 는 발급으로 세지 않는다** (쿠폰이 안 만들어진 줄)', async () => {
+    contracts.rows = [CONTRACT];
+    purchases.rows = [PURCHASE];
+    licenses.rows = [{
+      id: 'l1', partner_id: 'p1', contract_id: 'c1', status: 'failed',
+      seat_months: 1000, user_count: '1000', duration: '1', revoked_at: null, created_at: 'x',
+    }];
+    render(<Wrap><PartnerContractsSection partnerId="p1" /></Wrap>);
+    // 잔량이 그대로 1,200 이어야 한다(계약 수량·구매·잔량 세 군데)
+    await waitFor(() => expect(screen.getAllByText('1,200 인원·개월').length).toBe(3));
   });
 });
 

@@ -194,6 +194,8 @@ export async function voidPurchase(id: string, reason: string): Promise<void> {
 export interface LicenseSeatRow {
   id: string;
   partner_id: string;
+  contract_id: string | null;
+  status: string | null;
   seat_months: number | null;
   user_count: number | null;
   duration: number | null;
@@ -204,14 +206,13 @@ export interface LicenseSeatRow {
 /**
  * 잔량의 반대편(발급 합계)을 세기 위해 읽는다.
  *
- * ⚠️ **`partner_licenses` 에는 `contract_id` 가 없다**(운영에서 확인).
- *    그래서 "이 계약으로 몇 개를 발급했는지"를 **알 수 없다.** 이 함수는 파트너 전체의
- *    발급을 돌려주고, 화면은 그것을 계약별 잔량으로 쓰지 않는다 —
- *    요구사항대로 "발급 연결은 S7-3" 으로 표시한다.
+ * LEAD-S7-3 에서 `contract_id` 가 생겨 **계약별로 가를 수 있게** 됐다.
+ * `contract_id` 가 NULL 인 줄은 **계약 도입 전 발급**이라 어느 계약의
+ * 잔량에도 넣지 않고 따로 보여 준다.
  */
 export async function getPartnerLicenseSeats(partnerId: string): Promise<LicenseSeatRow[]> {
   const res = await authedFetch(
-    `${LICENSE_URL}?select=id,partner_id,seat_months,user_count,duration,revoked_at,created_at`
+    `${LICENSE_URL}?select=id,partner_id,contract_id,status,seat_months,user_count,duration,revoked_at,created_at`
     + `&partner_id=eq.${encodeURIComponent(partnerId)}&order=created_at.desc&limit=5000`,
     { headers: H },
   );

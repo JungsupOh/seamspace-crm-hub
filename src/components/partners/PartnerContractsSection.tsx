@@ -25,7 +25,8 @@ import { AlertTriangle, Ban, Lock, Plus, Receipt } from 'lucide-react';
 
 import {
   CONTRACT_STATUS_LABEL, SETTLEMENT_HINT, SETTLEMENT_LABEL, SETTLEMENT_METHODS,
-  SETTLEMENT_MONEY_LABEL, isLiveContract, toSettlementMethod,
+  SETTLEMENT_MONEY_LABEL, STALE_RESERVATION_MINUTES, isLiveContract, isStaleReservation,
+  toSettlementMethod,
   type ContractStatus, type SettlementMethod,
 } from '@/lib/partnerContract';
 import {
@@ -47,10 +48,15 @@ import {
 } from '@/lib/partnerContractsApi';
 import { todayKst } from '@/lib/leadFollowup';
 
-/** ⚠️ `partner_licenses` 에 `contract_id` 가 없어 **계약별 발급을 알 수 없다**(S7-3). */
-export const ISSUE_LINK_PENDING =
-  '발급 연결은 S7-3 에서 붙입니다 — 지금은 발급 기록이 어느 계약에서 나간 것인지 저장되지 않아, '
-  + '계약별 잔량을 셀 수 없습니다. 아래 "구매 수량"은 맞고 "발급·잔량"은 비워 둡니다.';
+/** 계약 도입 전 발급(contract_id 가 NULL)은 어느 잔량에도 넣지 않는다. */
+export const UNLINKED_ISSUE_HINT =
+  '계약을 두기 전에 나간 발급입니다. 어느 계약에서 나간 것인지 기록이 없어 '
+  + '**어느 계약의 잔량에도 넣지 않습니다.** 연결하려면 담당자에게 말씀해 주세요.';
+
+/** 예약으로 남은 줄 — 사람이 치워야 한다. */
+export const STALE_RESERVATION_HINT =
+  '발급하다 멈춘 줄입니다(쿠폰은 안 만들어졌거나 기록이 끝나지 않았습니다). '
+  + '**그만큼 잔량이 줄어들어 있습니다.** 진짜 발급이 아니라면 지워야 합니다.';
 
 interface Props {
   partnerId: string;
@@ -168,13 +174,20 @@ function ContractCard({ contract, today, onEdit, files }: {
   const { data: licenses } = useQuery({
     queryKey: ['partner_license_seats', contract.partner_id],
     queryFn: () => getPartnerLicenseSeats(contract.partner_id),
-    enabled: wholesale,
   });
 
-  // 요약은 **구매 쪽만** 쓴다(발급은 빈 배열 → 잔량 = 구매 합계).
+  // LEAD-S7-3: 발급이 계약에 이어졌으므로 **이 계약의 발급만** 넣어 잔량을 센다.
+  //   `contract_id` 가 NULL 인 줄(계약 도입 전 발급)은 **어느 잔량에도 넣지 않는다.**
+  const mine = useMemo(
+    () => (licenses ?? []).filter(l => l.contract_id === contract.id), [licenses, contract.id]);
+  const unlinked = useMemo(
+    () => (licenses ?? []).filter(l => !l.contract_id), [licenses]);
+  const stale = useMemo(
+    () => mine.filter(l => isStaleReservation(l, Date.now())), [mine]);
+
   const sum = useMemo(
-    () => contractSummary(contract, purchases ?? [], [], today),
-    [contract, purchases, today]);
+    () => contractSummary(contract, purchases ?? [], mine, today),
+    [contract, purchases, mine, today]);
 
   const [showLedger, setShowLedger] = useState(false);
   const [voiding, setVoiding] = useState(false);
@@ -236,8 +249,16 @@ function ContractCard({ contract, today, onEdit, files }: {
           <div className="rounded bg-muted/40 px-2.5 py-2 space-y-1">
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
               <span>구매 <strong>{seatMonthsLabel(sum.purchased)}</strong></span>
-              <span className="text-muted-foreground">
-                발급 <strong>—</strong> · 잔량 <strong>—</strong>
+              <span>발급 <strong>{seatMonthsLabel(sum.issued)}</strong></span>
+              <span>
+                잔량{' '}
+                <strong className={sum.balance < 0 ? 'text-destructive' : undefined}>
+                  {seatMonthsLabel(sum.balance)}
+                </strong>
+                {sum.balance < 0 && <span className="text-destructive"> (초과 발급)</span>}
+                {sum.balance === 0 && (
+                  <span className="text-amber-700"> · 더 발급할 수 없습니다</span>
+                )}
               </span>
               {sum.money.map(m => (
                 <span key={m.currency}>
@@ -259,15 +280,28 @@ function ContractCard({ contract, today, onEdit, files }: {
                 </span>
               )}
             </div>
-            <p className="text-[11px] text-amber-700 flex items-start gap-1">
-              <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
-              <span>{ISSUE_LINK_PENDING}</span>
-            </p>
-            {licenses && licenses.length > 0 && (
-              <p className="text-[11px] text-muted-foreground">
-                참고: 이 파트너의 발급 기록 {licenses.length}건
-                {licenses.filter(l => l.seat_months === null).length > 0 &&
-                  ` (그중 ${licenses.filter(l => l.seat_months === null).length}건은 인원·개월이 아직 안 박혀 있음)`}
+            {/* 예약으로 남은 줄 — 그만큼 잔량이 줄어 있다. 사람이 치워야 한다. */}
+            {stale.length > 0 && (
+              <p className="text-[11px] text-destructive flex items-start gap-1">
+                <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                <span>
+                  예약 상태로 {STALE_RESERVATION_MINUTES}분 넘게 남은 발급 {stale.length}건.
+                  {' '}{STALE_RESERVATION_HINT}
+                </span>
+              </p>
+            )}
+            {sum.unknownIssues > 0 && (
+              <p className="text-[11px] text-amber-700">
+                수량을 알 수 없는 발급 기록 {sum.unknownIssues}건 —
+                그 계약은 <strong>발급이 막힙니다</strong>(잔량을 셀 수 없습니다).
+              </p>
+            )}
+            {unlinked.length > 0 && (
+              <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+                <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                <span>
+                  계약 전 발급 {unlinked.length}건 (연결 안 됨) — {UNLINKED_ISSUE_HINT}
+                </span>
               </p>
             )}
             {sum.disagreeingLines > 0 && (

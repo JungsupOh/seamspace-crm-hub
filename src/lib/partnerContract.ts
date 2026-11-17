@@ -87,19 +87,56 @@ export function seatMonths(userCount: unknown, months: unknown): number | null {
 // ───────────────────────── 잔량 ─────────────────────────
 
 export interface PurchaseRow {
-  /** 이 회차로 산 인원·개월 */
-  seat_months?: number | null;
+  /**
+   * 이 회차로 산 인원·개월.
+   * DB 는 `bigint` 라 PostgREST 가 **문자열로 돌려줄 수도** 있다 — 둘 다 받는다
+   * (`_shared/seat-balance.ts` 와 같은 모양).
+   */
+  seat_months?: number | string | null;
   /** 잘못 적은 구매 회차는 지우지 않고 취소 표시한다 → 합계에서 뺀다 */
   voided_at?: string | null;
 }
 
 export interface IssuedRow {
   /** 발급 시점에 박아 둔 인원·개월. 없으면 user_count × duration 으로 센다 */
-  seat_months?: number | null;
-  user_count?: number | null;
-  duration?: number | null;
+  seat_months?: number | string | null;
+  user_count?: number | string | null;
+  duration?: number | string | null;
   /** ⚠️ 무효화는 **수량을 되돌리지 않는다**(James 확정). 그래서 여기서 쓰지 않는다 */
   revoked_at?: string | null;
+  /** LEAD-S7-3. `failed` 만 뺀다 — 아래 `countsTowardIssued` 참고 */
+  status?: unknown;
+  created_at?: string | null;
+  contract_id?: string | null;
+}
+
+/**
+ * 수량을 세는 데 포함하는 발급 상태 (LEAD-S7-3).
+ *
+ * **`failed` 만 뺀다.**
+ *   · `revoked`(무효화)도 센다 — 무효화해도 수량은 돌려주지 않는다(James 확정).
+ *   · `reserved`(진행 중)도 센다 — 안 세면 그 틈에 두 번 나간다.
+ *   · `failed` 는 쿠폰이 안 만들어져 아무 일도 없었던 줄이다.
+ *
+ * ⚠️ 이 규칙은 SQL(`partner_reserve_license_seats`)과
+ *    `supabase/functions/_shared/seat-balance.ts` 에도 같은 모양으로 있다.
+ *    셋이 어긋나면 "화면엔 잔량이 있는데 발급은 거부"가 된다 — 대조 시험이 지킨다.
+ */
+export function countsTowardIssued(status: unknown): boolean {
+  const s = typeof status === 'string' && status.trim() !== '' ? status.trim() : 'issued';
+  return s !== 'failed';
+}
+
+/** 예약으로 오래 남은 줄은 사람이 치워야 한다(그만큼 잔량이 줄어 있다). */
+export const STALE_RESERVATION_MINUTES = 15;
+
+export function isStaleReservation(
+  row: { status?: unknown; created_at?: string | null }, nowMs: number,
+): boolean {
+  if (row.status !== 'reserved') return false;
+  const t = row.created_at ? Date.parse(row.created_at) : NaN;
+  if (Number.isNaN(t)) return false;
+  return nowMs - t > STALE_RESERVATION_MINUTES * 60_000;
 }
 
 /** 구매 합계. 취소된 회차는 뺀다. */
@@ -136,6 +173,8 @@ export function issuedSeatMonths(rows: readonly IssuedRow[]): {
   let total = 0;
   let unknown = 0;
   for (const r of rows) {
+    // LEAD-S7-3: 쿠폰이 안 만들어졌던 줄(`failed`)은 발급이 아니다.
+    if (!countsTowardIssued(r.status)) continue;
     const n = issuedSeatMonthsOf(r);
     if (n === null) unknown += 1;
     else total += n;

@@ -457,15 +457,23 @@ describe('보안·구조', () => {
     expect(sum).not.toMatch(/amount\s*-\s*paid/);
   });
 
-  it('포털·발급 함수를 건드리지 않았다', () => {
+  it('포털을 건드리지 않았다', () => {
     const portal = read('src/pages/PartnerPortal.tsx');
     for (const n of ['partner_contracts', 'partner_purchases', 'PartnerContractsSection']) {
       expect(portal, n).not.toContain(n);
     }
+  });
+
+  // LEAD-S7-3 이 발급 함수를 **일부러** 바꿨다(잔량 차감). S7-2b 시점의
+  // "발급 함수를 건드리지 않았다"는 더 이상 참이 아니다. 대신 **무엇을 건드리면 안 되는지**
+  // 를 지킨다: 구매 원장을 직접 만지지 않고(RPC 를 거친다), 기존 보안을 유지한다.
+  it('발급 함수가 구매 원장을 직접 만지지 않는다 (잔량은 RPC 가 센다)', () => {
     const issue = read('supabase/functions/partner-issue-license/index.ts');
-    for (const n of ['partner_contracts', 'partner_purchases', 'seat_months']) {
-      expect(issue, n).not.toContain(n);
-    }
+    expect(issue).not.toMatch(/from\('partner_purchases'\)/);
+    expect(issue).toContain('partner_reserve_license_seats');
+    // 기존 보안이 그대로다
+    expect(issue).toContain('internalHeaders()');
+    expect(issue).toMatch(/if \(isPartner && role !== 'partner_admin'\)/);
   });
 
   it('파트너 쓰기 권한을 늘리지 않았다', () => {

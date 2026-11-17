@@ -559,10 +559,15 @@ describe('마이그레이션 — 추가만, 기존을 건드리지 않는다', (
 // ══════════════════════ 보안 ══════════════════════
 describe('보안 — 이 단계에 해당하는 항목', () => {
   it('순수 로직은 DB 를 부르지 않는다', () => {
-    const s = read('src/lib/partnerContract.ts');
-    expect(s).not.toContain('rest/v1');
-    expect(s).not.toMatch(/\bfetch\(/);
-    expect(s).not.toContain('supabase');
+    // ⚠️ 주석을 빼고 본다. LEAD-S7-3 에서 "같은 규칙이 SQL·Deno 모듈에도 있다"는
+    //    설명이 주석에 들어가면서 'supabase' 라는 **글자**가 생겼다 — 호출이 아니다.
+    const code = read('src/lib/partnerContract.ts')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+    expect(code).not.toContain('rest/v1');
+    expect(code).not.toMatch(/\bfetch\(/);
+    expect(code).not.toContain('supabase');
+    expect(code).not.toMatch(/\bimport\b[^\n]*from/);   // 아무것도 가져오지 않는다
   });
 
   it('키·개인정보를 담지 않는다', () => {
