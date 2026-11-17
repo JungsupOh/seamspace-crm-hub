@@ -18,6 +18,8 @@ import type { DealFields, ContactFields } from '@/types/airtable';
 import { authedFetch } from '@/lib/authedFetch';
 import PartnerContractsSection from '@/components/partners/PartnerContractsSection';
 import ReceivablesSummary from '@/components/partners/ReceivablesSummary';
+// LEAD-S7-8: 도매 정산 현황(알림이 갔는지까지)
+import SettlementStatus from '@/components/partners/SettlementStatus';
 import PartnerRequests from '@/components/partners/PartnerRequests';
 import PartnerOnboardingWizard, { OnboardingBadgeView }
   from '@/components/partners/PartnerOnboardingWizard';
@@ -2286,6 +2288,10 @@ export default function Partners() {
           const target = (list ?? []).find(p => p.id === pid);
           if (target) setDetailPartner(target);
         }}
+      />
+
+      <SettlementStatus
+        partnerNames={new Map((list ?? []).map(p => [p.id, p.name ?? '']))}
       />
 
       {/* 검색 */}
